@@ -1,0 +1,116 @@
+#!/usr/bin/env bash
+# One-shot install from WSL: install provider CLIs, build, trust the localhost
+# certificate in Windows, start the bridge and sideload the add-in into Excel.
+#
+#   bash scripts/install-windows.sh                     # install / upgrade (default: copilot)
+#   bash scripts/install-windows.sh --providers copilot,codex
+#   bash scripts/install-windows.sh --reference-dir "/mnt/c/Users/me/Templates"
+#   bash scripts/install-windows.sh --open              # ...and start a new Excel instance
+#   bash scripts/install-windows.sh --no-providers      # skip provider install/login hints
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$ROOT"
+
+PROVIDERS=""
+REFERENCE_DIR=""
+OPEN=0
+
+usage() {
+  sed -n '2,10p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --providers) PROVIDERS="${2:-}"; shift 2 ;;
+    --providers=*) PROVIDERS="${1#*=}"; shift ;;
+    --reference-dir) REFERENCE_DIR="${2:-}"; shift 2 ;;
+    --reference-dir=*) REFERENCE_DIR="${1#*=}"; shift ;;
+    --open) OPEN=1; shift ;;
+    --no-providers) PROVIDERS="none"; shift ;;
+    -h|--help) usage; exit 0 ;;
+    *) echo "unknown argument: $1" >&2; usage >&2; exit 2 ;;
+  esac
+done
+
+command -v powershell.exe >/dev/null || { echo "powershell.exe not found: run this inside WSL2 with Windows interop enabled" >&2; exit 1; }
+
+install_providers() {
+  local spec="$1" entry name pkg bin login
+  IFS=',' read -ra entries <<< "$spec"
+  for entry in "${entries[@]}"; do
+    name="$(echo "$entry" | tr -d ' ' | tr '[:upper:]' '[:lower:]')"
+    case "$name" in
+      copilot) pkg="@github/copilot"; bin="copilot"; login="copilot login" ;;
+      claude)  pkg="@anthropic-ai/claude-code"; bin="claude"; login="claude  (then /login)" ;;
+      codex)   pkg="@openai/codex"; bin="codex"; login="codex login" ;;
+      ""|none) continue ;;
+      *) echo "    skipping unknown provider '$name'"; continue ;;
+    esac
+    if command -v "$bin" >/dev/null 2>&1; then
+      echo "    $bin already installed"
+    else
+      echo "    installing $pkg (npm -g) ..."
+      npm install -g "$pkg" || echo "    could not install $pkg; install it manually"
+    fi
+    echo "      login when ready:  $login"
+  done
+}
+
+write_config() {
+  local ref="$1" file
+  [[ -z "$ref" ]] && return 0
+  file="$ROOT/excel-partner.config.json"
+  if command -v jq >/dev/null 2>&1 && [[ -f "$file" ]]; then
+    local tmp; tmp="$(mktemp)"
+    jq --arg d "$ref" '.referenceDirs = [$d]' "$file" > "$tmp" && mv "$tmp" "$file"
+  else
+    printf '{\n  "referenceDirs": ["%s"]\n}\n' "$ref" > "$file"
+  fi
+  echo "    wrote excel-partner.config.json (referenceDirs = $ref)"
+}
+
+if [[ -n "$PROVIDERS" ]]; then
+  echo "==> provider CLIs"
+  install_providers "$PROVIDERS"
+fi
+
+echo "==> build"
+[[ -f certs/localhost.crt ]] || bash scripts/gen-cert.sh
+node scripts/gen-icons.mjs >/dev/null
+npm run build >/dev/null
+
+echo "==> trust localhost certificate (current user)"
+WIN_USERPROFILE="$(wslpath -u "$(powershell.exe -NoProfile -Command '$env:USERPROFILE' | tr -d '\r')")"
+SHARE_WIN="$(wslpath -w "$WIN_USERPROFILE/ExcelAIAddin")"
+mkdir -p "$WIN_USERPROFILE/ExcelAIAddin"
+cp certs/localhost.crt "$WIN_USERPROFILE/ExcelAIAddin/localhost.crt"
+if powershell.exe -NoProfile -Command '$t=(New-Object Security.Cryptography.X509Certificates.X509Certificate2 "'"$SHARE_WIN"'\localhost.crt").Thumbprint; if (Get-ChildItem Cert:\CurrentUser\Root | Where-Object Thumbprint -eq $t) { exit 0 } else { exit 1 }'; then
+  echo "    already trusted"
+else
+  powershell.exe -NoProfile -Command 'certutil -addstore -user Root "'"$SHARE_WIN"'\localhost.crt"' | tail -1
+fi
+
+if [[ -n "$REFERENCE_DIR" ]]; then
+  echo "==> local config"
+  write_config "$REFERENCE_DIR"
+fi
+
+echo "==> (re)start bridge"
+bash scripts/stop.sh >/dev/null 2>&1 || true
+bash scripts/start.sh | tail -2
+
+echo "==> sideload add-in"
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$(wslpath -w scripts/sideload.ps1)" \
+  -ManifestPath "$(wslpath -w addin/manifest.xml)" | grep -E "Copied|Registered" || true
+
+if [[ "$OPEN" == "1" ]]; then
+  echo "==> starting Excel"
+  powershell.exe -NoProfile -Command 'Start-Process "C:\Program Files\Microsoft Office\Root\Office16\EXCEL.EXE" -ArgumentList "/x"'
+fi
+
+cat <<MSG
+
+Done. In Excel: Home > Excel Partner.
+Restart any Excel window that was already open before this install.
+MSG

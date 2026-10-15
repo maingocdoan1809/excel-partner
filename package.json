@@ -1,0 +1,62 @@
+{
+  "name": "excel-partner",
+  "version": "0.1.9",
+  "description": "Excel Partner: local Excel desktop AI add-in with Claude Code, GitHub Copilot CLI and Codex CLI providers.",
+  "type": "module",
+  "bin": {
+    "excel-partner": "bin/excel-partner.mjs"
+  },
+  "files": [
+    "addin/assets/",
+    "addin/dist/",
+    "addin/manifest.xml",
+    "addin/taskpane/index.html",
+    "addin/taskpane/styles.css",
+    "bin/",
+    "dist/bridge/src/",
+    "dist/excel_mcp/src/",
+    "dist/protocol/src/",
+    "dist/providers/src/",
+    "scripts/package-windows.ps1",
+    "scripts/workspace-windows.ps1",
+    "skills/"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "npm run build:server && npm run build:addin",
+    "build:server": "tsc -p tsconfig.json",
+    "build:addin": "esbuild addin/taskpane/main.ts --bundle --format=iife --target=es2020 --outfile=addin/dist/taskpane.js",
+    "prepack": "npm run build",
+    "clean": "rm -rf dist addin/dist",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p addin/tsconfig.json --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "bridge": "node dist/bridge/src/index.js",
+    "dev:bridge": "tsx watch bridge/src/index.ts",
+    "cert": "bash scripts/gen-cert.sh",
+    "smoke": "tsx scripts/live-smoke.ts",
+    "test:live": "vitest run tests/providers.live.test.ts"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.12.0",
+    "cross-spawn": "^7.0.6",
+    "fast-xml-parser": "^5.11.2",
+    "fflate": "^0.8.3",
+    "selfsigned": "^5.5.0",
+    "ws": "^8.18.0",
+    "zod": "^3.23.8",
+    "zod-to-json-schema": "^3.25.1"
+  },
+  "devDependencies": {
+    "@types/cross-spawn": "^6.0.6",
+    "@types/node": "^22.10.0",
+    "@types/office-js": "^1.0.400",
+    "@types/ws": "^8.5.13",
+    "esbuild": "^0.24.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0",
+    "vitest": "^2.1.0"
+  }
+}

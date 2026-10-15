@@ -1,0 +1,15 @@
+node_modules/
+dist/
+addin/dist/
+run/
+release/
+tmp/
+*.tgz
+*.log
+.env
+certs/
+*.crt
+*.key
+*.pfx
+.DS_Store
+excel-partner.config.json

@@ -1,0 +1,34 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="192" height="176" viewBox="0 0 192 176" fill="none" role="img" aria-label="Hand-drawn spreadsheet">
+  <style>
+    .draw { stroke-dasharray: 1; stroke-dashoffset: 1; animation: draw 9s ease-in-out infinite; }
+    .grid { animation-delay: .5s; }
+    .entry { animation-delay: 1.2s; }
+    .check { animation-delay: 2s; }
+    .pencil { transform-origin: 145px 111px; animation: pencil 9s ease-in-out infinite; }
+    .spark { transform-origin: 155px 35px; animation: spark 9s ease-in-out infinite; }
+    @keyframes draw { 0%, 6% { stroke-dashoffset: 1; opacity: 0; } 12% { opacity: 1; } 38%, 78% { stroke-dashoffset: 0; opacity: 1; } 92%, 100% { stroke-dashoffset: 0; opacity: 0; } }
+    @keyframes pencil { 0%, 8% { opacity: 0; transform: translate(-35px, -40px) rotate(-8deg); } 16% { opacity: .9; transform: translate(-25px, -35px) rotate(-5deg); } 30% { transform: translate(-8px, -20px) rotate(3deg); } 44%, 77% { opacity: .9; transform: translate(0, 0) rotate(0); } 91%, 100% { opacity: 0; transform: translate(4px, -4px) rotate(4deg); } }
+    @keyframes spark { 0%, 37%, 85%, 100% { opacity: 0; transform: scale(.7); } 45%, 73% { opacity: .6; transform: scale(1); } }
+    @media (prefers-reduced-motion: reduce) { .draw { animation: none; stroke-dashoffset: 0; } .pencil { animation: none; opacity: .9; } .spark { animation: none; opacity: .5; } }
+  </style>
+  <defs>
+    <filter id="chalk" x="-10%" y="-10%" width="120%" height="120%">
+      <feTurbulence type="fractalNoise" baseFrequency=".055" numOctaves="3" seed="12" result="grain"/>
+      <feDisplacementMap in="SourceGraphic" in2="grain" scale=".9" xChannelSelector="R" yChannelSelector="G"/>
+    </filter>
+  </defs>
+  <g filter="url(#chalk)" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M38 40 Q35 38 35 44 L34 132 Q34 138 41 138 L136 136 Q142 136 142 130 L144 45 Q144 39 138 39 Z" stroke="#9ac3aa" stroke-width="1.6" opacity=".18"/>
+    <path class="draw" pathLength="1" d="M39 39 Q34 38 35 45 L34 132 Q34 138 41 138 L136 136 Q142 136 142 130 L144 45 Q144 39 138 39 L39 39" stroke="#bcd8c5" stroke-width="1.8"/>
+    <path class="draw grid" pathLength="1" d="M36 61 Q86 63 143 61 M35 86 Q84 85 142 86 M35 111 Q86 109 142 110 M62 40 Q60 85 61 137 M102 40 Q104 86 102 136" stroke="#91b59d" stroke-width="1.35"/>
+    <path class="draw entry" pathLength="1" d="M44 51 L52 51 M73 51 Q82 50 91 51 M114 51 L133 50 M73 74 L89 74 M74 99 Q81 98 89 99 M114 74 L131 74 M45 74 L51 74 M44 99 L51 99 M44 123 L51 123 M73 123 L89 122" stroke="#c9d8cd" stroke-width="1.8" opacity=".75"/>
+    <path class="draw check" pathLength="1" d="M112 99 L118 104 L131 93" stroke="#a1dbb5" stroke-width="2.3"/>
+    <path class="draw check" pathLength="1" d="M111 121 Q122 120 132 121 M112 125 L132 125" stroke="#a1dbb5" stroke-width="1.6"/>
+    <g class="pencil" stroke="#c9d8cd" stroke-width="1.7">
+      <path d="M128 128 L133 115 L158 84 Q161 81 164 84 L167 87 Q169 90 166 93 L141 124 Z" fill="#17231b"/>
+      <path d="M133 115 L141 124 M155 88 L163 96 M136 119 L159 91 M128 128 L134 126"/>
+      <path d="M158 84 Q161 81 164 84 L167 87 Q169 90 166 93" stroke="#a1dbb5"/>
+    </g>
+    <g class="spark" stroke="#a1dbb5" stroke-width="1.5"><path d="M154 28 L155 39 M149 34 L160 33 M24 113 L24 119 M21 116 L27 116"/></g>
+  </g>
+</svg>

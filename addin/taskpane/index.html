@@ -1,0 +1,182 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="addin-build-id" content="__ADDIN_BUILD_ID__" />
+    <title>Excel Partner</title>
+    <script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <header class="app-header">
+      <div class="brand">
+        <img class="logo" src="../assets/icon-32.png?v=4" alt="" />
+        <div class="brand-text"><strong>Excel Partner</strong><span id="connection-status" class="status" data-state="idle"><i class="dot"></i><span id="connection-label">Waiting for Excel</span></span></div>
+      </div>
+      <div class="header-actions">
+        <button id="new-chat-button" type="button" class="icon-button" aria-label="New chat" title="New chat">＋</button>
+        <button id="menu-button" type="button" class="icon-button" aria-haspopup="menu" aria-expanded="false" aria-label="Settings" title="Settings">
+          <svg viewBox="0 0 20 20" aria-hidden="true">
+            <path d="M8.3 2h3.4l.5 2a6 6 0 0 1 1.4.8l2-.6 1.7 2.9-1.5 1.4a6 6 0 0 1 0 1.6l1.5 1.4-1.7 2.9-2-.6a6 6 0 0 1-1.4.8l-.5 2H8.3l-.5-2a6 6 0 0 1-1.4-.8l-2 .6L2.7 11l1.5-1.4a6 6 0 0 1 0-1.6L2.7 6.6l1.7-2.9 2 .6a6 6 0 0 1 1.4-.8z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" />
+            <circle cx="10" cy="9.8" r="2.3" fill="none" stroke="currentColor" stroke-width="1.3" />
+          </svg>
+          <span id="menu-dot" class="menu-dot" hidden></span>
+        </button>
+      </div>
+
+      <div id="settings-menu" class="menu" role="menu" aria-label="Settings" hidden>
+        <div class="menu-label">Provider</div>
+        <div id="provider-list" role="group" aria-label="Provider">
+          <button type="button" class="menu-item" role="menuitemradio" data-provider="claude" aria-checked="false"><span class="check"></span>Claude Code</button>
+          <button type="button" class="menu-item" role="menuitemradio" data-provider="copilot" aria-checked="false"><span class="check"></span>GitHub Copilot</button>
+          <button type="button" class="menu-item" role="menuitemradio" data-provider="codex" aria-checked="false"><span class="check"></span>Codex</button>
+        </div>
+        <div id="provider-hint" class="menu-hint"></div>
+        <button id="menu-login" type="button" class="menu-item" role="menuitem">Sign in to GitHub Copilot</button>
+        <label class="menu-label" for="theme-select">Appearance</label>
+        <select id="theme-select" class="theme-select" aria-label="Appearance"><option value="auto">Follow Excel</option><option value="light">Light</option><option value="dark">Dark</option></select>
+        <div class="menu-sep"></div>
+        <button id="menu-changes" type="button" class="menu-item" role="menuitem">Changes <span id="changes-count" class="badge" hidden>0</span></button>
+        <button id="menu-history" type="button" class="menu-item" role="menuitem">History</button>
+        <button id="menu-templates" type="button" class="menu-item" role="menuitem">Skill templates</button>
+        <button id="menu-skills" type="button" class="menu-item" role="menuitem">Manage skills</button>
+        <button id="menu-new" type="button" class="menu-item" role="menuitem">New chat</button>
+      </div>
+    </header>
+
+    <nav class="pane-tabs" aria-label="Navigation">
+      <button id="tab-chat" type="button" aria-pressed="true">Chat</button>
+      <button id="tab-changes" type="button" aria-pressed="false">Changes <span id="tab-changes-count" class="badge" hidden>0</span></button>
+      <button id="tab-history" type="button" aria-pressed="false">History</button>
+    </nav>
+
+    <aside id="auth-notice" class="auth-notice" hidden aria-label="AI provider sign-in">
+      <div><strong id="auth-notice-title">Connect your AI account</strong><span id="auth-notice-detail"></span></div>
+      <button id="provider-login-button" type="button">Sign in ↗</button>
+    </aside>
+
+    <main class="layout" id="layout">
+      <section id="messages" class="messages" aria-live="polite"></section>
+
+      <section id="panel-skills" class="panel" hidden aria-label="Manage skills">
+        <header class="panel-head"><button type="button" class="back" data-close="skills" aria-label="Back to chat">←</button><h2>Your skills</h2></header>
+        <p class="template-help">Upload a Markdown skill or a ZIP containing SKILL.md and text references. No skills are installed by default.</p>
+        <p class="template-help">Use a lowercase name in SKILL.md frontmatter. Maximum upload: 2 MB. Type / in chat to use an installed skill.</p>
+        <div class="skill-upload-actions"><button id="skill-upload-button" type="button">Upload skill</button><input id="skill-upload-input" type="file" accept=".md,.zip" hidden /></div>
+        <p id="user-skills-status" class="template-help" role="status" aria-live="polite"></p>
+        <div id="user-skills-list" class="panel-body"></div>
+      </section>
+
+      <section id="panel-login" class="panel login-panel" hidden aria-label="Sign in to GitHub Copilot">
+        <header class="panel-head"><button type="button" class="back" data-close="login" aria-label="Back">←</button><h2>Connect account</h2></header>
+        <div class="panel-body login-body">
+          <img class="hero-mark" src="../assets/excel-partner-mark.png" alt="" />
+          <h2 id="login-heading">Sign in to GitHub Copilot</h2>
+          <p id="login-description">Finish signing in through your browser, then return to Excel.</p>
+          <div id="login-device" class="login-card">
+            <strong>GitHub Copilot <span class="badge">DEVICE CODE</span></strong>
+            <p id="login-status" role="status" aria-live="polite">Connect your GitHub Copilot account to get started.</p>
+            <div id="login-code-card" hidden><p>1. Copy the device code</p><code id="login-code" class="device-code"></code><button id="login-copy" type="button" class="secondary">Copy code</button><p>2. Open GitHub and enter the code, then return to Excel.</p></div>
+            <a id="login-browser" class="login-primary" target="_blank" rel="noopener noreferrer" hidden>Open GitHub verification ↗</a>
+            <p id="login-timer" class="login-timer"></p>
+            <button id="login-start" type="button">Get device code →</button>
+            <button id="login-cancel" type="button" class="secondary" hidden>Cancel sign-in</button>
+            <button id="login-continue" type="button" hidden>Start chatting →</button>
+          </div>
+          <div id="login-manual" class="login-card" hidden><p id="login-manual-hint"></p><code id="login-command" class="login-command"></code><button id="login-recheck" type="button">Check sign-in status</button></div>
+          <p class="login-help">Your credentials are managed by the CLI on the bridge machine.</p>
+        </div>
+      </section>
+
+      <section id="panel-changes" class="panel" hidden aria-label="Changes">
+        <header class="panel-head">
+          <button type="button" class="back" data-close="changes" aria-label="Back to chat">←</button>
+          <h2>Changes</h2>
+        </header>
+        <div id="changes-list" class="panel-body"></div>
+      </section>
+
+      <section id="panel-history" class="panel" hidden aria-label="History">
+        <header class="panel-head">
+          <button type="button" class="back" data-close="history" aria-label="Back to chat">←</button>
+          <h2>History</h2>
+          <button id="history-clear" type="button" class="ghost">Delete all</button>
+        </header>
+        <div id="history-list" class="panel-body"></div>
+      </section>
+
+      <section id="panel-templates" class="panel" hidden aria-label="Skill templates">
+        <header class="panel-head">
+          <button type="button" class="back" data-close="templates" aria-label="Back to chat">←</button>
+          <h2>Skill templates</h2>
+        </header>
+        <p class="template-help">Add example files to a skill. The assistant can inspect them when that skill is used.</p>
+        <div class="template-controls">
+          <select id="template-skill" aria-label="Skill"></select>
+          <button id="template-add" type="button" class="secondary">Add file</button>
+          <input id="template-input" type="file" accept=".xlsx,.xlsm,.xltx,.xltm,.png,.jpg,.jpeg,.gif,.webp,.md,.txt,.json,.csv,.yaml,.yml" hidden />
+        </div>
+        <div id="template-list" class="panel-body"></div>
+      </section>
+
+      <section id="panel-session" class="panel" hidden aria-label="Past chat">
+        <header class="panel-head">
+          <button type="button" class="back" id="session-back" aria-label="Back to history">←</button>
+          <h2 id="session-title">Chat</h2>
+        </header>
+        <div class="session-meta" id="session-meta"></div>
+        <div id="session-transcript" class="panel-body messages"></div>
+        <footer class="session-actions">
+          <button id="session-delete" type="button" class="secondary">Delete</button>
+          <button id="session-continue" type="button">Continue this chat</button>
+        </footer>
+      </section>
+    </main>
+
+    <footer class="composer">
+      <div id="composer-resizer" class="resizer" role="separator" aria-orientation="horizontal" tabindex="0" title="Drag to resize the input">
+        <span></span>
+      </div>
+      <div class="composer-card">
+        <div id="slash-menu" class="slash-menu" role="listbox" aria-label="Skills and commands" hidden></div>
+        <div id="mention-menu" class="slash-menu workspace-menu" aria-label="Workspace files" hidden></div>
+        <div id="selection-chip" class="chip" title="Current selection (sent with your message)">No selection</div>
+        <div class="composer-input-wrap">
+          <div id="prompt-display" class="prompt-display" aria-hidden="true"></div>
+          <textarea
+            id="prompt-input"
+            rows="3"
+            placeholder="What would you like to do with this workbook?"
+          ></textarea>
+        </div>
+        <div class="composer-actions">
+          <button id="attach-button" type="button" class="attach-button" title="Attach a file or image" aria-label="Attach a file or image"><svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="6.5"/><path d="M10 6.5v7M6.5 10h7"/></svg></button>
+          <div class="composer-picker model-picker">
+            <select id="model-select" hidden aria-label="Model" title="AI model"></select>
+            <button id="model-button" type="button" class="picker-button" aria-haspopup="listbox" aria-expanded="false" aria-controls="model-menu" aria-label="Choose an AI model"><span class="picker-label">Default</span><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m5 6.5 3 3 3-3"/></svg></button>
+            <div id="model-menu" class="picker-menu" role="listbox" aria-label="AI model" hidden></div>
+          </div>
+            <div class="composer-picker effort-picker">
+              <select id="effort-select" hidden aria-label="Reasoning effort"><option value="low">Low</option><option value="medium" selected>Medium</option><option value="high">High</option></select>
+              <button id="effort-button" type="button" class="picker-button" aria-haspopup="listbox" aria-expanded="false" aria-controls="effort-menu" aria-label="Reasoning effort: Medium" data-effort="medium"><span class="picker-label">Medium</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 18a9 9 0 1 1 16 0M5 10l2 1m10 0 2-1M12 5v2"/><path class="effort-needle" d="M12 14V9"/><circle cx="12" cy="14" r="1.5"/></svg></button>
+              <div id="effort-menu" class="picker-menu" role="listbox" aria-label="Reasoning effort" hidden></div>
+            </div>
+            <div class="composer-picker permission-picker">
+            <select id="permission-mode" hidden aria-label="Permissions" title="Ask: request approval before overwriting or deleting. Auto: approve these operations."><option value="ask">Ask</option><option value="auto">Auto</option></select>
+            <button id="permission-button" type="button" class="picker-button" aria-haspopup="listbox" aria-expanded="false" aria-controls="permission-menu" aria-label="Permissions"><span class="picker-label">Ask</span><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m5 6.5 3 3 3-3"/></svg></button>
+            <div id="permission-menu" class="picker-menu" role="listbox" aria-label="Permissions" hidden></div>
+          </div>
+          <button id="send-button" type="button" data-mode="send" aria-label="Send message" disabled>
+            <svg class="send-icon" viewBox="0 0 20 20" aria-hidden="true"><path d="M10 15V5m-4 4 4-4 4 4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" /></svg>
+            <svg class="stop-icon" viewBox="0 0 20 20" aria-hidden="true"><rect x="4" y="4" width="12" height="12" rx="2" fill="currentColor" /></svg>
+            <span class="label">Send</span>
+          </button>
+        </div>
+      </div>
+      <div class="composer-hint"><span><b>/</b> skills &nbsp; <b>@</b> attachments</span><span>Enter to send</span></div>
+    </footer>
+
+    <script src="../dist/taskpane.js"></script>
+  </body>
+</html>
