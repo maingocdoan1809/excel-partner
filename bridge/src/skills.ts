@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { MAX_SKILL_TEXT_BYTES } from "../../protocol/src/skill-limits.js";
 
 /** A skill is a folder with a `SKILL.md` (frontmatter `name` + `description`) and optional reference files. */
 export interface SkillInfo {
@@ -28,7 +29,7 @@ export class SkillError extends Error {}
 
 const NAME_RE = /^[a-z0-9][a-z0-9_-]{0,63}$/;
 const READABLE_EXT = new Set([".md", ".txt", ".json", ".csv", ".yaml", ".yml"]);
-const MAX_FILE_BYTES = 200_000;
+const MAX_FILE_BYTES = MAX_SKILL_TEXT_BYTES;
 const TEMPLATE_EXT = new Set([".xlsx", ".xlsm", ".xltx", ".xltm", ".png", ".jpg", ".jpeg", ".gif", ".webp", ...READABLE_EXT]);
 const MAX_TEMPLATE_BYTES = 30 * 1024 * 1024;
 export interface SkillTemplate { name: string; kind: "workbook" | "image" | "text"; size: number; path: string }
@@ -83,7 +84,8 @@ export class SkillStore {
   constructor(private readonly dirs: string[], private readonly templateRoot = path.join(os.homedir(), ".excel-partner", "templates")) {}
 
   private templateDirs(skill: string): string[] {
-    return [path.join(this.templateRoot, skill)];
+    const packaged = this.get(skill);
+    return [path.join(this.templateRoot, skill), ...(packaged ? [path.join(packaged.dir, "templates")] : [])];
   }
 
   private existingTemplateFile(skill: string, name: string): string | null {
@@ -133,7 +135,7 @@ export class SkillStore {
         : ext === ".gif" ? ["GIF87a", "GIF89a"].includes(bytes.subarray(0, 6).toString())
         : bytes.subarray(0, 4).toString() === "RIFF" && bytes.subarray(8, 12).toString() === "WEBP";
       if (!valid || bytes.length > 10 * 1024 * 1024) throw new SkillError("invalid image template or image exceeds 10 MB");
-    } else if (!ext.startsWith(".xl") && bytes.length > MAX_FILE_BYTES) throw new SkillError("text template exceeds 200 KB");
+    } else if (!ext.startsWith(".xl") && bytes.length > MAX_FILE_BYTES) throw new SkillError("text template exceeds 5 MB");
     fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
     fs.writeFileSync(file, bytes, { flag: "wx", mode: 0o600 });
     return this.listTemplates(skill).find((item) => item.name === name)!;

@@ -465,6 +465,14 @@ button:focus-visible, a:focus-visible, select:focus-visible { outline: 2px solid
 .attach-button { background: none !important; border: 0 !important; color: var(--text-secondary) !important; }
 .composer-hint { display: flex; justify-content: space-between; gap: 8px; color: var(--text-tertiary); font-size: 9px; padding: 7px 3px 0; }
 .composer-hint b { color: var(--text-secondary); font-weight: 400; }
+.usage-picker { flex-shrink: 0; }
+.usage-button { width: 25px; justify-content: center; }
+.usage-picker .usage-button svg { width: 16px; height: 16px; }
+.usage-picker .usage-popover { left: auto; right: 0; width: 270px; min-width: 0; padding: 12px; color: var(--text-secondary); font-size: 11px; line-height: 1.6; }
+.usage-popover strong { color: var(--text); font-size: 12px; }
+.usage-popover p { margin: 7px 0; overflow-wrap: anywhere; }
+.usage-popover .usage-explanation { color: var(--text-tertiary); font-size: 10px; }
+.usage-popover button { margin-top: 5px; font-size: 11px; }
 .bubble { font-size: 12px; line-height: 1.75; }
 .bubble.assistant { background: var(--assistant-bg); border-color: var(--assistant-border); }
 .tool { font-size: 10px; }

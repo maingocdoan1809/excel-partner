@@ -7,6 +7,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import selfsigned from "selfsigned";
+import { updatePackage } from "./update.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const dataDir = path.join(process.env.LOCALAPPDATA || os.homedir(), "Excel Partner");
@@ -36,7 +37,8 @@ function livePid() {
   try { process.kill(pid, 0); return pid; } catch { return null; }
 }
 function bridgeEnv() {
-  return { ...process.env, BRIDGE_CERT: cert, BRIDGE_KEY: key, BRIDGE_CONFIG: configFile };
+  return { ...process.env, BRIDGE_CERT: cert, BRIDGE_KEY: key, BRIDGE_CONFIG: configFile,
+    BRIDGE_USAGE_FILE: process.env.BRIDGE_USAGE_FILE ?? path.join(dataDir, "usage.jsonl") };
 }
 async function health() {
   return new Promise((resolve) => {
@@ -108,7 +110,7 @@ async function stop() {
 async function main() {
   const command = process.argv[2] || "help";
   if (command === "help" || command === "--help") {
-    console.log("Usage: excel-partner <setup|start|stop|status|uninstall>\nExcel desktop on Windows; setup registers the local add-in for the current user.");
+    console.log("Usage: excel-partner <setup|start|stop|status|update|uninstall>\nExcel desktop on Windows; setup registers the local add-in for the current user.\nupdate: install the latest npm release, refresh registration, and restart the bridge.");
     return;
   }
   requireWindows();
@@ -121,6 +123,7 @@ async function main() {
   } else if (command === "start") await start();
   else if (command === "stop") await stop();
   else if (command === "status") console.log((await health()) ? "Bridge running at https://localhost:8765" : "Bridge stopped or unhealthy");
+  else if (command === "update") await updatePackage({ root, dataDir, nodePath: process.execPath, stop, wasRunning: Boolean(livePid()) });
   else if (command === "uninstall") {
     await stop();
     powershell("unregister");

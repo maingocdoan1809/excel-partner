@@ -2,19 +2,19 @@ import fs from "node:fs";
 import path from "node:path";
 import { unzipSync } from "fflate";
 import { parseFrontmatter, SkillError } from "./skills.js";
+import { MAX_SKILL_UPLOAD_BYTES, MAX_SKILL_TEXT_BYTES, MAX_SKILL_EXPANDED_BYTES } from "../../protocol/src/skill-limits.js";
 
-export const MAX_SKILL_UPLOAD_BYTES = 2 * 1024 * 1024;
+export { MAX_SKILL_UPLOAD_BYTES } from "../../protocol/src/skill-limits.js";
 const MAX_FILES = 64;
-const MAX_TEXT_BYTES = 200_000;
+const MAX_TEXT_BYTES = MAX_SKILL_TEXT_BYTES;
 const NAME = /^[a-z0-9][a-z0-9_-]{0,63}$/;
-const TEXT_EXTENSIONS = new Set([".md", ".txt", ".json", ".csv", ".yaml", ".yml"]);
 
 export class UserSkills {
   readonly root: string;
   constructor(root: string) { this.root = path.resolve(root); }
 
   install(filename: string, bytes: Buffer, exists: (name: string) => boolean): { name: string; description: string } {
-    if (!bytes.length || bytes.length > MAX_SKILL_UPLOAD_BYTES) throw new SkillError("Upload a Markdown or ZIP file up to 2 MB.");
+    if (!bytes.length || bytes.length > MAX_SKILL_UPLOAD_BYTES) throw new SkillError("Upload a Markdown or ZIP file up to 5 MB.");
     let files: Record<string, Uint8Array>;
     let fallbackName = "";
     if (path.extname(filename).toLowerCase() === ".md") {
@@ -29,7 +29,7 @@ export class UserSkills {
         files = unzipSync(bytes, { filter: (file) => {
           this.validatePath(file.name.replace(/\/$/, ""));
           expanded += file.originalSize;
-          if (++entries > MAX_FILES || expanded > MAX_SKILL_UPLOAD_BYTES || file.originalSize > MAX_TEXT_BYTES) throw new SkillError("The archive exceeds the skill file or size limits.");
+          if (++entries > MAX_FILES || expanded > MAX_SKILL_EXPANDED_BYTES || file.originalSize > MAX_TEXT_BYTES) throw new SkillError("The archive exceeds the skill file or size limits (5 MB per file, 10 MB expanded total).");
           const normalized = file.name.toLowerCase();
           if (seen.has(normalized)) throw new SkillError("The archive contains duplicate file paths.");
           seen.add(normalized);
@@ -54,10 +54,12 @@ export class UserSkills {
 
     for (const [name, content] of Object.entries(files)) {
       this.validatePath(name);
-      if (!TEXT_EXTENSIONS.has(path.extname(name).toLowerCase()) || content.length > MAX_TEXT_BYTES) throw new SkillError("Skills support text reference files up to 200 KB each.");
-      if (content.includes(0)) throw new SkillError("Skill files must contain text, not binary data.");
-      try { new TextDecoder("utf-8", { fatal: true }).decode(content); }
-      catch { throw new SkillError("Skill files must use UTF-8 text encoding."); }
+      if (content.length > MAX_TEXT_BYTES) throw new SkillError("Skill files must be 5 MB or smaller.");
+      if (name === "SKILL.md") {
+        if (content.includes(0)) throw new SkillError("SKILL.md must contain text, not binary data.");
+        try { new TextDecoder("utf-8", { fatal: true }).decode(content); }
+        catch { throw new SkillError("SKILL.md must use UTF-8 text encoding."); }
+      }
     }
     const manifest = Buffer.from(files["SKILL.md"] ?? []).toString("utf8");
     const { meta, body } = parseFrontmatter(manifest);

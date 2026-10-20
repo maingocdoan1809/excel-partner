@@ -3,6 +3,8 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { exposedToolNames } from "../../protocol/src/index.js";
+import { TokenUsageSchema } from "../../protocol/src/usage.js";
+import { CumulativeUsage, parseCopilotCredits } from "./usage.js";
 import type {
   ProviderCapabilities,
   ProviderConnectionStatus,
@@ -25,6 +27,10 @@ interface CopilotSession {
   /** True once the system prompt has been delivered with the first prompt. */
   primed: boolean;
   active: ActiveTurn | null;
+  usage?: CumulativeUsage;
+  supportsUsageCommand?: boolean;
+  usageReport?: string;
+  creditTotal?: number;
 }
 
 interface ActiveTurn {
@@ -152,6 +158,7 @@ export class CopilotAdapter extends BaseCliAdapter {
     );
 
     let session: CopilotSession | null = null;
+    let supportsUsageCommand = false;
     const peer = new JsonRpcPeer({
       command: this.command,
       args: [
@@ -174,7 +181,14 @@ export class CopilotAdapter extends BaseCliAdapter {
       env: this.env,
       versionField: true,
       onStderr: (line) => log.debug(`copilot stderr: ${line}`),
-      onNotification: (method, params) => session && this.onNotification(session, method, params),
+      onNotification: (method, params) => {
+        const update = (params as { update?: { sessionUpdate?: string; availableCommands?: Array<{ name: string }> } })?.update;
+        if (method === "session/update" && update?.sessionUpdate === "available_commands_update") {
+          supportsUsageCommand = update.availableCommands?.some(command => command.name.replace(/^\//, "") === "usage") ?? false;
+          if (session) session.supportsUsageCommand = supportsUsageCommand;
+        }
+        if (session) this.onNotification(session, method, params);
+      },
       onRequest: (method, params) => this.onServerRequest(method, params),
     });
 
@@ -194,7 +208,7 @@ export class CopilotAdapter extends BaseCliAdapter {
       );
       const effort = effortConfig(created.configOptions, ctx.effort ?? "medium");
       if (effort) await peer.request("session/set_config_option", { sessionId: created.sessionId, ...effort });
-      session = { peer, configDir, acpSessionId: created.sessionId, primed: false, active: null };
+      session = { peer, configDir, acpSessionId: created.sessionId, primed: false, active: null, supportsUsageCommand };
       this.sessions.set(providerSessionId, session);
       peer.onExit(() => {
         const current = this.sessions.get(providerSessionId);
@@ -235,13 +249,40 @@ export class CopilotAdapter extends BaseCliAdapter {
     session.primed = true;
 
     session.peer
-      .request<{ stopReason?: string }>(
+      .request<{ stopReason?: string; usage?: { inputTokens: number; outputTokens: number; totalTokens: number; cachedReadTokens?: number } }>(
         "session/prompt",
         { sessionId: session.acpSessionId, prompt: [{ type: "text", text }] },
         30 * 60_000,
       )
-      .then((response) => {
+      .then(async (response) => {
         this.flushText(active);
+        // Copilot's ACP PromptResponse usage contains CLI-session totals.
+        // Convert to the increment for this turn before the bridge adds it.
+        // usage_update.used is context occupancy and must never be counted here.
+        if (response.usage) {
+          const usage = TokenUsageSchema.safeParse({ ...response.usage, cachedInputTokens: response.usage.cachedReadTokens ?? 0 });
+          if (usage.success) {
+            session.usage ??= new CumulativeUsage();
+            const increment = session.usage.next(usage.data);
+            if (session.supportsUsageCommand && !input.signal.aborted) {
+              try {
+                // Advertised informational slash command: no model call or credits consumed.
+                // Suppress its messages so the usage report never appears as an assistant reply.
+                session.usageReport = "";
+                await session.peer.request("session/prompt", { sessionId: session.acpSessionId,
+                  prompt: [{ type: "text", text: "/usage" }] }, 5000);
+                const total = parseCopilotCredits(session.usageReport);
+                if (total !== null) {
+                  increment.copilotCredits = Math.max(0, total - (session.creditTotal ?? 0));
+                  session.creditTotal = total;
+                }
+              } catch (error) {
+                this.runtime.logger.debug("Copilot credit report unavailable", { error: String(error) });
+              } finally { session.usageReport = undefined; }
+            }
+            queue.push({ type: "usage_update", requestId, usage: increment });
+          }
+        }
         const stop = response?.stopReason ?? "end_turn";
         if (stop === "cancelled") {
           queue.push({ type: "turn_finished", requestId, reason: "cancelled" });
@@ -313,6 +354,12 @@ export class CopilotAdapter extends BaseCliAdapter {
     const params = (raw ?? {}) as { sessionId?: string; update?: Record<string, any> };
     const active = session.active;
     const update = params.update;
+    if (session.usageReport !== undefined) {
+      if (update?.sessionUpdate === "agent_message_chunk" && update.content?.type === "text") {
+        session.usageReport += String(update.content.text ?? "");
+      }
+      return;
+    }
     if (!active || !update || params.sessionId !== session.acpSessionId) return;
     const { queue, requestId } = active;
     if (update.sessionUpdate !== "agent_thought_chunk") {

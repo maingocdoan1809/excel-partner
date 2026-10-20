@@ -1,7 +1,9 @@
-import type { ProviderEvent, ProviderId, ProviderConnectionStatus, ToolResult } from "../../protocol/src/index.js";
+import type { UsageSummary, TokenUsage, ProviderEvent, ProviderId, ProviderConnectionStatus, ToolResult } from "../../protocol/src/index.js";
 import { BridgeClient, type ModelCatalog, type SkillTemplate, type UploadedAttachment, type WorkspaceEntry, type WorkspaceRoot } from "./bridge-client.js";
 import type { PermissionMode } from "./permissions.js";
 import { WRITE_TOOLS, executeTool } from "./executor/index.js";
+import { formatDuration, usageCsv } from "./ui/usage.js";
+import { setupUsagePopover } from "./ui/usage-popover.js";
 import { describeChange } from "./ui/changes.js";
 import { setupInputResizer } from "./ui/input-resizer.js";
 import { renderMarkdown } from "./ui/markdown.js";
@@ -25,6 +27,10 @@ import { leadingCommand, slashBadgeRange } from "./ui/slash.js";
 import { activeFileMention, atomicBadgeDeletion, fileMentionRanges } from "./ui/file-mentions.js";
 
 const els = {
+  usageStats: byId<HTMLElement>("usage-stats"),
+  usageBreakdown: byId<HTMLElement>("usage-breakdown"),
+  usageCredits: byId<HTMLElement>("usage-credits"),
+  usageExport: byId<HTMLButtonElement>("usage-export"),
   status: byId<HTMLSpanElement>("connection-status"),
   statusLabel: byId<HTMLSpanElement>("connection-label"),
   messages: byId<HTMLElement>("messages"),
@@ -121,6 +127,12 @@ let workspaceRequest = 0;
 let localPickerLoading = false;
 let viewing: StoredSession | null = null;
 let persistTimer: number | undefined;
+let usageSummary: UsageSummary | undefined;
+let usageSessionId: string | null = null;
+let usageRequestId: string | null = null;
+let usageStartedAt: number | null = null;
+let turnUsage: TokenUsage | null = null;
+let usageTimer: number | undefined;
 const providerHints = new Map<ProviderId, string>();
 const providerStatuses = new Map<ProviderId, ProviderConnectionStatus>();
 const modelLoginRequired = new Set<ProviderId>();
@@ -160,6 +172,7 @@ Office.onReady((info) => {
     onState: renderState,
     onHello: ({ addinBuildId }) => {
       client.setProvider(provider);
+      void refreshUsage();
       void refreshModelCatalog(provider);
       if (session.messages.length) needsContext = true;
       activeModel = undefined;
@@ -261,6 +274,8 @@ Office.onReady((info) => {
     if (file) void addTemplate(file);
   });
 
+  els.usageExport.addEventListener("click", () => void exportUsage());
+  setupUsagePopover(byId<HTMLButtonElement>("usage-button"), byId("usage-popover"), () => void refreshUsage());
   // Composer
   els.mentionMenu.addEventListener("mousedown", (event) => {
     if (!(event.target instanceof HTMLInputElement)) event.preventDefault();
@@ -336,6 +351,7 @@ Office.onReady((info) => {
   renderProviderMenu();
   renderModelPicker();
   renderChanges();
+  void refreshUsage();
 });
 
 /* -------------------------------------------------------------------------- */
@@ -480,7 +496,7 @@ async function submit(): Promise<void> {
     const attachmentIds = pendingAttachments.flatMap((item) => item.reference.id ? [item.reference.id] : []);
     const referencePaths = pendingAttachments.flatMap((item) => item.reference.id ? [] : [item.reference.path]);
     if (cancelRequested) return finishLocalCancel(requestId);
-    client.sendPrompt(requestId, prompt, selection, context, attachmentIds, model, referencePaths, effort);
+    client.sendPrompt(requestId, prompt, selection, context, attachmentIds, model, referencePaths, effort, session.id);
     clearAttachment();
     promptDispatched = true;
     activeModel = model;
@@ -828,6 +844,22 @@ function clearAttachment(): void {
 
 function handleEvent(event: ProviderEvent): void {
   switch (event.type) {
+    case "turn_started":
+      if (event.requestId !== currentRequestId) return;
+      usageSessionId = session.id;
+      usageRequestId = event.requestId;
+      usageStartedAt = Date.now();
+      turnUsage = null;
+      window.clearInterval(usageTimer);
+      usageTimer = window.setInterval(renderUsage, 1000);
+      renderUsage();
+      return;
+    case "usage_update":
+      if (event.requestId === usageRequestId) {
+        turnUsage = event.usage;
+        renderUsage();
+      }
+      return;
     case "message_delta":
       if (!live) live = startLive("assistant");
       live.message.text += event.text;
@@ -871,6 +903,13 @@ function handleEvent(event: ProviderEvent): void {
       return;
     }
     case "turn_finished":
+      if (event.requestId === usageRequestId) {
+        window.clearInterval(usageTimer);
+        usageStartedAt = null;
+        turnUsage = null;
+        usageRequestId = null;
+      }
+      void refreshUsage();
       slash.reload();
       void userSkills.refresh();
       clearThinking();
@@ -900,6 +939,69 @@ function handleEvent(event: ProviderEvent): void {
       return;
     default:
       return;
+  }
+}
+
+async function refreshUsage(): Promise<void> {
+  const id = session.id;
+  if (usageSummary?.sessionId !== id) usageSummary = undefined;
+  renderUsage();
+  if (!client?.connected) return;
+  try {
+    const summaries = await client.usageSummaries(id);
+    if (session.id !== id) return;
+    usageSummary = summaries[0];
+    renderUsage();
+  } catch {
+    if (session.id === id) els.usageStats.textContent = "Usage statistics unavailable";
+  }
+}
+
+function renderUsage(): void {
+  const running = usageSessionId === session.id && usageStartedAt !== null;
+  const summary = usageSummary?.sessionId === session.id ? usageSummary : undefined;
+  const reported = (summary?.reportedTurns ?? 0) + (running && turnUsage ? 1 : 0);
+  const turns = (summary?.turns ?? 0) + (running ? 1 : 0);
+  const tokens = (summary?.totalTokens ?? 0) + (running ? turnUsage?.totalTokens ?? 0 : 0);
+  const partial = reported > 0 && reported < turns;
+  const duration = (summary?.durationMs ?? 0) + (running ? Date.now() - usageStartedAt! : 0);
+  els.usageStats.textContent = `Session tokens: ${reported || !turns ? tokens.toLocaleString() : "N/A"}${partial ? " (partial)" : ""} · AI time: ${formatDuration(duration)}`;
+  const input = (summary?.inputTokens ?? 0) + (running ? turnUsage?.inputTokens ?? 0 : 0);
+  const cached = (summary?.cachedInputTokens ?? 0) + (running ? turnUsage?.cachedInputTokens ?? 0 : 0);
+  const output = (summary?.outputTokens ?? 0) + (running ? turnUsage?.outputTokens ?? 0 : 0);
+  els.usageBreakdown.textContent = reported || !turns
+    ? `Input: ${input.toLocaleString()} · Cached: ${cached.toLocaleString()} · Output: ${output.toLocaleString()}`
+    : "Provider has not reported token usage";
+  els.usageBreakdown.title = "Cached tokens are included in input, not added again. Input includes instructions, tools, workbook context and conversation history.";
+  const creditTurns = (summary?.creditReportedTurns ?? 0) + (running && turnUsage?.copilotCredits !== undefined ? 1 : 0);
+  const credits = (summary?.copilotCredits ?? 0) + (running ? turnUsage?.copilotCredits ?? 0 : 0);
+  els.usageCredits.hidden = provider !== "copilot" && creditTurns === 0;
+  els.usageCredits.textContent = creditTurns
+    ? `Copilot credits: ≈ ${credits.toFixed(2)}${creditTurns < turns ? " (partial)" : ""}`
+    : "Copilot credits: not reported";
+  els.usageCredits.title = "Provider-reported AI Credits from Copilot /usage, rounded by the CLI. Separate from token counts; never estimated from tokens.";
+  els.usageStats.title = `This chat session: ${reported}/${turns} turns with token data. Total includes cached tokens. AI time includes provider/tool/approval waits while processing; idle time is excluded.`;
+}
+
+async function exportUsage(): Promise<void> {
+  els.usageExport.disabled = true;
+  try {
+    persistNow();
+    const summaries = await client.usageSummaries();
+    const titles = new Map(store.list().map((item) => [item.id, item.title]));
+    const blob = new Blob([usageCsv(summaries, titles)], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `excel-partner-usage-${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.append(link);
+    link.click();
+    link.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+  } catch (error) {
+    append({ kind: "error", text: `Could not export usage: ${error instanceof Error ? error.message : String(error)}` });
+  } finally {
+    els.usageExport.disabled = false;
   }
 }
 
@@ -954,6 +1056,7 @@ function startNewChat(): void {
   els.messages.replaceChildren();
   renderWelcome();
   renderChanges();
+  void refreshUsage();
   showPanel(null);
 }
 
@@ -971,6 +1074,7 @@ function loadSession(stored: StoredSession): void {
   for (const message of stored.messages) renderMessage(els.messages, message);
   scrollToEnd();
   renderChanges();
+  void refreshUsage();
 }
 
 /* -------------------------------------------------------------------------- */
@@ -1318,6 +1422,7 @@ function deleteSession(id: string): void {
     els.messages.replaceChildren();
     renderWelcome();
     renderChanges();
+    void refreshUsage();
   }
   viewing = null;
   showPanel("history");
@@ -1341,6 +1446,7 @@ function clearHistory(): void {
   renderWelcome();
   renderChanges();
   renderHistory();
+  void refreshUsage();
 }
 
 function resetClearButton(): void {
@@ -1385,6 +1491,11 @@ function renderState(state: string): void {
   els.send.disabled = state !== "open" || els.send.dataset.stopping === "true";
   if (state === "closed" && currentRequestId) {
     // The bridge dropped mid-turn; the running request can no longer finish, so free the UI.
+    window.clearInterval(usageTimer);
+    usageStartedAt = null;
+    turnUsage = null;
+    usageRequestId = null;
+    renderUsage();
     currentRequestId = null;
     live = null;
     setBusy(false);

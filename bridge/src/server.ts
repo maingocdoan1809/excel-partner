@@ -14,6 +14,7 @@ import {
   type ServerMessage,
 } from "../../protocol/src/index.js";
 import { PROJECT_ROOT, type BridgeConfig } from "./config.js";
+import { UsageStore, type UsageRecord } from "./usage.js";
 import { Logger } from "./logger.js";
 import { ReferenceError_, ReferenceFiles, workbookFolderFromUrl } from "./reference-files.js";
 import { AttachmentError, MAX_ATTACHMENT_BYTES, attachmentPath, createAttachment } from "./attachments.js";
@@ -44,12 +45,15 @@ export interface BridgeOptions {
   /** Where user-added workspaces are saved; null disables persistence in tests. */
   workspaceConfigPath?: string | null;
   skillUploadDir?: string;
+  usageFile?: string | null;
 }
 
 const MAX_BODY_BYTES = 8 * 1024 * 1024;
 
 /** Wires the HTTP(S) + WebSocket surface to the session manager and providers. */
 export class Bridge {
+  private readonly usage: UsageStore;
+  private readonly activeUsage = new Map<string, UsageRecord>();
   private readonly skills: SkillStore;
   readonly config: BridgeConfig;
   readonly logger: Logger;
@@ -70,6 +74,8 @@ export class Bridge {
 
   constructor(config: BridgeConfig, options: BridgeOptions = {}) {
     this.config = config;
+    this.usage = new UsageStore(options.usageFile === undefined
+      ? process.env.BRIDGE_USAGE_FILE ?? path.join(PROJECT_ROOT, "run", "usage.jsonl") : options.usageFile);
     this.logger = options.logger ?? new Logger("bridge", config.logLevel);
     this.sessions = new SessionManager({
       ttlMs: config.sessionTtlMs,
@@ -195,6 +201,12 @@ export class Bridge {
       return this.handleInternalTool(req, res);
     }
 
+    if (req.method === "GET" && url.pathname === "/session/usage") {
+      const session = this.sessions.getByToken(bearerToken(req.headers.authorization) ?? "");
+      if (!session?.isConnected) return this.sendJson(res, 401, { error: "unauthorized" });
+      const id = url.searchParams.get("sessionId");
+      return this.sendJson(res, 200, { sessions: this.usage.summaries().filter((item) => !id || item.sessionId === id) });
+    }
     if (req.method === "POST" && url.pathname === "/session/attachment") {
       return this.handleAttachment(req, res);
     }
@@ -643,7 +655,7 @@ export class Bridge {
       case "set_provider":
         return this.onSetProvider(session, message.provider);
       case "prompt":
-        return this.onPrompt(session, message.requestId, message.prompt, message.selection, message.context, message.attachmentIds, message.model, message.referencePaths, message.effort);
+        return this.onPrompt(session, message.requestId, message.prompt, message.selection, message.context, message.attachmentIds, message.model, message.referencePaths, message.effort, message.chatSessionId);
       case "cancel":
         session.abortTurn();
         return this.onCancel(session, message.requestId);
@@ -725,8 +737,9 @@ export class Bridge {
     model?: string | null,
     referencePaths?: string[],
     effort: "low" | "medium" | "high" = "medium",
+    chatSessionId?: string,
   ): Promise<void> {
-    return this.runPrompt(session, requestId, prompt, selection, context, attachmentIds, model, referencePaths, effort);
+    return this.runPrompt(session, requestId, prompt, selection, context, attachmentIds, model, referencePaths, effort, chatSessionId);
   }
 
   private async runPrompt(
@@ -739,6 +752,7 @@ export class Bridge {
     model?: string | null,
     referencePaths?: string[],
     effort: "low" | "medium" | "high" = "medium",
+    chatSessionId?: string,
   ): Promise<void> {
     if (!session.provider) {
       return void session.send({
@@ -792,6 +806,10 @@ export class Bridge {
     }
     const adapter = this.providers.require(session.provider);
     const controller = session.beginTurn(requestId);
+    this.activeUsage.set(`${session.id}:${requestId}`, {
+      sessionId: chatSessionId ?? session.id, requestId, provider: session.provider,
+      model: selectedModel, startedAt: Date.now(), durationMs: 0, reason: "completed", usage: null,
+    });
     // `/skill-name request` loads the skill's instructions into this turn.
     const expanded = expandSkillPrompt(prompt, this.skills);
     if (expanded.skill) this.logger.info("skill invoked", { skill: expanded.skill });
@@ -823,6 +841,10 @@ export class Bridge {
         if (event.type === "turn_finished") {
           this.finishTurn(session, requestId, event.reason);
         } else if (!session.hasFinished(requestId)) {
+          if (event.type === "usage_update") {
+            const record = this.activeUsage.get(`${session.id}:${requestId}`);
+            if (record) record.usage = event.usage;
+          }
           session.send(event as ServerMessage);
         }
       }
@@ -849,6 +871,18 @@ export class Bridge {
     reason: "completed" | "cancelled" | "error",
   ): void {
     if (!session.markFinished(requestId)) return;
+    const key = `${session.id}:${requestId}`;
+    const record = this.activeUsage.get(key);
+    if (record) {
+      this.activeUsage.delete(key);
+      record.durationMs = Math.max(0, Date.now() - record.startedAt);
+      record.reason = reason;
+      try { this.usage.append(record); }
+      catch (error) {
+        this.logger.error("could not save usage", { error: String(error) });
+        session.send({ type: "error", requestId, code: "usage_save_failed", message: "Usage statistics could not be saved to disk." });
+      }
+    }
     // Release the workbook before telling the pane, otherwise a client that
     // sends its next prompt on `turn_finished` races the adapter's cleanup
     // and gets a spurious `busy`.

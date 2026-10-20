@@ -1,5 +1,6 @@
 import {
   PROTOCOL_VERSION,
+  MAX_SKILL_UPLOAD_BYTES,
   decodeServerMessage,
   encodeMessage,
   type ProviderEvent,
@@ -109,8 +110,14 @@ export class BridgeClient {
     this.send({ type: "set_provider", provider });
   }
 
-  sendPrompt(requestId: string, prompt: string, selection: SelectionSnapshot | null, context?: string, attachmentIds?: string[], model?: string | null, referencePaths?: string[], effort: "low" | "medium" | "high" = "medium"): void {
-    this.send({ type: "prompt", requestId, prompt, selection, model: model ?? null, effort, ...(context ? { context } : {}), ...(attachmentIds?.length ? { attachmentIds } : {}), ...(referencePaths?.length ? { referencePaths } : {}) });
+  sendPrompt(requestId: string, prompt: string, selection: SelectionSnapshot | null, context?: string, attachmentIds?: string[], model?: string | null, referencePaths?: string[], effort: "low" | "medium" | "high" = "medium", chatSessionId?: string): void {
+    this.send({ type: "prompt", requestId, prompt, selection, chatSessionId, model: model ?? null, effort, ...(context ? { context } : {}), ...(attachmentIds?.length ? { attachmentIds } : {}), ...(referencePaths?.length ? { referencePaths } : {}) });
+  }
+
+  async usageSummaries(sessionId?: string): Promise<import("../../protocol/src/index.js").UsageSummary[]> {
+    const data = await this.sessionFetch<{ sessions: import("../../protocol/src/index.js").UsageSummary[] }>(
+      `/session/usage${sessionId ? `?sessionId=${encodeURIComponent(sessionId)}` : ""}`);
+    return data.sessions;
   }
 
   async uploadAttachment(file: File): Promise<UploadedAttachment> {
@@ -158,7 +165,7 @@ export class BridgeClient {
   }
 
   async uploadSkill(file: File): Promise<void> {
-    if (file.size > 2 * 1024 * 1024) throw new Error("Skill uploads must be 2 MB or smaller.");
+    if (file.size > MAX_SKILL_UPLOAD_BYTES) throw new Error("Skill uploads must be 5 MB or smaller.");
     await this.sessionFetch("/session/skills", { method: "POST", body: file, headers: { "x-file-name": encodeURIComponent(file.name) } });
   }
 

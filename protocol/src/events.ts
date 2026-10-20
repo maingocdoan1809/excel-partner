@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { TokenUsageSchema } from "./usage.js";
 
 /** Why a turn ended. */
 export const TurnFinishReasonSchema = z.enum(["completed", "cancelled", "error"]);
@@ -9,6 +10,12 @@ export type TurnFinishReason = z.infer<typeof TurnFinishReasonSchema>;
  * understand a CLI-specific stream format.
  */
 export const ProviderEventSchema = z.discriminatedUnion("type", [
+  z.object({
+    type: z.literal("usage_update"),
+    requestId: z.string(),
+    /** Cumulative snapshot for this turn, replacing earlier snapshots. */
+    usage: TokenUsageSchema,
+  }),
   z.object({
     type: z.literal("turn_started"),
     requestId: z.string(),

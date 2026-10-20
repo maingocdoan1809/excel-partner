@@ -329,15 +329,24 @@ export class ClaudeStreamTranslator {
       }
 
       case "result": {
+        const usage = message.usage;
+        const events: ProviderEvent[] = [];
+        if (usage && Number.isSafeInteger(usage.input_tokens) && Number.isSafeInteger(usage.output_tokens)) {
+          const cachedInputTokens = Math.max(0, usage.cache_read_input_tokens ?? 0);
+          const inputTokens = Math.max(0, usage.input_tokens) + cachedInputTokens + Math.max(0, usage.cache_creation_input_tokens ?? 0);
+          const outputTokens = Math.max(0, usage.output_tokens);
+          events.push({ type: "usage_update", requestId, usage: { inputTokens, outputTokens, cachedInputTokens, totalTokens: inputTokens + outputTokens } });
+        }
         if (message.is_error) {
           const text = String(message.result ?? "claude reported an error");
           const auth = message.api_error_status === 401 || message.api_error_status === 403;
           return [
+            ...events,
             { type: "error", requestId, code: auth ? "login_required" : "provider_error", message: text },
             { type: "turn_finished", requestId, reason: "error" },
           ];
         }
-        return [{ type: "turn_finished", requestId, reason: "completed" }];
+        return [...events, { type: "turn_finished", requestId, reason: "completed" }];
       }
 
       default:

@@ -61,8 +61,8 @@
 
       <section id="panel-skills" class="panel" hidden aria-label="Manage skills">
         <header class="panel-head"><button type="button" class="back" data-close="skills" aria-label="Back to chat">←</button><h2>Your skills</h2></header>
-        <p class="template-help">Upload a Markdown skill or a ZIP containing SKILL.md and text references. No skills are installed by default.</p>
-        <p class="template-help">Use a lowercase name in SKILL.md frontmatter. Maximum upload: 2 MB. Type / in chat to use an installed skill.</p>
+        <p class="template-help">Upload a Markdown skill or a ZIP containing SKILL.md. ZIP files can include any file type.</p>
+        <p class="template-help">Use a lowercase name in SKILL.md frontmatter. Maximum upload: 5 MB. Type / in chat to use an installed skill.</p>
         <div class="skill-upload-actions"><button id="skill-upload-button" type="button">Upload skill</button><input id="skill-upload-input" type="file" accept=".md,.zip" hidden /></div>
         <p id="user-skills-status" class="template-help" role="status" aria-live="polite"></p>
         <div id="user-skills-list" class="panel-body"></div>
@@ -166,6 +166,19 @@
             <select id="permission-mode" hidden aria-label="Permissions" title="Ask: request approval before overwriting or deleting. Auto: approve these operations."><option value="ask">Ask</option><option value="auto">Auto</option></select>
             <button id="permission-button" type="button" class="picker-button" aria-haspopup="listbox" aria-expanded="false" aria-controls="permission-menu" aria-label="Permissions"><span class="picker-label">Ask</span><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m5 6.5 3 3 3-3"/></svg></button>
             <div id="permission-menu" class="picker-menu" role="listbox" aria-label="Permissions" hidden></div>
+          </div>
+          <div class="composer-picker usage-picker">
+            <button id="usage-button" type="button" class="picker-button usage-button" aria-label="Session usage" title="Session usage" aria-haspopup="dialog" aria-expanded="false" aria-controls="usage-popover">
+              <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="7"/><path d="M10 9v5M10 6.2v.2"/></svg>
+            </button>
+            <div id="usage-popover" class="picker-menu usage-popover" role="dialog" aria-label="Session usage" hidden>
+              <strong>Session usage</strong>
+              <p id="usage-stats">Session tokens: 0 · AI time: 0m 0s</p>
+              <p id="usage-breakdown">Input: 0 · Cached: 0 · Output: 0</p>
+              <p id="usage-credits">Copilot credits: not reported yet</p>
+              <p class="usage-explanation">Input includes instructions, tools and conversation history. Cached tokens are included in input. Token counts are separate from Copilot credits.</p>
+              <button id="usage-export" type="button" class="secondary">Export CSV</button>
+            </div>
           </div>
           <button id="send-button" type="button" data-mode="send" aria-label="Send message" disabled>
             <svg class="send-icon" viewBox="0 0 20 20" aria-hidden="true"><path d="M10 15V5m-4 4 4-4 4 4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" /></svg>

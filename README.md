@@ -85,6 +85,7 @@ GitHub Copilot also supports device-code sign-in through **Settings > Sign in to
 | `excel-partner setup` | Register the add-in, configure certificate trust and startup, and restart the bridge. |
 | `excel-partner start` | Start the bridge after setup. |
 | `excel-partner stop` | Stop the bridge. |
+| `excel-partner update` | Install the latest npm release, refresh registration, and restart the bridge. |
 | `excel-partner status` | Check whether the bridge is healthy. |
 | `excel-partner uninstall` | Stop the bridge and remove add-in registration, startup entry, and certificate trust. |
 | `excel-partner --help` | Show CLI usage. |
@@ -94,13 +95,13 @@ GitHub Copilot also supports device-code sign-in through **Settings > Sign in to
 Save your work and close Excel before updating:
 
 ```powershell
-excel-partner stop
-npm install -g excel-partner@latest
-excel-partner setup
+excel-partner update
 excel-partner status
 ```
 
-Reopen Excel after setup. Running `setup` again refreshes the registered manifest and startup path.
+Reopen Excel after updating. The command preserves your configuration, certificates, usage statistics, skills, and templates. It supports global npm installations; source installations use `scripts/update.ps1` or `scripts/update.sh`.
+
+For an older release that does not yet have the `update` command, run `excel-partner stop`, `npm install -g excel-partner@latest`, then `excel-partner setup` once.
 
 ## Uninstall
 
@@ -113,11 +114,21 @@ npm uninstall -g excel-partner
 
 Restart Excel. Local configuration, logs, skills, and templates remain on disk.
 
+## Session usage and export
+
+Click the small info icon beside **Ask/Auto** to open session usage. **Session tokens** shows provider-reported token usage for the current chat and **AI time** shows cumulative time spent processing requests. The popover includes Input/Cached/Output counts, Copilot AI Credits when reported, and **Export CSV**. Copilot credits come from the advertised informational `/usage` command, which does not invoke the model. They are marked approximate because the CLI rounds them; missing or legacy premium-request data is never converted into AI Credits. The timer runs while a response is being generated, including provider startup, tools, and approval waits; idle time between requests is excluded. New chat starts a separate accounting session; continuing a saved chat keeps its session ID.
+
+**Export CSV** downloads one row per session with completed requests: session ID, title (when available in local history), timestamps, turn count, AI processing seconds, average seconds per turn, input/output/cache/total tokens, and token data completeness. It includes requests that ended with an error or cancellation. The currently running request appears after it finishes. Old chats from before this feature have no retrospective usage data.
+
+Input includes cached tokens; the cache column is a subset and is not added again. Missing token data is shown as `N/A`, or `partial` when only some turns have usage; CSV leaves unknown totals blank. Claude reports usage at turn completion, Codex reports updates while running, and Copilot session totals are converted to per-turn increments; usage depends on its optional [ACP prompt response usage](https://agentclientprotocol.github.io/typescript-sdk/types/PromptResponse.html).
+
+Statistics are appended locally to `%LOCALAPPDATA%\Excel Partner\usage.jsonl` for the npm CLI, or `run/usage.jsonl` for a source checkout. Set `BRIDGE_USAGE_FILE` to override the path. The ledger contains IDs, provider/model, duration, result status, and token counts; chat history remains in the task pane's local storage. Deleting chat history does not delete the usage ledger.
+
 ## Local data and configuration
 
 | Location | Contents |
 | --- | --- |
-| `%LOCALAPPDATA%\Excel Partner` | Bridge configuration, certificate, installed manifest, process ID, and logs. |
+| `%LOCALAPPDATA%\Excel Partner` | Bridge configuration, certificate, installed manifest, process ID, logs, and `usage.jsonl`. |
 | `%USERPROFILE%\.excel-partner\skills` | User-installed skills. |
 | `%USERPROFILE%\.excel-partner\templates` | Templates associated with skills. |
 

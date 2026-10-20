@@ -34,7 +34,7 @@ async function startBridge() {
       reply: "Edited A1.",
     }),
   );
-  bridge = new Bridge(config, { registry });
+  bridge = new Bridge(config, { usageFile: null, registry });
   const { url } = await bridge.listen();
   return { url, port };
 }
@@ -56,7 +56,7 @@ describe("bridge end to end", () => {
     try {
       const port = await getFreePort();
       const config = loadConfig({ host: "127.0.0.1", port, tls: null, publicBaseUrl: `http://127.0.0.1:${port}`, logLevel: "error" });
-      bridge = new Bridge(config, { skills: new SkillStore([folder]), skillUploadDir: folder,
+      bridge = new Bridge(config, { usageFile: null, skills: new SkillStore([folder]), skillUploadDir: folder,
         registry: new ProviderRegistry().register(new MockAdapter({ id: "claude", toolCalls: [{ tool: "save_skill",
           args: { name: "custom-report", description: "User reporting rules", instructions: "Format the selected table." } }] })),
       });
@@ -81,7 +81,7 @@ describe("bridge end to end", () => {
     try {
       const port = await getFreePort();
       const config = loadConfig({ host: "127.0.0.1", port, tls: null, publicBaseUrl: `http://127.0.0.1:${port}`, logLevel: "error" });
-      bridge = new Bridge(config, { skills: new SkillStore([folder]), skillUploadDir: folder, registry: new ProviderRegistry().register(new MockAdapter({ id: "copilot" })) });
+      bridge = new Bridge(config, { usageFile: null, skills: new SkillStore([folder]), skillUploadDir: folder, registry: new ProviderRegistry().register(new MockAdapter({ id: "copilot" })) });
       const { url } = await bridge.listen();
       expect((await fetch(`${url}/session/skills`, { method: "POST", body: "test" })).status).toBe(401);
       const pane = await PaneClient.connect(`${url.replace("http", "ws")}/ws`);
@@ -142,7 +142,7 @@ describe("bridge end to end", () => {
     try {
       const port = await getFreePort();
       const config = loadConfig({ host: "127.0.0.1", port, tls: null, publicBaseUrl: `http://127.0.0.1:${port}`, logLevel: "error" });
-      bridge = new Bridge(config, { registry: new ProviderRegistry().register(new CaptureAdapter({ id: "claude" })), references: new ReferenceFiles([folder]) });
+      bridge = new Bridge(config, { usageFile: null, registry: new ProviderRegistry().register(new CaptureAdapter({ id: "claude" })), references: new ReferenceFiles([folder]) });
       const { url } = await bridge.listen();
       const pane = await PaneClient.connect(`${url.replace("http", "ws")}/ws`);
       const hello = await handshake(pane);
@@ -166,7 +166,7 @@ describe("bridge end to end", () => {
     }
     const port = await getFreePort();
     const config = loadConfig({ host: "127.0.0.1", port, tls: null, publicBaseUrl: `http://127.0.0.1:${port}`, logLevel: "error" });
-    bridge = new Bridge(config, { registry: new ProviderRegistry().register(new CaptureAdapter({ id: "claude" })) });
+    bridge = new Bridge(config, { usageFile: null, registry: new ProviderRegistry().register(new CaptureAdapter({ id: "claude" })) });
     const { url } = await bridge.listen();
     const pane = await PaneClient.connect(`${url.replace("http", "ws")}/ws`);
     const hello = await handshake(pane);
@@ -201,7 +201,7 @@ describe("bridge end to end", () => {
         return { models: [{ id: "current-model", name: "Current Model" }], defaultModelId: "current-model" };
       }
     }
-    bridge = new Bridge(config, { registry: new ProviderRegistry().register(new CatalogAdapter({ id: "claude" })) });
+    bridge = new Bridge(config, { usageFile: null, registry: new ProviderRegistry().register(new CatalogAdapter({ id: "claude" })) });
     const { url } = await bridge.listen();
     const unauthenticated = await fetch(`${url}/session/models?provider=claude`);
     expect(unauthenticated.status).toBe(401);
@@ -242,7 +242,7 @@ describe("bridge end to end", () => {
     try {
       const port = await getFreePort();
       const config = loadConfig({ host: "127.0.0.1", port, tls: null, publicBaseUrl: `http://127.0.0.1:${port}`, logLevel: "error" });
-      bridge = new Bridge(config, { skills, registry: new ProviderRegistry() });
+      bridge = new Bridge(config, { usageFile: null, skills, registry: new ProviderRegistry() });
       const { url } = await bridge.listen();
       const pane = await PaneClient.connect(`${url.replace("http", "ws")}/ws`);
       const hello = await handshake(pane);
@@ -278,7 +278,7 @@ describe("bridge end to end", () => {
       // This test writes only to its temporary config, never the user's local settings.
       const port = await getFreePort();
       const config = loadConfig({ host: "127.0.0.1", port, tls: null, publicBaseUrl: `http://127.0.0.1:${port}`, referenceDirs: [], logLevel: "error" });
-      bridge = new Bridge(config, { registry: new ProviderRegistry(), workspaceConfigPath: configFile });
+      bridge = new Bridge(config, { usageFile: null, registry: new ProviderRegistry(), workspaceConfigPath: configFile });
       const live = await bridge.listen();
       const pane = await PaneClient.connect(`${live.url.replace("http", "ws")}/ws`);
       const hello = await handshake(pane);
@@ -417,7 +417,7 @@ describe("continued chats", () => {
         return super.closeSession(id);
       }
     }
-    bridge = new Bridge(config, { registry: new ProviderRegistry().register(new Recording({ id: "claude", reply: "ok" })) });
+    bridge = new Bridge(config, { usageFile: null, registry: new ProviderRegistry().register(new Recording({ id: "claude", reply: "ok" })) });
     const { url } = await bridge.listen();
     const pane = await PaneClient.connect(`${url.replace("http", "ws")}/ws`);
     await handshake(pane);
@@ -445,7 +445,7 @@ describe("continued chats", () => {
       }
     }
     const registry = new ProviderRegistry().register(new Recording({ id: "claude", reply: "ok" }));
-    bridge = new Bridge(config, { registry });
+    bridge = new Bridge(config, { usageFile: null, registry });
     const { url } = await bridge.listen();
     const pane = await PaneClient.connect(`${url.replace("http", "ws")}/ws`);
     await handshake(pane);

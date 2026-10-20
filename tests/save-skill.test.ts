@@ -69,13 +69,18 @@ describe("save_skill MCP tool", () => {
     for (const invalid of [
       { ...args, name: "../escape" }, { ...args, name: "C:/escape" }, { ...args, name: "con" },
       { ...args, path: "elsewhere/SKILL.md" }, { ...args, instructions: "  " },
-      { ...args, instructions: "X".repeat(200_001) }, { ...args, instructions: "界".repeat(80_000) },
+      { ...args, instructions: "X".repeat(200_001) },
     ]) {
       expect(await gateway.invoke({ sessionId, tool: "save_skill", args: invalid })).toMatchObject({
         ok: false, error: { code: "invalid_arguments" },
       });
     }
     expect(fs.existsSync(uploads.root)).toBe(false);
+  });
+
+  it("saves Unicode instructions larger than the old 200 KB byte limit", async () => {
+    expect(await gateway.invoke({ sessionId, tool: "save_skill", args: { ...args, instructions: "界".repeat(80_000) } })).toMatchObject({ ok: true });
+    expect(new SkillStore([uploads.root]).read(args.name).content).toContain("界");
   });
 
   it("requires an authenticated session before writing", async () => {

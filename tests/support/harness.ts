@@ -47,7 +47,7 @@ export class Harness {
       mcp: { command: process.execPath, args: [path.join(root, "dist/excel_mcp/src/cli.js")] },
       ...overrides,
     });
-    const bridge = new Bridge(config);
+    const bridge = new Bridge(config, { usageFile: null });
     const { url } = await bridge.listen();
     const pane = await PaneClient.connect(`${url.replace("http", "ws")}/ws`);
     const harness = new Harness(bridge, pane, url);

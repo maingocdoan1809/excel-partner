@@ -15,8 +15,9 @@ import { ensureWorkspaceDir } from "./workspace.js";
 interface CodexSession {
   peer: JsonRpcPeer;
   threadId: string;
+  tokenTotals?: import("../../protocol/src/index.js").TokenUsage;
   /** Sink for the turn currently running, if any. */
-  active: { queue: AsyncQueue<ProviderEvent>; requestId: string; turnId: string | null; interrupting: boolean } | null;
+  active: { queue: AsyncQueue<ProviderEvent>; requestId: string; turnId: string | null; interrupting: boolean; tokenBaseline?: import("../../protocol/src/index.js").TokenUsage } | null;
 }
 
 interface TurnLike {
@@ -241,6 +242,23 @@ export class CodexAdapter extends BaseCliAdapter {
     const { queue, requestId } = active;
 
     switch (method) {
+      case "thread/tokenUsage/updated": {
+        if (params.turnId && active.turnId && params.turnId !== active.turnId) break;
+        const total = params.tokenUsage?.total;
+        if (!total || ![total.inputTokens, total.outputTokens, total.totalTokens].every((n) => Number.isSafeInteger(n) && n >= 0)) break;
+        active.tokenBaseline ??= session.tokenTotals ?? { inputTokens: 0, outputTokens: 0, cachedInputTokens: 0, totalTokens: 0 };
+        const current = { inputTokens: total.inputTokens, outputTokens: total.outputTokens,
+          cachedInputTokens: total.cachedInputTokens ?? 0, totalTokens: total.totalTokens };
+        const baseline = active.tokenBaseline;
+        queue.push({ type: "usage_update", requestId, usage: {
+          inputTokens: Math.max(0, current.inputTokens - baseline.inputTokens),
+          outputTokens: Math.max(0, current.outputTokens - baseline.outputTokens),
+          cachedInputTokens: Math.max(0, current.cachedInputTokens - baseline.cachedInputTokens),
+          totalTokens: Math.max(0, current.totalTokens - baseline.totalTokens),
+        } });
+        session.tokenTotals = current;
+        break;
+      }
       case "turn/started":
         active.turnId = params.turn?.id ?? active.turnId;
         break;
