@@ -1,8 +1,27 @@
 import { describe, expect, it } from "vitest";
-import { executeWithPermission } from "../addin/taskpane/permissions.js";
+import { authorizeSkillScript, executeWithPermission } from "../addin/taskpane/permissions.js";
+import { parseToolInput } from "../protocol/src/index.js";
 import type { ToolResult } from "../protocol/src/index.js";
 
 describe("permission mode", () => {
+  it("asks for script execution with its arguments and local file permissions", async () => {
+    const input = parseToolInput("run_skill_script", { name: "report", file: "tools/layout.py", args: ["--recipe", "navigate"], stdin: "{}" });
+    const result = await authorizeSkillScript("ask", input, async (detail, target) => {
+      expect(detail).toContain("delete local files");
+      expect(target).toContain("report/tools/layout.py");
+      expect(target).toContain('"--recipe","navigate"');
+      expect(target).toContain("Standard input: {}");
+      return false;
+    });
+    expect(result).toEqual({ ok: true, data: { approved: false } });
+  });
+
+  it("Auto approves skill scripts without a prompt", async () => {
+    const input = parseToolInput("run_skill_script", { name: "report", file: "run.sh" });
+    expect(await authorizeSkillScript("auto", input, async () => { throw new Error("should not ask"); }))
+      .toEqual({ ok: true, data: { approved: true } });
+  });
+
   it("Ask checks occupied cells and retries only after approval", async () => {
     const calls: unknown[] = [];
     const execute = async (_tool: string, args: unknown): Promise<ToolResult> => {

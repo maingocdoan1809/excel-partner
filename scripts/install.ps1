@@ -14,8 +14,8 @@
   node.exe is present, otherwise it falls back to WSL2.
 
 .PARAMETER Providers
-  Comma-separated subset of: copilot, claude, codex. Default: copilot. Use 'none'
-  to skip provider installation (e.g. CLIs are already installed elsewhere).
+  Comma-separated subset of: copilot, claude, codex, opencode. Default: copilot.
+  Use 'none' to skip provider installation (e.g. CLIs are already installed elsewhere).
 
 .PARAMETER ReferenceDir
   Optional folder the assistant may read .xlsx templates from. Written to
@@ -53,7 +53,7 @@ Write-Info "repo: $Root"
 if (-not $SkipProviders -and [string]::IsNullOrWhiteSpace($Providers)) {
   Write-Host ""
   Write-Host "Which provider CLI(s) should this machine install?" -ForegroundColor Yellow
-  Write-Info "options: copilot, claude, codex   (comma separated, or 'none')"
+  Write-Info "options: copilot, claude, codex, opencode   (comma separated, or 'none')"
   $answer = Read-Host "Providers [copilot]"
   if ([string]::IsNullOrWhiteSpace($answer)) { $answer = 'copilot' }
   $Providers = $answer

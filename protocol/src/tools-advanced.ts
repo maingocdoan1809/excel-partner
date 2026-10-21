@@ -519,6 +519,34 @@ export const ReadSkillInputSchema = z.object({
 });
 export type ReadSkillInput = z.infer<typeof ReadSkillInputSchema>;
 
+export const RunSkillScriptInputSchema = z.object({
+  name: z.string().regex(/^[a-z0-9][a-z0-9_-]{0,63}$/).describe("Installed skill name."),
+  file: z.string().min(1).max(200).describe("Python (.py) or Bash (.sh) script relative to the skill folder, e.g. tools/flow_layout.py."),
+  args: z.array(z.string().max(4096).refine(value => !value.includes("\0"), "Arguments cannot contain NUL")).max(64).default([])
+    .describe("Literal arguments, without shell quoting. Working directory is the skill folder."),
+  stdin: z.string().max(200_000).optional().describe("Optional text supplied on standard input, such as JSON."),
+  outputFiles: z.array(z.string().min(1).max(200)).max(8).default([])
+    .describe("Optional generated files relative to the skill folder to return as attachment:// paths (30 MB combined)."),
+  timeoutMs: z.number().int().min(100).max(60_000).default(30_000),
+}).strict();
+export type RunSkillScriptInput = z.infer<typeof RunSkillScriptInputSchema>;
+
+const SandboxPath = z.string().min(1).max(200).refine(value =>
+  value.split("/").every(part => Boolean(part) && part !== "." && part !== ".." && !/[\\:\x00-\x1f]/.test(part)),
+"Use a relative path without traversal or drive letters.");
+export const RunPythonInputSchema = z.object({
+  code: z.string().min(1).max(190_000).describe("Python source to write as main.py and execute in an isolated Linux container. Standard library only by default."),
+  args: z.array(z.string().max(4096).refine(value => !value.includes("\0"))).max(64).default([]),
+  stdin: z.string().max(200_000).default(""),
+  files: z.array(z.object({
+    path: SandboxPath.refine(value => value !== "main.py", "main.py is reserved for code"),
+    attachment: z.string().regex(/^attachment:\/\/[0-9a-f-]{36}$/).describe("Existing attachment:// reference to copy into the sandbox."),
+  }).strict()).max(16).default([]),
+  outputFiles: z.array(SandboxPath).max(8).default([]).describe("Generated files to return as attachments; maximum 10 MB combined."),
+  timeoutMs: z.number().int().min(100).max(60_000).default(30_000),
+}).strict();
+export type RunPythonInput = z.infer<typeof RunPythonInputSchema>;
+
 /* -------------------------------------------------------------------------- */
 /* Reference files (read-only access to folders the user opened up)            */
 /* -------------------------------------------------------------------------- */

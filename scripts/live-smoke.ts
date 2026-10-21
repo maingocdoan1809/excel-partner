@@ -2,7 +2,7 @@
  * Drive a REAL provider CLI end to end against an in-memory workbook.
  *
  *   npm run build:server
- *   npx tsx scripts/live-smoke.ts <claude|copilot|codex> ["prompt"] [--tls] [--cancel-after=ms] [--turns=N]
+ *   npx tsx scripts/live-smoke.ts <claude|copilot|codex|opencode> ["prompt"] [--tls] [--cancel-after=ms] [--turns=N]
  *
  * Starts the bridge, connects a fake task pane, sends the prompt(s), prints the
  * normalised event stream and the resulting workbook state.

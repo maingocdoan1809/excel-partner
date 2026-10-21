@@ -10,29 +10,28 @@ export function setupSavedReferences(client: () => BridgeClient): { refresh(): P
   const file = get<HTMLInputElement>("reference-path");
   const description = get<HTMLTextAreaElement>("reference-description");
   const message = get<HTMLElement>("reference-dialog-status");
-  const choose = get<HTMLButtonElement>("reference-choose");
   const save = get<HTMLButtonElement>("reference-save");
   const cancel = get<HTMLButtonElement>("reference-cancel");
   let editing: string | undefined;
-  let selectionId: string | undefined;
+  let originalPath = "";
   let busy = false;
   let request = 0;
   const errorText = (error: unknown) => error instanceof Error ? error.message : "Could not update reference files.";
 
   function setBusy(value: boolean): void {
     busy = value;
-    choose.disabled = save.disabled = cancel.disabled = value;
+    file.disabled = save.disabled = cancel.disabled = value;
   }
 
   function open(entry?: SavedReference): void {
     editing = entry?.id;
-    selectionId = undefined;
+    originalPath = entry?.path ?? "";
     name.value = entry?.name ?? "";
     file.value = entry?.path ?? "";
     description.value = entry?.description ?? "";
-    message.textContent = entry && !entry.available ? "File not found. Choose its new location." : "";
+    message.textContent = entry && !entry.available ? "File not found. Enter its new path." : "";
     dialog.showModal();
-    (entry ? name : choose).focus();
+    (entry ? name : file).focus();
   }
 
   async function refresh(): Promise<void> {
@@ -56,7 +55,7 @@ export function setupSavedReferences(client: () => BridgeClient): { refresh(): P
         if (!entry.available) {
           const missing = document.createElement("p");
           missing.className = "reference-missing";
-          missing.textContent = "File not found — choose its new location.";
+          missing.textContent = "File not found — edit the reference to enter its new path.";
           row.append(missing);
         }
         const actions = document.createElement("div");
@@ -91,28 +90,13 @@ export function setupSavedReferences(client: () => BridgeClient): { refresh(): P
   cancel.addEventListener("click", () => dialog.close());
   dialog.addEventListener("keydown", event => { if (event.key === "Escape") event.stopPropagation(); });
   dialog.addEventListener("cancel", event => { if (busy) event.preventDefault(); });
-  choose.addEventListener("click", async () => {
-    if (busy) return;
-    setBusy(true);
-    message.textContent = "Choose a file in the Windows dialog…";
-    try {
-      const selected = await client().pickReferenceFile();
-      if (!selected.cancelled && selected.selectionId && selected.path) {
-        selectionId = selected.selectionId;
-        file.value = selected.path;
-        if (!name.value.trim()) name.value = selected.name ?? "";
-      }
-      message.textContent = "";
-    } catch (error) { message.textContent = errorText(error); }
-    finally { setBusy(false); }
-  });
   form.addEventListener("submit", async event => {
     event.preventDefault();
     if (busy) return;
-    if (!file.value) { message.textContent = "Choose a file first."; choose.focus(); return; }
+    if (!file.value.trim()) { message.textContent = "Enter the file path first."; file.focus(); return; }
     setBusy(true);
     try {
-      await client().saveReference({ id: editing, selectionId, name: name.value, description: description.value });
+      await client().saveReference({ id: editing, ...(file.value.trim() !== originalPath ? { path: file.value } : {}), name: name.value, description: description.value });
       dialog.close();
       status.textContent = "Reference saved. It is available to all skills.";
       await refresh();

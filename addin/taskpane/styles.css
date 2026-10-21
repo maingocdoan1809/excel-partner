@@ -1,52 +1,44 @@
 
+/* Design tokens. Apple-style: one blue accent, neutral surfaces, hairline borders.
+   Dark is the default; the light theme overrides it through [data-theme="light"]. */
 :root {
-  --mint: #a1dbb5; --on-mint: #173a24;
-  --composer-bg: #1c261f; --composer-border: #465d4c; --composer-end: #131a15;
-  --accent-soft: #c4efd2; --accent-dot: #8bd7a4;
-  --subtle-bg: #2d3b31; --subtle-text: #b9d3c1;
-  --text-secondary: #b4c7ba; --text-tertiary: #8da596;
-  --assistant-bg: #171f19; --assistant-border: #2d3a31;
-  --login-border: #3d5545; --login-gradient: #23342a; --login-bg: #18231c;
-  --code-text: #d8f6e3; --code-bg: #142219; --code-border: #587961;
-  --warning-text: #f4c39b; --user-bg: #293c30; --user-text: #d6e9dd; --user-border: #3b5544;
+  color-scheme: dark;
+  --bg: #1d1d1f; --panel: #272729; --float: #272729;
+  --blue-50: #2c2c2e; --blue-100: #333336; --blue-200: #48484a; --blue-300: #636366;
+  --accent: #2997ff; --accent-strong: #2997ff; --accent-soft: #f5f5f7; --accent-dot: #30d158;
+  --btn: #0071e3; --mint: #0071e3; --on-mint: #fff;
+  --text: #f5f5f7; --muted: #a1a1a6; --text-secondary: #a1a1a6; --text-tertiary: #98989d;
+  --border: #424245; --field: #8e8e93; --composer-border: #8e8e93;
+  --ok: #30d158; --ok-soft: #1c3524; --error: #ff6961; --error-soft: #3a2224; --warning-text: #ffb340;
+  --composer-bg: #272729; --composer-end: #1d1d1f;
+  --subtle-bg: #333336; --subtle-text: #d2d2d7;
+  --assistant-bg: transparent; --assistant-border: transparent;
+  --login-border: #424245; --login-gradient: #272729; --login-bg: #272729;
+  --code-text: #f5f5f7; --code-bg: #333336; --code-border: #48484a;
+  --user-bg: #0071e3; --user-text: #fff; --user-border: #0071e3;
+  --shadow: none; --pop-shadow: 0 8px 30px rgba(0, 0, 0, 0.5);
+  --changes-width: 320px;
+  --input-height: 64px;
 }
 :root[data-theme="light"] {
   color-scheme: light;
-  --bg: #fafcfb; --panel: #fff; --blue-50: #f2f6f3; --blue-100: #e7f1e9;
-  --blue-200: #d6e4d9; --blue-300: #b4cdbb; --accent: #247647; --accent-strong: #1c633a;
-  --text: #203528; --muted: #617568; --border: #dbe5de;
-  --ok: #247647; --ok-soft: #e7f4ea; --error: #ad3030; --error-soft: #fceeee;
-  --mint: #247647; --on-mint: #fff; --composer-bg: #fff; --composer-border: #b6cbbb; --composer-end: #f5f8f6;
-  --accent-soft: #1c633a; --accent-dot: #247647; --subtle-bg: #e5efe8; --subtle-text: #466c51;
-  --text-secondary: #506c59; --text-tertiary: #698070; --assistant-bg: #fff; --assistant-border: #dbe5de;
-  --login-border: #cbded0; --login-gradient: #f0f7f2; --login-bg: #f9fcfa;
-  --code-text: #245c38; --code-bg: #f1f7f3; --code-border: #9bbca5; --warning-text: #92541d;
-  --user-bg: #e5f1e9; --user-text: #244c32; --user-border: #cadfcf;
-  --shadow: 0 1px 3px #20352808;
+  --bg: #f5f5f7; --panel: #fff; --float: #fff;
+  --blue-50: #f5f5f7; --blue-100: #ebebef; --blue-200: #d2d2d7; --blue-300: #aeaeb2;
+  --accent: #0066cc; --accent-strong: #0066cc; --accent-soft: #1d1d1f; --accent-dot: #248a3d;
+  --btn: #0066cc; --mint: #0066cc; --on-mint: #fff;
+  --text: #1d1d1f; --muted: #66666b; --text-secondary: #66666b; --text-tertiary: #66666b;
+  --border: #e0e0e0; --field: #86868b; --composer-border: #86868b;
+  --ok: #1e7a35; --ok-soft: #e8f5ec; --error: #d70015; --error-soft: #fff0f0; --warning-text: #b25000;
+  --composer-bg: #fff; --composer-end: #f5f5f7;
+  --subtle-bg: #ebebef; --subtle-text: #424245;
+  --assistant-bg: transparent; --assistant-border: transparent;
+  --login-border: #d2d2d7; --login-gradient: #fff; --login-bg: #fff;
+  --code-text: #1d1d1f; --code-bg: #ebebef; --code-border: #d2d2d7;
+  --user-bg: #0066cc; --user-text: #fff; --user-border: #0066cc;
+  --pop-shadow: 0 8px 30px rgba(0, 0, 0, 0.12);
 }
 html, body { width: 100%; overflow: hidden; }
 :root[data-theme="light"] .welcome-sheet { filter: brightness(.52) saturate(1.15); }
-:root {
-  --bg: #111513;
-  --panel: #191e1b;
-  --blue-50: #18211b;
-  --blue-100: var(--user-bg);
-  --blue-200: #354c3d;
-  --blue-300: #587a63;
-  --accent: var(--mint);
-  --accent-strong: #85c89d;
-  --text: #edf2ee;
-  --muted: #98a79c;
-  --border: #303e34;
-  --ok: var(--mint);
-  --ok-soft: #213b2a;
-  --error: #ffb4ab;
-  --error-soft: #3e2426;
-  --shadow: 0 1px 2px rgba(0, 0, 0, 0.12), 0 4px 14px rgba(0, 0, 0, 0.1);
-  --changes-width: 320px;
-  --input-height: 64px;
-  color-scheme: dark;
-}
 
 * { box-sizing: border-box; }
 html, body { height: 100%; }
@@ -56,7 +48,8 @@ body {
   margin: 0;
   display: flex;
   flex-direction: column;
-  font: 13px/1.5 "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
+  font: 13px/1.5 "SF Pro Text", "Segoe UI Variable", "Segoe UI", system-ui, -apple-system, sans-serif;
+  letter-spacing: -0.01em;
   color: var(--text);
   background: var(--bg);
   min-width: 0;
@@ -263,7 +256,7 @@ button {
   font-weight: 600;
   transition: filter 0.15s, transform 0.1s;
 }
-button:hover:not(:disabled) { filter: brightness(1.06); }
+button:where(:hover:not(:disabled)) { filter: brightness(1.06); }
 button:active:not(:disabled) { transform: translateY(1px); }
 button.secondary { background: var(--panel); color: var(--accent-strong); border-color: var(--border); }
 button.secondary:hover:not(:disabled) { background: var(--blue-50); filter: none; }
@@ -549,3 +542,79 @@ body.login-active .auth-notice { display: none; }
 .reference-dialog input, .reference-dialog textarea { font: inherit; padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px; color: var(--text); background: var(--bg); }
 .reference-dialog input[readonly] { color: var(--muted); }
 #reference-status { margin-top: 8px; }
+
+/* ---- Apple-style layer: shapes, flat surfaces, pill actions --------------------
+   Placed last so it refines the component rules above without rewriting them. */
+body { scrollbar-color: var(--blue-300) transparent; }
+.logo, .hero-mark { filter: none; }
+.composer { background: var(--bg); }
+.composer-card { border-radius: 18px; box-shadow: none; padding: 12px 14px; }
+.composer-card:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 28%, transparent); }
+.composer-card textarea::placeholder { color: var(--text-tertiary); }
+.composer-card textarea, .prompt-display { font-size: 13px; line-height: 1.6; }
+
+/* actions: filled blue pills, outlined blue pills for secondary */
+button { border-radius: 999px; background: var(--btn); color: var(--on-mint); font-weight: 400; padding: 6px 16px; transition: filter .15s, transform .1s; }
+/* :where() keeps this at zero extra specificity so item-level hover rules (menu rows, tabs) are not washed out by the brightness filter. */
+button:where(:hover:not(:disabled)) { filter: brightness(1.08); }
+button:active:not(:disabled) { transform: scale(.95); }
+button.secondary { background: transparent; color: var(--accent); border: 1px solid var(--accent); }
+button.secondary:hover:not(:disabled) { background: color-mix(in srgb, var(--accent) 10%, transparent); filter: none; }
+button.ghost { background: none; color: var(--muted); border: 0; }
+.composer-actions #send-button { border-radius: 999px; background: var(--btn); }
+#send-button[data-mode="stop"] { background: #d70015; }
+.login-primary { background: var(--btn); color: var(--on-mint); border-radius: 999px; }
+.login-card button, .login-primary { border-radius: 999px; font-size: 12px; }
+.icon-button, .back { border-radius: 999px; }
+.attach-button, .composer-actions .attach-button, .picker-button, .menu-item, .history-delete, .workspace-remove, .pane-tabs button { box-shadow: none; }
+.picker-button { border-radius: 999px; padding: 4px 8px; }
+.model-select, .permission-select { font-size: 11px; }
+
+/* surfaces */
+.bubble { font-size: 13px; line-height: 1.6; }
+.bubble.user { border-radius: 18px; border-bottom-right-radius: 6px; }
+.bubble.assistant { padding: 4px 2px; border: 0; box-shadow: none; border-radius: 0; max-width: 100%; }
+.bubble code { background: var(--code-bg); color: var(--code-text); border-radius: 6px; padding: 1px 6px; }
+.bubble pre { background: var(--code-bg); border: 0; border-radius: 12px; }
+.bubble.user code { background: rgba(255, 255, 255, .2); color: inherit; }
+.bubble.error { border-color: color-mix(in srgb, var(--error) 45%, transparent); border-radius: 14px; }
+.tool { font-size: 11px; background: var(--panel); border-color: var(--border); }
+.tool[data-state="ok"] { border-color: color-mix(in srgb, var(--ok) 40%, transparent); }
+.tool[data-state="error"], .change[data-ok="false"] { border-color: color-mix(in srgb, var(--error) 45%, transparent); }
+.tool-group summary { border-radius: 999px; background: var(--blue-100); padding: 4px 12px; }
+.note { font-size: 12px; }
+.change { border-radius: 14px; border-left-width: 1px; }
+.history-item, .user-skill, .template-row, .reference-row { border-radius: 14px; }
+.history-item:hover { box-shadow: none; border-color: var(--accent); }
+.history-item[data-current="true"] { border-left-width: 1px; border-color: var(--accent); }
+.login-card { border-radius: 18px; background: var(--panel); }
+.device-code { border-radius: 12px; }
+.chip { border-radius: 999px; font-size: 11px; padding: 2px 10px; }
+.badge { border-radius: 999px; font-size: 10px; padding: 1px 7px; }
+.status[data-state="open"] .dot { background: var(--ok); box-shadow: none; }
+
+/* floating surfaces: hairline plus a soft shadow so they separate from content */
+.slash-menu, .menu, .picker-menu, .usage-popover, .usage-picker .usage-popover { background: var(--float); border-radius: 14px; border: 1px solid var(--border); box-shadow: var(--pop-shadow); }
+.menu-item, .picker-option, .slash-item, .workspace-row, .mention-item { border-radius: 9px; }
+.permission-dialog, .reference-dialog { background: var(--float); border-radius: 18px; box-shadow: none; border: 1px solid var(--border); }
+.permission-overlay { background: rgba(0, 0, 0, .5); }
+.permission-dialog code { border-radius: 10px; }
+.reference-dialog::backdrop { background: rgba(0, 0, 0, .45); }
+.reference-dialog input, .reference-dialog textarea, .theme-select { border: 1px solid var(--field); border-radius: 10px; background: var(--float); color: var(--text); }
+.model-select option, .permission-select option { background: var(--float); }
+.login-command, .auth-notice button { border-radius: 10px; }
+.auth-notice button { color: var(--accent); background: transparent; border: 1px solid var(--accent); border-radius: 999px; font-size: 11px; }
+
+/* navigation: pill tabs instead of an underline */
+.pane-tabs { gap: 4px; padding: 8px 12px; border-bottom: 0; }
+.pane-tabs button { padding: 4px 14px; border: 0; border-radius: 999px; font-size: 12px; color: var(--muted); }
+.pane-tabs button:hover:not(:disabled) { filter: none; background: var(--blue-100); }
+.pane-tabs button[aria-pressed="true"] { background: var(--blue-100); color: var(--text); font-weight: 600; border-bottom-color: transparent; }
+
+/* small text: nothing below 11px */
+.brand-text > span, .auth-notice span, .composer-hint, .usage-popover .usage-explanation,
+.login-card .login-timer, .login-body .login-help, .slash-kind, .history-meta, .menu-hint { font-size: 11px; }
+.eyebrow, .login-card > strong .badge, .auth-notice button, .user-skill button, .picker-button { font-size: 11px; }
+.composer-hint b { color: var(--text-secondary); font-weight: 600; }
+
+@media (prefers-reduced-motion: reduce) { button:active:not(:disabled) { transform: none; } }

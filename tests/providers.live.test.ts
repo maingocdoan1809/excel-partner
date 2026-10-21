@@ -6,7 +6,7 @@ import { Harness } from "./support/harness.js";
  * Opt-in tests against REAL, logged-in provider CLIs and real models:
  *
  *   npm run build:server
- *   LIVE_PROVIDERS=codex,copilot npx vitest run tests/providers.live.test.ts
+ *   LIVE_PROVIDERS=codex,copilot,opencode npx vitest run tests/providers.live.test.ts
  *
  * They cost model tokens, so they never run by default.
  */

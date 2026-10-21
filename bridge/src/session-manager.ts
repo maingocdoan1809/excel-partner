@@ -66,6 +66,7 @@ export class SessionManager {
 
   remove(session: WorkbookSession, reason: string): void {
     if (!this.sessions.delete(session.id)) return;
+    session.abortTurn();
     this.byToken.delete(session.sessionToken);
     this.byConnection.delete(session.workbookConnectionId);
     session.rejectAllPending({ code: "disconnected", message: `session closed (${reason})` });

@@ -48,6 +48,7 @@ export class WorkbookSession {
   providerEffort: "low" | "medium" | "high" = "medium";
   activeRequestId: string | null = null;
   turnController: AbortController | null = null;
+  readonly scriptControllers = new Set<AbortController>();
   lastActivityAt: number;
   /** Extra read-only paths approved in this connected workbook session. */
   readonly referenceGrants = new Set<string>();
@@ -111,6 +112,7 @@ export class WorkbookSession {
 
   abortTurn(): void {
     this.turnController?.abort();
+    for (const controller of this.scriptControllers) controller.abort();
   }
 
   get isConnected(): boolean {
@@ -124,6 +126,7 @@ export class WorkbookSession {
 
   detachSocket(socket: WebSocket): void {
     if (this.socket === socket) {
+      this.abortTurn();
       this.socket = null;
       this.referenceGrants.clear();
       this.defaultWorkspace = null;

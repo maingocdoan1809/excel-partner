@@ -3,7 +3,7 @@
 # certificate in Windows, start the bridge and sideload the add-in into Excel.
 #
 #   bash scripts/install-windows.sh                     # install / upgrade (default: copilot)
-#   bash scripts/install-windows.sh --providers copilot,codex
+#   bash scripts/install-windows.sh --providers copilot,codex,opencode
 #   bash scripts/install-windows.sh --reference-dir "/mnt/c/Users/me/Templates"
 #   bash scripts/install-windows.sh --open              # ...and start a new Excel instance
 #   bash scripts/install-windows.sh --no-providers      # skip provider install/login hints
@@ -41,9 +41,10 @@ install_providers() {
   for entry in "${entries[@]}"; do
     name="$(echo "$entry" | tr -d ' ' | tr '[:upper:]' '[:lower:]')"
     case "$name" in
-      copilot) pkg="@github/copilot"; bin="copilot"; login="copilot login" ;;
-      claude)  pkg="@anthropic-ai/claude-code"; bin="claude"; login="claude  (then /login)" ;;
-      codex)   pkg="@openai/codex"; bin="codex"; login="codex login" ;;
+      copilot)  pkg="@github/copilot"; bin="copilot"; login="copilot login" ;;
+      claude)   pkg="@anthropic-ai/claude-code"; bin="claude"; login="claude  (then /login)" ;;
+      codex)    pkg="@openai/codex"; bin="codex"; login="codex login" ;;
+      opencode) pkg="opencode-ai"; bin="opencode"; login="opencode auth login" ;;
       ""|none) continue ;;
       *) echo "    skipping unknown provider '$name'"; continue ;;
     esac

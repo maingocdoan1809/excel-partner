@@ -6,7 +6,7 @@
 # over to scripts/install-windows.sh.
 #
 #   bash install.sh                          # clone (if needed) + install
-#   bash install.sh --providers copilot,codex --open
+#   bash install.sh --providers copilot,codex,opencode --open
 #   REPO_DIR=~/tools/excel-partner bash install.sh
 set -euo pipefail
 

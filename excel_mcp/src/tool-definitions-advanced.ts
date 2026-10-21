@@ -102,6 +102,28 @@ const META: Partial<Record<ExcelToolName, Meta>> = {
       "READ. Load a skill's instructions (and, with `file`, one of its reference documents). Always read the matching skill BEFORE " +
       "drawing, formatting or filling company documents, and follow it exactly.",
   },
+  run_skill_script: {
+    title: "Run skill script",
+    annotations: WRITE,
+    description:
+      "EXECUTE. Run an installed skill's Python (.py) or Bash (.sh) script on the bridge machine. Read the skill and script first. " +
+      "Ask/Auto permission applies to each execution. Scripts run with the local user's permissions and can modify local files. " +
+      "Pass literal args and optional stdin; cwd is the skill folder. Returns stdout, stderr, exitCode, timedOut and outputTruncated. " +
+      "Python/Bash and dependencies must be installed on that machine. Use Excel tools to apply generated drawing calls to the open workbook; " +
+      "Request generated outputFiles inside the skill folder to receive attachment:// paths readable with the file tools. " +
+      "do not run scripts that edit the open workbook on disk. Never claim success after a nonzero exit or timeout.",
+  },
+  run_python: {
+    title: "Run Python in sandbox",
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false },
+    description:
+      "EXECUTE. Write AI-generated Python as main.py in a fresh Docker Linux sandbox and run it. No network, no host folders, " +
+      "non-root user, read-only system, 256 MB RAM, one CPU and a 60-second maximum. Standard library only by default; no pip/network installs. " +
+      "Supply selected attachment:// files through files; only those copies enter the sandbox. Request outputFiles to receive attachment:// results " +
+      "(10 MB combined). Returns stdout, stderr, exitCode and timeout/output-limit status. Check these before claiming success. " +
+      "Ask/Auto permission applies. Requires a running Docker daemon and the configured sandbox image already installed; fails closed if unavailable. " +
+      "Use this for code you create, and Excel tools for the open workbook. Never use local skill scripts as a way to bypass the sandbox.",
+  },
   list_reference_files: {
     title: "List reference files",
     annotations: READ,

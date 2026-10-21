@@ -26,6 +26,31 @@ interface ClaudeSession {
   child: ChildProcess | null;
 }
 
+/** Shape of one entry in the CLI's `initialize` control response (`models`). */
+interface ClaudeModelInfo { value?: unknown; displayName?: unknown; description?: unknown; resolvedModel?: unknown }
+
+/** Turn the CLI's own model list (the one behind `/model`) into the picker catalog. */
+export function parseClaudeModels(models: unknown): ProviderModelCatalog | null {
+  if (!Array.isArray(models)) return null;
+  const seen = new Set<string>();
+  const out: ProviderModelCatalog["models"] = [];
+  let defaultModelId: string | null = null;
+  for (const item of models as ClaudeModelInfo[]) {
+    if (typeof item?.value !== "string" || !item.value || seen.has(item.value)) continue;
+    seen.add(item.value);
+    if (item.value === "default") {
+      if (typeof item.resolvedModel === "string") defaultModelId = item.resolvedModel;
+      continue; // the picker already has its own "Default" entry
+    }
+    const display = typeof item.displayName === "string" && item.displayName ? item.displayName : item.value;
+    // Some accounts report only "Sonnet" as displayName and keep the version in the
+    // description ("Sonnet 5.5 · Efficient for routine tasks"). Prefer that lead-in.
+    const lead = typeof item.description === "string" ? item.description.split(" · ")[0]!.trim() : "";
+    out.push({ id: item.value, name: lead.toLowerCase().startsWith(display.toLowerCase()) && lead.length <= 40 ? lead : display });
+  }
+  return out.length ? { models: out, defaultModelId } : null;
+}
+
 const MCP_PREFIX = `mcp__${MCP_SERVER_NAME}__`;
 
 /**
@@ -38,8 +63,14 @@ const MCP_PREFIX = `mcp__${MCP_SERVER_NAME}__`;
  * running turn process; the conversation stays resumable.
  */
 export class ClaudeAdapter extends BaseCliAdapter {
+  /**
+   * Ask the CLI itself: the `initialize` control request of the stream-json
+   * protocol returns the same account-filtered model list as `/model`
+   * (exact versions such as "Sonnet 5" and "Sonnet 5.5"). No model call is made.
+   * Falls back to the three basic aliases if the CLI cannot answer.
+   */
   async listModels(): Promise<ProviderModelCatalog> {
-    return {
+    const fallback: ProviderModelCatalog = {
       models: [
         { id: "sonnet", name: "Sonnet (latest)" },
         { id: "opus", name: "Opus (latest)" },
@@ -47,6 +78,35 @@ export class ClaudeAdapter extends BaseCliAdapter {
       ],
       defaultModelId: null,
     };
+    try { return (await this.queryModels()) ?? fallback; } catch { return fallback; }
+  }
+
+  private queryModels(timeoutMs = 20_000): Promise<ProviderModelCatalog | null> {
+    return new Promise((resolve) => {
+      const child = spawn(this.command, [
+        "-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose",
+        "--setting-sources", "project", "--tools", "", "--disable-slash-commands",
+      ], { cwd: ensureWorkspaceDir(), env: this.env, windowsHide: true, stdio: ["pipe", "pipe", "ignore"] });
+      let done = false;
+      const finish = (value: ProviderModelCatalog | null) => {
+        if (done) return;
+        done = true;
+        clearTimeout(timer);
+        child.kill();
+        resolve(value);
+      };
+      const timer = setTimeout(() => finish(null), timeoutMs);
+      child.on("error", () => finish(null));
+      child.on("exit", () => finish(null));
+      createInterface({ input: child.stdout! }).on("line", (line) => {
+        try {
+          const message = JSON.parse(line) as { type?: string; response?: { request_id?: string; response?: { models?: unknown } } };
+          if (message.type === "control_response" && message.response?.request_id === "models") finish(parseClaudeModels(message.response.response?.models));
+        } catch { /* not JSON */ }
+      });
+      child.stdin!.on("error", () => finish(null));
+      child.stdin!.write(JSON.stringify({ type: "control_request", request_id: "models", request: { subtype: "initialize" } }) + "\n");
+    });
   }
   readonly id: ProviderId = "claude";
   readonly capabilities: ProviderCapabilities = {

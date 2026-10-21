@@ -19,9 +19,9 @@ The pane refuses to load over `https://localhost:8765`.
 ## Provider shows `not_installed` / `login_required`
 
 - Install the CLI **inside WSL**, not on Windows.
-- Log in once in a WSL terminal (`claude`, `copilot`, `codex login`).
-- Point the bridge at a non-default binary with `CLAUDE_BIN`, `COPILOT_BIN` or
-  `CODEX_BIN`.
+- Log in once in a WSL terminal (`claude`, `copilot`, `codex login`, `opencode auth login`).
+- Point the bridge at a non-default binary with `CLAUDE_BIN`, `COPILOT_BIN`,
+  `CODEX_BIN` or `OPENCODE_BIN`.
 
 ### Provider-specific notes (verified versions)
 
@@ -30,6 +30,7 @@ The pane refuses to load over `https://localhost:8765`.
 | Claude Code | 2.1.294 | one `claude -p --output-format stream-json` process per turn, `--resume` between turns | `login_required` + "organization has disabled ..." means the API rejected the account, not the add-in; use another provider or an `ANTHROPIC_API_KEY` |
 | Copilot CLI | 1.0.95 | `copilot --acp` over stdio, Excel MCP server via `--additional-mcp-config @file` | `not_installed` / `login_required`: run `copilot login` |
 | Codex CLI | 0.162.1 | `codex app-server` over stdio, Excel MCP server via `thread/start` config | `login_required`: run `codex login` |
+| OpenCode CLI | 1.19.3 | `opencode acp` over stdio, Excel MCP server via `session/new` `mcpServers` | `login_required`: run `opencode auth login`; free OpenCode models work without any login |
 
 A version older than the tested minimum is reported as `error` with an update hint.
 Only the seven Excel tools are exposed to the model; shell, file and web tools of

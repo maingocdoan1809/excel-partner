@@ -1,5 +1,5 @@
 import type { UsageSummary, TokenUsage, ProviderEvent, ProviderId, ProviderConnectionStatus, ToolResult } from "../../protocol/src/index.js";
-import { BridgeClient, type ModelCatalog, type SkillTemplate, type UploadedAttachment, type WorkspaceEntry, type WorkspaceRoot } from "./bridge-client.js";
+import { BridgeClient, type ModelCatalog, type SavedReference, type SkillTemplate, type UploadedAttachment, type WorkspaceEntry, type WorkspaceRoot } from "./bridge-client.js";
 import type { PermissionMode } from "./permissions.js";
 import { WRITE_TOOLS, executeTool } from "./executor/index.js";
 import { formatDuration, usageCsv } from "./ui/usage.js";
@@ -88,14 +88,30 @@ const NARROW_BELOW = 330;
 /** A chat younger than this is reopened automatically after a reload. */
 const RESTORE_WITHIN_MS = 12 * 3_600_000;
 
-const PROVIDER_NAMES: Record<ProviderId, string> = { claude: "Claude Code", copilot: "GitHub Copilot", codex: "Codex" };
+const PROVIDER_NAMES: Record<ProviderId, string> = { claude: "Claude Code", copilot: "GitHub Copilot", codex: "Codex", opencode: "OpenCode" };
+/** Short label used in the model picker. */
+const PROVIDER_SHORT_NAMES: Record<ProviderId, string> = { claude: "Claude", copilot: "Copilot", codex: "Codex", opencode: "OpenCode" };
+/** CLI command that signs the provider in on the bridge machine. */
+const PROVIDER_LOGIN_COMMANDS: Record<ProviderId, string> = {
+  claude: "claude",
+  copilot: "copilot login",
+  codex: "codex login",
+  opencode: "opencode auth login",
+};
+/** Hint shown under the manual login command. */
+const PROVIDER_LOGIN_HINTS: Record<ProviderId, string> = {
+  claude: "Open a terminal, run the command below and use /login. To install the CLI: npm install -g @anthropic-ai/claude-code",
+  copilot: "",
+  codex: "Open a terminal and run the command below. To install the CLI: npm install -g @openai/codex",
+  opencode: "Open a terminal and run the command below. To install the CLI: npm install -g opencode-ai",
+};
 const MODEL_ID = /^[a-zA-Z0-9][a-zA-Z0-9._/-]{0,79}$/;
 
 function loadModels(): Partial<Record<ProviderId, string>> {
   try {
     const parsed = JSON.parse(localStorage.getItem(MODEL_KEY) ?? "{}") as Record<string, unknown>;
     return Object.fromEntries(Object.entries(parsed).filter(([key, value]) =>
-      (key === "claude" || key === "copilot" || key === "codex") && typeof value === "string" && MODEL_ID.test(value),
+      (key === "claude" || key === "copilot" || key === "codex" || key === "opencode") && typeof value === "string" && MODEL_ID.test(value),
     )) as Partial<Record<ProviderId, string>>;
   } catch { return {}; }
 }
@@ -121,6 +137,7 @@ let liveToolGroup: { element: HTMLDetailsElement; message: StoredMessage } | nul
 let thinking: HTMLElement | null = null;
 const pendingAttachments: Array<{ reference: UploadedAttachment; name: string }> = [];
 let workspaceRoots: WorkspaceRoot[] | null = null;
+let mentionReferences: SavedReference[] = [];
 let workspaceStack: { path: string; name: string }[] = [];
 let workspaceEntries: WorkspaceEntry[] = [];
 let workspaceError: string | null = null;
@@ -202,7 +219,7 @@ Office.onReady((info) => {
   client.connect();
 
   setupTheme(byId<HTMLSelectElement>("theme-select"));
-  modelPicker = setupComposerMenu(els.modelSelect, byId<HTMLButtonElement>("model-button"), byId("model-menu"), (label) => `${({ claude: "Claude", copilot: "Copilot", codex: "Codex" })[provider]} · ${label}`);
+  modelPicker = setupComposerMenu(els.modelSelect, byId<HTMLButtonElement>("model-button"), byId("model-menu"), (label) => `${PROVIDER_SHORT_NAMES[provider]} · ${label}`);
   const savedEffort = localStorage.getItem("excelPartner.effort");
   els.effortSelect.value = savedEffort === "low" || savedEffort === "high" ? savedEffort : "medium";
   const effortButton = byId<HTMLButtonElement>("effort-button");
@@ -306,12 +323,23 @@ Office.onReady((info) => {
     else void submit();
   });
   els.input.addEventListener("keydown", (event) => {
+    if (event.isComposing || event.keyCode === 229) return;
+    if (event.key === "Enter" && event.ctrlKey) {
+      event.preventDefault();
+      els.input.setRangeText("\n", els.input.selectionStart, els.input.selectionEnd, "end");
+      els.input.dispatchEvent(new Event("input", { bubbles: true }));
+      return;
+    }
     if (event.key === "Escape" && !els.mentionMenu.hidden) {
       event.preventDefault();
       els.mentionMenu.hidden = true;
       return;
     }
     if (slash.handleKey(event)) return;
+    if (event.key === "Enter" && !event.shiftKey && !event.altKey && !event.metaKey) {
+      event.preventDefault();
+      if (!event.repeat) void submit();
+    }
   });
   els.input.addEventListener("beforeinput", (event) => {
     if (!event.inputType.startsWith("delete")) return;
@@ -550,12 +578,21 @@ function updateMentionMenu(): void {
   const before = els.input.value.slice(0, els.input.selectionStart);
   const mention = activeFileMention(before, pendingAttachments.map((item) => item.name));
   const show = !!mention;
+  const opening = show && els.mentionMenu.hidden;
   els.mentionMenu.hidden = !show;
   if (show) {
     slash.close();
     void ensureWorkspaces();
+    if (opening) void refreshMentionReferences();
     renderWorkspaceMenu();
   }
+}
+
+/** Saved reference files are listed in the @ menu; reload them each time it opens so edits show up. */
+async function refreshMentionReferences(): Promise<void> {
+  try { mentionReferences = await client.listSavedReferences(); }
+  catch { mentionReferences = []; }
+  renderWorkspaceMenu();
 }
 
 async function ensureWorkspaces(): Promise<void> {
@@ -691,6 +728,28 @@ function renderWorkspaceMenu(): void {
       } else menu.append(button);
     }
     if (!workspaceStack.length && workspaceDefaultError) menu.append(workspaceNote("Workbook folder unavailable. Choose local files below."));
+  }
+
+  if (!workspaceStack.length && !workspaceLoading && !workspaceError) {
+    const before = els.input.value.slice(0, els.input.selectionStart);
+    const query = activeFileMention(before, pendingAttachments.map((item) => item.name))?.query.toLowerCase().trim() ?? "";
+    const refs = query ? mentionReferences.filter((ref) => `${ref.name} ${ref.path}`.toLowerCase().includes(query)) : mentionReferences;
+    if (refs.length) {
+      const label = document.createElement("div");
+      label.className = "workspace-heading";
+      label.textContent = "Reference files";
+      menu.append(label);
+      for (const ref of refs) {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "workspace-row";
+        button.title = ref.available ? `${ref.path}${ref.description ? `\n${ref.description}` : ""}` : `File not found: ${ref.path}`;
+        button.textContent = `📄  ${ref.name}${ref.available ? "" : "  · file not found"}`;
+        button.disabled = !ref.available;
+        button.addEventListener("click", () => void chooseWorkspaceFile(ref.path));
+        menu.append(button);
+      }
+    }
   }
 
   const actions = document.createElement("div");
@@ -1088,7 +1147,7 @@ function loadSession(stored: StoredSession): void {
 
 function loadProvider(): ProviderId {
   const saved = localStorage.getItem(PROVIDER_KEY);
-  return saved === "claude" || saved === "copilot" || saved === "codex" ? saved : "copilot";
+  return saved === "claude" || saved === "copilot" || saved === "codex" || saved === "opencode" ? saved : "copilot";
 }
 
 function openMenu(): void {
@@ -1212,8 +1271,8 @@ function showPanel(name: "changes" | "history" | "session" | "templates" | "logi
     byId("login-description").textContent = provider === "copilot" ? "Finish signing in through your browser, then return to Excel." : "Sign in through the CLI on the bridge machine, then check the connection again.";
     byId("login-device").hidden = provider !== "copilot";
     byId("login-manual").hidden = provider === "copilot";
-    byId("login-command").textContent = provider === "claude" ? "claude" : "codex login";
-    byId("login-manual-hint").textContent = provider === "claude" ? "Open a terminal, run the command below and use /login. To install the CLI: npm install -g @anthropic-ai/claude-code" : "Open a terminal and run the command below. To install the CLI: npm install -g @openai/codex";
+    byId("login-command").textContent = PROVIDER_LOGIN_COMMANDS[provider];
+    byId("login-manual-hint").textContent = PROVIDER_LOGIN_HINTS[provider];
     if (provider === "copilot") loginPanel.open();
     else loginPanel.close();
   } else loginPanel.close();

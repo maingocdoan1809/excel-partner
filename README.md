@@ -33,6 +33,7 @@ Choose at least one provider:
 | GitHub Copilot | `npm install -g @github/copilot` | `copilot login` |
 | Claude Code | `npm install -g @anthropic-ai/claude-code` | `claude` and follow the login prompts |
 | Codex | `npm install -g @openai/codex` | `codex login` |
+| OpenCode | `npm install -g opencode-ai` | `opencode auth login` |
 
 Provider accounts, subscriptions, usage limits, and charges are managed by the provider. Provider CLIs are installed separately from Excel Partner.
 
@@ -77,6 +78,18 @@ GitHub Copilot also supports device-code sign-in through **Settings > Sign in to
 - Attach local files or browse workspace files with `@`.
 - Add reusable instructions through **Settings > Manage skills**, then invoke them with `/skill-name`.
 - Review workbook changes and return to conversations through chat history.
+
+Press **Enter** to send a message and **Ctrl+Enter** to insert a new line.
+
+Skill ZIP uploads retain scripts, templates and other assets, except nested `.zip` files. The existing upload size and path limits still apply. Python (`.py`) and Bash (`.sh`) scripts can be inspected with `read_skill` and run through `run_skill_script`. **Ask** requests approval for each run; **Auto** approves execution automatically. Scripts run with your local user permissions on the bridge machine and can modify local files. The skill folder is the working directory; the runner passes arguments literally, supports text stdin, and returns stdout, stderr and the exit status. Runs default to 30 seconds (maximum 60 seconds) and stop when their combined output exceeds 512 KB, the turn is cancelled, or the pane disconnects. Optional `outputFiles` paths inside the skill folder return generated files as `attachment://` references, up to 30 MB combined. Use the Excel tools to modify the open workbook.
+
+Install Python and any skill dependencies on the machine running the bridge. The runner uses `python` on Windows, `python3` on Linux/WSL, and `bash` for Shell scripts. On Windows it first checks common per-user and system Git Bash installation folders. Set `BRIDGE_PYTHON_BIN` or `BRIDGE_BASH_BIN` to an interpreter executable path when needed, then restart the bridge. Bash runs in the bridge's OS; a Windows bridge does not automatically run scripts through WSL.
+
+For example, after reading `bd-generator`, call `run_skill_script` with `{"name":"bd-generator","file":"tools/flow_layout.py","args":["--recipe","navigate"]}`. The returned JSON contains drawing calls; the assistant must apply them with the Excel tools before the workbook changes.
+
+For Python written by the assistant, use **`run_python`**. It creates `main.py` in a temporary Docker Linux container, with no network, no host folder mounts, a non-root user, a read-only system, one CPU, 256 MB RAM and a maximum execution time of 60 seconds. Only explicitly supplied attachment copies enter the container (10 MB combined). Requested output files return as `attachment://` references (10 MB combined). The default image includes the Python standard library; network installs are unavailable. Ask/Auto controls execution approval. Containers are removed after execution or cancellation; this tool never falls back to running code directly on the host.
+
+Docker must be running with Linux containers. Prepare the official image once with `docker pull python:3.13-slim`. `BRIDGE_DOCKER_BIN` can select the Docker executable, and `BRIDGE_PYTHON_SANDBOX_IMAGE` can select an administrator-prepared image with additional libraries. The tool uses only an image already present locally. Example: `run_python {"code":"from pathlib import Path; Path('result.txt').write_text('Hello', encoding='utf-8')","outputFiles":["result.txt"]}`. The installed-skill runner remains a separate operation with local user permissions; AI-generated code belongs in the sandbox. Both runners use UTF-8, including Python subprocess output.
 
 ## Commands
 
@@ -222,6 +235,7 @@ Check the selected provider in Windows PowerShell:
 copilot --version
 claude --version
 codex --version
+opencode --version
 ```
 
 Only the provider you use needs to be installed. Install or update it using the command in the installation table, then sign in again. A CLI installed only in WSL cannot be used by the Windows bridge.
@@ -230,7 +244,7 @@ After installation or login, restart the bridge and select the provider again in
 
 ### Shared reference files
 
-Open **Settings → Reference files → Add reference file**. In the popup, use **Choose file…** to select a local file in Windows Explorer, then enter a display name and description. References are shared across all skills and chats on this machine.
+Open **Settings → Reference files → Add reference file**. In the popup, paste the full path of a local file (in Explorer: Shift + right-click → **Copy as path**), then enter a display name and description. References are shared across all skills and chats on this machine.
 
 Only the name, path and description are stored in `~/.excel-partner/references.json`; the original file is never copied or uploaded. The assistant receives the catalog and reads relevant files on demand, using their latest contents. Registering a file grants read access to that exact file. Existing file-reading format and size limits still apply.
 

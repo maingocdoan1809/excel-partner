@@ -3,6 +3,7 @@ import type { ProviderId } from "../../protocol/src/index.js";
 import { ClaudeAdapter } from "./claude.js";
 import { CopilotAdapter } from "./copilot.js";
 import { CodexAdapter } from "./codex.js";
+import { OpencodeAdapter } from "./opencode.js";
 
 export class ProviderRegistry {
   private readonly adapters = new Map<ProviderId, ProviderAdapter>();
@@ -54,5 +55,6 @@ export function createDefaultRegistry(runtime: ProviderRuntime): ProviderRegistr
   return new ProviderRegistry()
     .register(new ClaudeAdapter(runtime))
     .register(new CopilotAdapter(runtime))
-    .register(new CodexAdapter(runtime));
+    .register(new CodexAdapter(runtime))
+    .register(new OpencodeAdapter(runtime));
 }

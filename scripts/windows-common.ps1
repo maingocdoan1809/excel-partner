@@ -6,9 +6,10 @@ function Write-Info($m) { Write-Host "    $m" }
 function Fail($m) { Write-Host "`nERROR: $m" -ForegroundColor Red; exit 1 }
 
 $script:ProviderSpecs = @{
-  copilot = @{ pkg = '@github/copilot';          bin = 'copilot'; login = 'copilot login' }
-  claude  = @{ pkg = '@anthropic-ai/claude-code'; bin = 'claude';  login = 'claude  (then /login)' }
-  codex   = @{ pkg = '@openai/codex';             bin = 'codex';   login = 'codex login' }
+  copilot  = @{ pkg = '@github/copilot';          bin = 'copilot';  login = 'copilot login' }
+  claude   = @{ pkg = '@anthropic-ai/claude-code'; bin = 'claude';   login = 'claude  (then /login)' }
+  codex    = @{ pkg = '@openai/codex';             bin = 'codex';    login = 'codex login' }
+  opencode = @{ pkg = 'opencode-ai';              bin = 'opencode'; login = 'opencode auth login' }
 }
 
 # Pick native Windows when node.exe is present, otherwise WSL2. Asks when both

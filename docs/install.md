@@ -12,6 +12,7 @@ not supported yet.
   - Claude Code: `npm install -g @anthropic-ai/claude-code`, then `claude`
   - GitHub Copilot: `npm install -g @github/copilot`, then `copilot`
   - Codex: `npm install -g @openai/codex`, then `codex login`
+  - OpenCode: `npm install -g opencode-ai`, then `opencode auth login`
 
 The add-in reuses each CLI's existing login. It never asks for or stores an API
 key.

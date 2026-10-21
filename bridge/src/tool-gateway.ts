@@ -12,8 +12,12 @@ import { ReferenceError_, type ReferenceFiles } from "./reference-files.js";
 import { SkillError, parseSkillTemplateUri, type SkillStore } from "./skills.js";
 import type { UserSkills } from "./skill-upload.js";
 import type { SaveSkillInput } from "../../protocol/src/index.js";
+import type { RunSkillScriptInput } from "../../protocol/src/index.js";
+import { resolveSkillScript, runSkillScript, skillFile } from "./skill-runner.js";
+import { runPythonSandbox, SandboxError, SANDBOX_FILE_BYTES } from "./python-sandbox.js";
+import type { RunPythonInput } from "../../protocol/src/index.js";
 import { XlsxError, listSheetNames, readSheetDetails, readWorkbookOverview } from "./xlsx-reader.js";
-import { AttachmentError, attachmentId, createAttachment } from "./attachments.js";
+import { AttachmentError, attachmentId, attachmentPath, createAttachment, MAX_ATTACHMENT_BYTES } from "./attachments.js";
 import { inspectAttachment } from "./inspect-attachment.js";
 import fs from "node:fs";
 import pathModule from "node:path";
@@ -86,6 +90,10 @@ export class ToolGateway {
     if (request.tool === "list_skills" || request.tool === "read_skill" || request.tool === "save_skill") {
       return this.answerSkillTool(request.tool, parsed);
     }
+    if (request.tool === "run_skill_script") {
+      return this.answerScriptTool(session, parsed as RunSkillScriptInput);
+    }
+    if (request.tool === "run_python") return this.answerPythonTool(session, parsed as RunPythonInput);
     if (request.tool === "list_reference_files" || request.tool === "read_workbook_file" || request.tool === "read_attached_image" || request.tool === "read_attached_file") {
       return this.answerFileTool(session, request.tool, parsed);
     }
@@ -120,6 +128,98 @@ export class ToolGateway {
       detail: result.error.detail === undefined ? undefined : JSON.stringify(result.error.detail).slice(0, 300),
       args: summariseArgs(args),
     });
+  }
+
+  private async answerPythonTool(session: import("./session.js").WorkbookSession, args: RunPythonInput): Promise<ToolResult> {
+    const controller = new AbortController();
+    session.scriptControllers.add(controller);
+    try {
+      const seen = new Set<string>();
+      let bytes = 0;
+      const files = args.files.map(file => {
+        if (seen.has(file.path)) throw new SandboxError("Duplicate sandbox input file path.");
+        seen.add(file.path);
+        const attachment = session.attachments.get(attachmentId(file.attachment)!);
+        if (!attachment) throw new SandboxError("Sandbox input attachment is unavailable; select it again.");
+        bytes += attachment.bytes.length;
+        return { path: file.path, bytes: attachment.bytes };
+      });
+      if (bytes > SANDBOX_FILE_BYTES) throw new SandboxError("Sandbox inputs exceed 10 MB combined.");
+      const signal = session.turnController ? AbortSignal.any([controller.signal, session.turnController.signal]) : controller.signal;
+      if (signal.aborted) return error("cancelled", "Python execution cancelled.");
+      const approval = await session.requestTool("__authorize_python", args, 45_000);
+      if (!approval.ok) return approval;
+      if ((approval.data as { approved?: unknown })?.approved !== true) return error("cancelled", "The user declined Python execution.");
+      if (!session.isConnected) return error("disconnected", "task pane disconnected while requesting Python execution");
+      const started = Date.now();
+      session.touch();
+      const data = await runPythonSandbox(args, files, signal);
+      const { outputFiles: generated, ...status } = data;
+      if (data.exitCode !== 0 || data.timedOut || data.outputTruncated) {
+        const result = error(data.timedOut ? "timeout" : "internal_error", data.timedOut ? "Python timed out." : data.outputTruncated ? "Python exceeded its output limit." : `Python exited with code ${data.exitCode}.`, status);
+        this.logOutcome("run_python", {}, result, Date.now() - started);
+        return result;
+      }
+      const attachments = generated.map(file => createAttachment(pathModule.posix.basename(file.name), Buffer.from(file.base64, "base64")));
+      const outputFiles = attachments.map(attachment => {
+        if (session.attachments.size >= 10) session.attachments.delete(session.attachments.keys().next().value!);
+        session.attachments.set(attachment.id, attachment);
+        return { name: attachment.name, path: attachmentPath(attachment.id), size: attachment.bytes.length, kind: attachment.kind };
+      });
+      const result: ToolResult = { ok: true, data: { ...status, sandbox: "docker", outputFiles } };
+      this.logOutcome("run_python", {}, result, Date.now() - started);
+      return result;
+    } catch (err) {
+      if (err instanceof SandboxError || err instanceof AttachmentError) return error(controller.signal.aborted || session.turnController?.signal.aborted ? "cancelled" : "invalid_arguments", err.message);
+      throw err;
+    } finally { session.scriptControllers.delete(controller); }
+  }
+
+  private async answerScriptTool(session: import("./session.js").WorkbookSession, args: RunSkillScriptInput): Promise<ToolResult> {
+    if (!this.skills) return error("unsupported", "skills are not configured on this bridge");
+    const controller = new AbortController();
+    session.scriptControllers.add(controller);
+    try {
+      resolveSkillScript(this.skills, args);
+      const signal = session.turnController
+        ? AbortSignal.any([controller.signal, session.turnController.signal]) : controller.signal;
+      if (signal?.aborted) return error("cancelled", "Script execution cancelled.");
+      const approval = await session.requestTool("__authorize_skill_script", args, 45_000);
+      if (!approval.ok) return approval;
+      if ((approval.data as { approved?: unknown })?.approved !== true) return error("cancelled", "The user declined script execution.");
+      if (!session.isConnected) return error("disconnected", "task pane disconnected while requesting script execution");
+      if (signal?.aborted) return error("cancelled", "Script execution cancelled.");
+      session.touch();
+      const started = Date.now();
+      // Resolve again after approval so a removed/replaced skill cannot bypass path validation.
+      const data = await runSkillScript(this.skills, args, signal);
+      const failed = data.exitCode !== 0 || data.timedOut || data.cancelled || data.outputTruncated;
+      const outputFiles: Array<{ name: string; path: string; size: number; kind: string }> = [];
+      if (!failed) {
+        let total = 0;
+        const attachments = args.outputFiles.map(relative => {
+          const selected = skillFile(this.skills!, args.name, relative);
+          total += fs.statSync(selected.file).size;
+          if (total > MAX_ATTACHMENT_BYTES) throw new SkillError("Generated files exceed the combined 30 MB limit.");
+          return createAttachment(pathModule.basename(selected.file), fs.readFileSync(selected.file));
+        });
+        for (const attachment of attachments) {
+          if (session.attachments.size >= 10) session.attachments.delete(session.attachments.keys().next().value!);
+          session.attachments.set(attachment.id, attachment);
+          outputFiles.push({ name: attachment.name, path: attachmentPath(attachment.id), size: attachment.bytes.length, kind: attachment.kind });
+        }
+      }
+      const result: ToolResult = failed
+        ? error(data.cancelled ? "cancelled" : data.timedOut ? "timeout" : "internal_error", data.cancelled ? "Script cancelled." : data.timedOut ? "Script timed out." : data.outputTruncated ? "Script exceeded the output limit." : `Script exited with code ${data.exitCode}.`, data)
+        : { ok: true, data: { ...data, outputFiles } };
+      this.logOutcome("run_skill_script", { name: args.name, file: args.file }, result, Date.now() - started);
+      return result;
+    } catch (err) {
+      if (err instanceof SkillError || err instanceof AttachmentError) return error("invalid_arguments", err.message);
+      throw err;
+    } finally {
+      session.scriptControllers.delete(controller);
+    }
   }
 
   /** Read-only file tools: answered here because the files live on the bridge's machine. */

@@ -11,6 +11,7 @@ import type {
   ProviderEvent,
   ProviderId,
 } from "../../protocol/src/index.js";
+import { acpPermissionOutcome, contentText, toolNameOf } from "./acp.js";
 import { AsyncQueue } from "./async-queue.js";
 import { BaseCliAdapter, cliEnvironment, execCli, type CliProbe } from "./base.js";
 import { JsonRpcPeer } from "./jsonrpc.js";
@@ -413,18 +414,7 @@ export class CopilotAdapter extends BaseCliAdapter {
   }
 
   private onServerRequest(method: string, params: unknown): unknown {
-    if (method === "session/request_permission") {
-      const request = params as {
-        toolCall?: Record<string, any>;
-        options?: Array<{ optionId: string; kind?: string }>;
-      };
-      const options = request.options ?? [];
-      const isExcel = toolNameOf(request.toolCall ?? {}, true).isExcel;
-      const wanted = isExcel ? ["allow_once", "allow_always"] : ["reject_once", "reject_always"];
-      const choice = options.find((o) => wanted.includes(o.kind ?? ""));
-      if (choice) return { outcome: { outcome: "selected", optionId: choice.optionId } };
-      return { outcome: { outcome: "cancelled" } };
-    }
+    if (method === "session/request_permission") return acpPermissionOutcome(params);
     throw new Error(`unsupported client method: ${method}`);
   }
 }
@@ -434,35 +424,4 @@ const CLI_NOTICE = /^Info: Disabled tools: /;
 
 function isAuthError(error: unknown): boolean {
   return /auth|login|401|403|token/i.test(error instanceof Error ? error.message : String(error));
-}
-
-function contentText(update: Record<string, any>): string {
-  const parts: string[] = [];
-  for (const item of update.content ?? []) {
-    const text = item?.content?.text ?? item?.text;
-    if (typeof text === "string") parts.push(text);
-  }
-  if (parts.length === 0 && update.rawOutput) {
-    parts.push(typeof update.rawOutput === "string" ? update.rawOutput : JSON.stringify(update.rawOutput));
-  }
-  return parts.join(" ");
-}
-
-/** Extract the bare Excel tool name from an ACP tool_call (`excel-get_selection`, `excel/get_selection`, ...). */
-function toolNameOf(update: Record<string, any>): string;
-function toolNameOf(update: Record<string, any>, detail: true): { name: string; isExcel: boolean };
-function toolNameOf(update: Record<string, any>, detail?: true): string | { name: string; isExcel: boolean } {
-  const candidates = [update._meta?.toolName, update.rawInput?.toolName, update.title, update.kind]
-    .filter((v): v is string => typeof v === "string");
-  let name = candidates[0] ?? "unknown";
-  let isExcel = false;
-  for (const candidate of candidates) {
-    const match = new RegExp(`${MCP_SERVER_NAME}[-_/:.]+([a-z_]+)`, "i").exec(candidate);
-    if (match) {
-      name = match[1]!;
-      isExcel = true;
-      break;
-    }
-  }
-  return detail ? { name, isExcel } : name;
 }

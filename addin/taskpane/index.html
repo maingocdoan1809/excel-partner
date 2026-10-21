@@ -31,6 +31,7 @@
           <button type="button" class="menu-item" role="menuitemradio" data-provider="claude" aria-checked="false"><span class="check"></span>Claude Code</button>
           <button type="button" class="menu-item" role="menuitemradio" data-provider="copilot" aria-checked="false"><span class="check"></span>GitHub Copilot</button>
           <button type="button" class="menu-item" role="menuitemradio" data-provider="codex" aria-checked="false"><span class="check"></span>Codex</button>
+          <button type="button" class="menu-item" role="menuitemradio" data-provider="opencode" aria-checked="false"><span class="check"></span>OpenCode</button>
         </div>
         <div id="provider-hint" class="menu-hint"></div>
         <button id="menu-login" type="button" class="menu-item" role="menuitem">Sign in to GitHub Copilot</button>
@@ -123,8 +124,8 @@
           <label for="reference-name">Name</label>
           <input id="reference-name" maxlength="200" required />
           <label for="reference-path">File path</label>
-          <input id="reference-path" readonly placeholder="Choose a local file" />
-          <button id="reference-choose" type="button" class="secondary">Choose file…</button>
+          <input id="reference-path" placeholder="C:\\Folder\\file.xlsx" autocomplete="off" spellcheck="false" required />
+          <p class="template-help">Paste the full path. In Explorer: select the file, then Shift + right-click &gt; Copy as path. The file is not copied or uploaded.</p>
           <label for="reference-description">Description</label>
           <textarea id="reference-description" maxlength="4000" rows="4" placeholder="What does this file contain, and when should it be used?"></textarea>
           <p id="reference-dialog-status" class="template-help" role="status" aria-live="polite"></p>
@@ -215,7 +216,7 @@
           </button>
         </div>
       </div>
-      <div class="composer-hint"><span><b>/</b> skills &nbsp; <b>@</b> attachments</span><span>Enter to send</span></div>
+      <div class="composer-hint"><span><b>/</b> skills &nbsp; <b>@</b> attachments</span><span>Enter to send · Ctrl+Enter for new line</span></div>
     </footer>
 
     <script src="../dist/taskpane.js"></script>

@@ -70,8 +70,8 @@ describe("SkillStore", () => {
     expect(() => store.read("alpha", "../secret.md")).toThrow(SkillError);
     expect(() => store.read("alpha", "/etc/passwd")).toThrow(SkillError);
     expect(() => store.read("alpha", "references/missing.md")).toThrow(/not found/);
-    write("alpha/run.sh", "echo hi");
-    expect(() => store.read("alpha", "run.sh")).toThrow(/not a readable file/);
+    write("alpha/run.exe", "binary");
+    expect(() => store.read("alpha", "run.exe")).toThrow(/not a readable file/);
     expect(() => store.read("ghost")).toThrow(/unknown skill 'ghost'. Available: alpha/);
   });
 
@@ -79,6 +79,17 @@ describe("SkillStore", () => {
     write("outside/secret.md", "nope");
     fs.symlinkSync(path.join(root, "outside", "secret.md"), path.join(root, "alpha", "references", "link.md"));
     expect(() => new SkillStore([root]).read("alpha", "references/link.md")).toThrow(SkillError);
+  });
+
+  it("lists and reads Python and Shell scripts without executing them", () => {
+    write("alpha/tools/layout.py", 'raise RuntimeError("read only")');
+    write("alpha/install.sh", "exit 7");
+    const store = new SkillStore([root]);
+    expect(store.read("alpha").files).toContain("tools/layout.py");
+    expect(store.read("alpha").files).toContain("install.sh");
+    expect(store.read("alpha", "tools/layout.py").content).toContain("read only");
+    expect(store.read("alpha", "install.sh").content).toBe("exit 7");
+    expect(expandSkillPrompt("/alpha draw", store).prompt).toContain("tools/layout.py");
   });
 
   it("adds and deletes templates by skill without exposing arbitrary paths", () => {

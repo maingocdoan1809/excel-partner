@@ -10,9 +10,10 @@ import {
   type ServerMessage,
   type ToolRequestMessage,
   type ToolResult,
+  type RunSkillScriptInput,
 } from "../../protocol/src/index.js";
 import { executeTool } from "./executor/index.js";
-import { executeWithPermission, type PermissionMode } from "./permissions.js";
+import { authorizeSkillScript, executeWithPermission, type PermissionMode } from "./permissions.js";
 import type { ProviderLoginStatus } from "../../protocol/src/provider-login.js";
 
 export type BridgeState = "idle" | "connecting" | "open" | "closed";
@@ -24,7 +25,6 @@ export interface SkillTemplate { name: string; kind: "workbook" | "image" | "tex
 export interface AvailableSkill { name: string; description: string }
 export interface InstalledSkill extends AvailableSkill { removable: boolean }
 export interface SavedReference { id: string; name: string; path: string; description: string; available: boolean }
-export interface ReferenceSelection { cancelled: boolean; selectionId?: string; path?: string; name?: string }
 export interface ModelCatalog { models: Array<{ id: string; name: string }>; defaultModelId: string | null }
 
 export interface BridgeClientHandlers {
@@ -157,11 +157,7 @@ export class BridgeClient {
     return data.references;
   }
 
-  async pickReferenceFile(): Promise<ReferenceSelection> {
-    return this.sessionFetch("/session/references/pick", { method: "POST" });
-  }
-
-  async saveReference(input: { id?: string; selectionId?: string; name: string; description: string }): Promise<void> {
+  async saveReference(input: { id?: string; path?: string; name: string; description: string }): Promise<void> {
     await this.sessionFetch("/session/references", { method: "POST", body: JSON.stringify(input) });
   }
 
@@ -270,7 +266,15 @@ export class BridgeClient {
   }
 
   private async handleToolRequest(message: ToolRequestMessage): Promise<void> {
-    const result = message.tool === "__authorize_reference_path"
+    const result = message.tool === "__authorize_python"
+      ? this.permissionMode === "auto" ? { ok: true as const, data: { approved: true } }
+        : { ok: true as const, data: { approved: await this.askPermission("Run Python in sandbox?",
+          "The assistant will run Python in a temporary container with no network or access to your computer's folders. Only supplied file copies enter the sandbox.",
+          "Run Python", message.timeoutMs, (message.args as { code: string }).code.slice(0, 8000)) } }
+      : message.tool === "__authorize_skill_script"
+      ? await authorizeSkillScript(this.permissionMode, message.args as RunSkillScriptInput,
+        (detail, target) => this.askPermission("Allow skill script?", detail, "Run script", message.timeoutMs, target))
+      : message.tool === "__authorize_reference_path"
       ? this.permissionMode === "auto"
         ? { ok: true as const, data: { approved: true } }
         : await this.askReferencePermission(message.args as { path: string }, message.timeoutMs)
@@ -282,7 +286,7 @@ export class BridgeClient {
         (detail) => this.askPermission("Allow workbook change?", detail, "Allow change", message.timeoutMs),
       );
     this.send({ type: "tool_result", callId: message.callId, result });
-    if (message.tool !== "__authorize_reference_path") this.handlers.onToolExecuted?.(message.tool, message.args, result);
+    if (!message.tool.startsWith("__authorize_")) this.handlers.onToolExecuted?.(message.tool, message.args, result);
   }
 
   private askReferencePermission(args: { path: string }, timeoutMs: number): Promise<ToolResult> {

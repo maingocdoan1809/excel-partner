@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 /** CLI providers supported by the bridge. */
-export const ProviderIdSchema = z.enum(["claude", "copilot", "codex"]);
+export const ProviderIdSchema = z.enum(["claude", "copilot", "codex", "opencode"]);
 export type ProviderId = z.infer<typeof ProviderIdSchema>;
 
 export const PROVIDER_IDS = ProviderIdSchema.options;

@@ -1,6 +1,20 @@
 import type { ToolResult } from "../../protocol/src/index.js";
+import type { RunSkillScriptInput } from "../../protocol/src/index.js";
 
 export type PermissionMode = "ask" | "auto";
+
+export async function authorizeSkillScript(
+  mode: PermissionMode,
+  input: RunSkillScriptInput,
+  ask: (detail: string, target: string) => Promise<boolean>,
+): Promise<ToolResult> {
+  const approved = mode === "auto" || await ask(
+    "Run this skill script on your computer? It can read, change, or delete local files with your user permissions. " +
+    `Time limit: ${input.timeoutMs / 1000} seconds.`,
+    `${input.name}/${input.file}\nArguments: ${JSON.stringify(input.args)}${input.stdin === undefined ? "" : `\nStandard input: ${input.stdin.slice(0, 4000)}`}`,
+  );
+  return { ok: true, data: { approved } };
+}
 
 const OVERWRITE_TOOLS = new Set(["write_range", "set_formula", "set_cells", "copy_to", "merge_range"]);
 

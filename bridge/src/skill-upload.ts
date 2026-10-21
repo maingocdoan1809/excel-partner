@@ -28,6 +28,8 @@ export class UserSkills {
       try {
         files = unzipSync(bytes, { filter: (file) => {
           this.validatePath(file.name.replace(/\/$/, ""));
+          // Keep packaged assets and scripts, but do not extract nested ZIP archives.
+          if (!file.name.endsWith("/") && path.extname(file.name).toLowerCase() === ".zip") return false;
           expanded += file.originalSize;
           if (++entries > MAX_FILES || expanded > MAX_SKILL_EXPANDED_BYTES || file.originalSize > MAX_TEXT_BYTES) throw new SkillError("The archive exceeds the skill file or size limits (5 MB per file, 10 MB expanded total).");
           const normalized = file.name.toLowerCase();

@@ -29,6 +29,7 @@ export class SkillError extends Error {}
 
 const NAME_RE = /^[a-z0-9][a-z0-9_-]{0,63}$/;
 const READABLE_EXT = new Set([".md", ".txt", ".json", ".csv", ".yaml", ".yml"]);
+const SCRIPT_EXT = new Set([".py", ".sh"]);
 const MAX_FILE_BYTES = MAX_SKILL_TEXT_BYTES;
 const TEMPLATE_EXT = new Set([".xlsx", ".xlsm", ".xltx", ".xltm", ".png", ".jpg", ".jpeg", ".gif", ".webp", ...READABLE_EXT]);
 const MAX_TEMPLATE_BYTES = 30 * 1024 * 1024;
@@ -211,7 +212,7 @@ export class SkillStore {
 
     const target = path.resolve(skill.dir, file);
     const inside = target.startsWith(skill.dir + path.sep);
-    if (!inside || !READABLE_EXT.has(path.extname(target).toLowerCase())) {
+    if (!inside || !(READABLE_EXT.has(path.extname(target).toLowerCase()) || SCRIPT_EXT.has(path.extname(target).toLowerCase()))) {
       throw new SkillError(`'${file}' is not a readable file of skill '${name}'. Files: ${files.join(", ") || "(none)"}`);
     }
     let stat: fs.Stats;
@@ -236,7 +237,7 @@ export class SkillStore {
       for (const entry of fs.readdirSync(current, { withFileTypes: true })) {
         const full = path.join(current, entry.name);
         if (entry.isDirectory()) walk(full, depth + 1);
-        else if (entry.isFile() && entry.name !== "SKILL.md" && READABLE_EXT.has(path.extname(entry.name).toLowerCase())) {
+        else if (entry.isFile() && entry.name !== "SKILL.md" && (READABLE_EXT.has(path.extname(entry.name).toLowerCase()) || SCRIPT_EXT.has(path.extname(entry.name).toLowerCase()))) {
           out.push(path.relative(dir, full).split(path.sep).join("/"));
         }
       }

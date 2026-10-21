@@ -18,7 +18,7 @@
 
 .EXAMPLE
   # straight from scratch (no clone yet)
-  powershell -ExecutionPolicy Bypass -File install.ps1 -Providers copilot,codex -Open
+  powershell -ExecutionPolicy Bypass -File install.ps1 -Providers copilot,codex,opencode -Open
 
 .EXAMPLE
   # from a one-liner when the file is downloaded and gh is authenticated

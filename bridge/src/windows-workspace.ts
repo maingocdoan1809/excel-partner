@@ -128,10 +128,3 @@ export async function pickWorkspaceFolder(): Promise<string | null> {
 export async function activeWorkbookPath(workbookName: string): Promise<string | null> {
   return callWindows("workbook", workbookName);
 }
-
-export async function pickReferenceFile(): Promise<string | null> {
-  // The warm worker processes requests serially. Excel COM calls (or an open
-  // workspace dialog) can block it, leaving a file-picker request queued for
-  // minutes. Give this modal dialog its own STA process instead.
-  return callOnce("file", "");
-}

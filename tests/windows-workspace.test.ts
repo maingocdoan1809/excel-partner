@@ -7,7 +7,7 @@ vi.mock("node:child_process", () => {
 });
 
 import { EventEmitter } from "node:events";
-import { activeWorkbookPath, pickReferenceFile, stopWorkspaceHelper } from "../bridge/src/windows-workspace.js";
+import { activeWorkbookPath, stopWorkspaceHelper } from "../bridge/src/windows-workspace.js";
 
 afterEach(() => {
   stopWorkspaceHelper();
@@ -21,20 +21,9 @@ function mockCommands(selected: string | null): void {
   });
 }
 
-describe("Windows reference picker", () => {
-  it("returns the chosen path or cancellation from a dedicated STA process", async () => {
-    mockCommands("C:\\files\\rules.xlsx");
-    expect(await pickReferenceFile()).toBe("C:\\files\\rules.xlsx");
-    expect(mocks.run).toHaveBeenLastCalledWith(expect.any(String), expect.arrayContaining([
-      "-STA", "-Mode", "file",
-    ]), expect.objectContaining({ timeout: 600_000 }));
-    expect(mocks.spawn).not.toHaveBeenCalled();
+describe("Windows workspace helper", () => {
+  it("resolves the workbook path through the shared helper", async () => {
     mockCommands(null);
-    expect(await pickReferenceFile()).toBeNull();
-  });
-
-  it("opens while the shared helper is still waiting for Excel COM", async () => {
-    mockCommands("C:\\files\\rules.xlsx");
     const child = Object.assign(new EventEmitter(), {
       stdout: Object.assign(new EventEmitter(), { setEncoding: vi.fn() }),
       stderr: new EventEmitter(),
@@ -47,8 +36,6 @@ describe("Windows reference picker", () => {
     });
     const workbook = activeWorkbookPath("open.xlsx");
     await vi.waitFor(() => expect(child.stdin.write).toHaveBeenCalledOnce());
-    expect(await pickReferenceFile()).toBe("C:\\files\\rules.xlsx");
-    expect(child.stdin.write).toHaveBeenCalledOnce();
     const request = JSON.parse(child.stdin.write.mock.calls[0]![0] as string);
     child.stdout.emit("data", JSON.stringify({ id: request.id, path: null }) + "\n");
     expect(await workbook).toBeNull();

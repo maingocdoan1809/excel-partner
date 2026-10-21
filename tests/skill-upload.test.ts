@@ -80,7 +80,24 @@ describe("user skill uploads", () => {
     expect(store.readTemplate("skill-template://monthly-report/BD_Master.xlsx").bytes.toString()).toBe("PKworkbook");
     expect(fs.readFileSync(path.join(uploads.root, "monthly-report", "tools", "lint.py"), "utf8")).toContain("Do not execute");
     expect(fs.statSync(path.join(uploads.root, "monthly-report", "install.sh")).mode & 0o111).toBe(0);
-    expect(fs.readFileSync(path.join(uploads.root, "monthly-report", "dist", "bundle.zip"))).toEqual(Buffer.from([0, 1, 2]));
+    expect(fs.existsSync(path.join(uploads.root, "monthly-report", "dist", "bundle.zip"))).toBe(false);
+    expect(fs.readFileSync(path.join(uploads.root, "monthly-report", "dist", "templates", "BD_Master.xlsx"), "utf8")).toBe("PKduplicate");
+  });
+
+  it("skips nested ZIP files regardless of case or size, preserving neighboring files", () => {
+    const archive = zipSync({
+      "report/SKILL.md": strToU8(manifest),
+      "report/backup.ZIP": zipSync({ "SKILL.md": strToU8("Another skill") }),
+      "report/dist/large.Zip": new Uint8Array(MAX_SKILL_TEXT_BYTES + 1),
+      "report/dist/notes.txt": strToU8("Keep this file"),
+      "report/assets/zip/icon.png": new Uint8Array([0, 255, 1]),
+    });
+    uploads.install("report.zip", Buffer.from(archive), () => false);
+    const target = path.join(uploads.root, "monthly-report");
+    expect(fs.existsSync(path.join(target, "backup.ZIP"))).toBe(false);
+    expect(fs.existsSync(path.join(target, "dist", "large.Zip"))).toBe(false);
+    expect(fs.readFileSync(path.join(target, "dist", "notes.txt"), "utf8")).toBe("Keep this file");
+    expect(fs.readFileSync(path.join(target, "assets", "zip", "icon.png"))).toEqual(Buffer.from([0, 255, 1]));
   });
 
   it("preserves arbitrary binary assets and unknown extensions without executing them", () => {

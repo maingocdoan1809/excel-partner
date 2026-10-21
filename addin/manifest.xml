@@ -10,7 +10,7 @@
   <ProviderName>Excel Partner</ProviderName>
   <DefaultLocale>en-US</DefaultLocale>
   <DisplayName DefaultValue="Excel Partner" />
-  <Description DefaultValue="Excel Partner: chat with Claude Code, GitHub Copilot CLI or Codex CLI to read and edit the open workbook." />
+  <Description DefaultValue="Excel Partner: chat with Claude Code, GitHub Copilot CLI, Codex CLI or OpenCode CLI to read and edit the open workbook." />
   <IconUrl DefaultValue="https://localhost:8765/addin/assets/icon-32.png?v=4" />
   <HighResolutionIconUrl DefaultValue="https://localhost:8765/addin/assets/icon-64.png?v=4" />
   <SupportUrl DefaultValue="https://localhost:8765/" />

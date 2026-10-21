@@ -77,16 +77,15 @@ describe("saved reference files", () => {
     expect(() => access.resolve(file)).toThrow("outside");
   });
 
-  it("requires native selection, isolates picker tokens, exposes metadata to AI and reads originals through MCP", async () => {
+  it("validates typed paths, exposes metadata to AI and reads originals through MCP", async () => {
     const { file, metadata } = fixture();
-    let selected: string | null = file;
     let prompt = "";
     class CaptureAdapter extends MockAdapter {
       override async *sendTurn(input: SendTurnInput) { prompt = input.prompt; yield* super.sendTurn(input); }
     }
     const port = await getFreePort();
     const config = loadConfig({ host: "127.0.0.1", port, tls: null, publicBaseUrl: `http://127.0.0.1:${port}`, logLevel: "error" });
-    bridge = new Bridge(config, { savedReferencesFile: metadata, references: new ReferenceFiles([]), referencePicker: async () => selected,
+    bridge = new Bridge(config, { savedReferencesFile: metadata, references: new ReferenceFiles([]),
       usageFile: null, registry: new ProviderRegistry().register(new CaptureAdapter({ id: "claude" })) });
     const { url } = await bridge.listen();
     async function connect(id: string) {
@@ -101,18 +100,16 @@ describe("saved reference files", () => {
     const second = await connect("reference-second-123");
     const request = (route: string, method = "GET", body?: unknown, headers = first.headers) => fetch(`${url}${route}`, { method, headers, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
     expect((await fetch(`${url}/session/references`)).status).toBe(401);
-    expect((await request("/session/references", "POST", { name: "Knowledge", description: "Rules", path: file })).status).toBe(400);
-    const selection = await (await request("/session/references/pick", "POST")).json() as { path: string; selectionId: string };
-    expect(selection.path).toBe(file);
-    const input = { name: "Knowledge", description: "Common rules", selectionId: selection.selectionId };
-    expect((await request("/session/references", "POST", input, second.headers)).status).toBe(400);
+    expect((await request("/session/references", "POST", { name: "Knowledge", description: "Rules", path: path.join(path.dirname(file), "missing.md") })).status).toBe(400);
+    expect((await request("/session/references", "POST", { name: "Knowledge", description: "Rules", path: path.dirname(file) })).status).toBe(400);
+    const input = { name: "Knowledge", description: "Common rules", path: `  "${file}"  ` };
+    expect((await request("/session/references", "POST", input, second.headers)).status).toBe(200);
+    expect((await request("/session/references", "DELETE", { id: ((await (await request("/session/references")).json()) as { references: SavedReferenceStatus[] }).references[0]!.id })).status).toBe(200);
     expect((await request("/session/references", "POST", input)).status).toBe(200);
     const entries = await (await request("/session/references")).json() as { references: SavedReferenceStatus[] };
     const id = entries.references[0]!.id;
     expect(entries.references[0]).toMatchObject({ name: "Knowledge", available: true });
     expect((await request("/session/references", "POST", input)).status).toBe(400);
-    selected = null;
-    expect(await (await request("/session/references/pick", "POST")).json()).toEqual({ cancelled: true });
     first.pane.send({ type: "set_provider", provider: "claude" });
     await first.pane.waitFor(m => m.type === "provider_status");
     first.pane.send({ type: "prompt", requestId: "references-turn", prompt: "Consult the rules", selection: null });
@@ -127,9 +124,7 @@ describe("saved reference files", () => {
     expect((await request("/session/references", "POST", { id, name: "Renamed", description: "Edited" })).status).toBe(200);
     const replacement = path.join(path.dirname(file), "new-common.md");
     fs.writeFileSync(replacement, "Replacement rules");
-    selected = replacement;
-    const reselection = await (await request("/session/references/pick", "POST")).json() as { selectionId: string };
-    expect((await request("/session/references", "POST", { id, selectionId: reselection.selectionId, name: "Renamed", description: "Relinked" })).status).toBe(200);
+    expect((await request("/session/references", "POST", { id, path: replacement, name: "Renamed", description: "Relinked" })).status).toBe(200);
     const oldAccess = await (await request("/internal/tool", "POST", { tool: "read_attached_file", args: { path: file } })).json() as ToolResult;
     expect(oldAccess.ok).toBe(false);
     const newAccess = await (await request("/internal/tool", "POST", { tool: "read_attached_file", args: { path: replacement } })).json() as ToolResult;
