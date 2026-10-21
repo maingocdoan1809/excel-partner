@@ -14,7 +14,7 @@ import type { UserSkills } from "./skill-upload.js";
 import type { SaveSkillInput } from "../../protocol/src/index.js";
 import type { RunSkillScriptInput } from "../../protocol/src/index.js";
 import { resolveSkillScript, runSkillScript, skillFile } from "./skill-runner.js";
-import { runPythonSandbox, SandboxError, SANDBOX_FILE_BYTES } from "./python-sandbox.js";
+import { runPython, PythonError, PYTHON_FILE_BYTES } from "./python-runner.js";
 import type { RunPythonInput } from "../../protocol/src/index.js";
 import { XlsxError, listSheetNames, readSheetDetails, readWorkbookOverview } from "./xlsx-reader.js";
 import { AttachmentError, attachmentId, attachmentPath, createAttachment, MAX_ATTACHMENT_BYTES } from "./attachments.js";
@@ -137,14 +137,14 @@ export class ToolGateway {
       const seen = new Set<string>();
       let bytes = 0;
       const files = args.files.map(file => {
-        if (seen.has(file.path)) throw new SandboxError("Duplicate sandbox input file path.");
+        if (seen.has(file.path)) throw new PythonError("Duplicate Python input file path.");
         seen.add(file.path);
         const attachment = session.attachments.get(attachmentId(file.attachment)!);
-        if (!attachment) throw new SandboxError("Sandbox input attachment is unavailable; select it again.");
+        if (!attachment) throw new PythonError("Python input attachment is unavailable; select it again.");
         bytes += attachment.bytes.length;
         return { path: file.path, bytes: attachment.bytes };
       });
-      if (bytes > SANDBOX_FILE_BYTES) throw new SandboxError("Sandbox inputs exceed 10 MB combined.");
+      if (bytes > PYTHON_FILE_BYTES) throw new PythonError("Python inputs exceed 10 MB combined.");
       const signal = session.turnController ? AbortSignal.any([controller.signal, session.turnController.signal]) : controller.signal;
       if (signal.aborted) return error("cancelled", "Python execution cancelled.");
       const approval = await session.requestTool("__authorize_python", args, 45_000);
@@ -153,10 +153,10 @@ export class ToolGateway {
       if (!session.isConnected) return error("disconnected", "task pane disconnected while requesting Python execution");
       const started = Date.now();
       session.touch();
-      const data = await runPythonSandbox(args, files, signal);
+      const data = await runPython(args, files, signal);
       const { outputFiles: generated, ...status } = data;
-      if (data.exitCode !== 0 || data.timedOut || data.outputTruncated) {
-        const result = error(data.timedOut ? "timeout" : "internal_error", data.timedOut ? "Python timed out." : data.outputTruncated ? "Python exceeded its output limit." : `Python exited with code ${data.exitCode}.`, status);
+      if (data.exitCode !== 0 || data.timedOut || data.cancelled || data.outputTruncated) {
+        const result = error(data.cancelled ? "cancelled" : data.timedOut ? "timeout" : "internal_error", data.cancelled ? "Python execution cancelled." : data.timedOut ? "Python timed out." : data.outputTruncated ? "Python exceeded its output limit." : `Python exited with code ${data.exitCode}.`, status);
         this.logOutcome("run_python", {}, result, Date.now() - started);
         return result;
       }
@@ -166,11 +166,11 @@ export class ToolGateway {
         session.attachments.set(attachment.id, attachment);
         return { name: attachment.name, path: attachmentPath(attachment.id), size: attachment.bytes.length, kind: attachment.kind };
       });
-      const result: ToolResult = { ok: true, data: { ...status, sandbox: "docker", outputFiles } };
+      const result: ToolResult = { ok: true, data: { ...status, execution: "local", outputFiles } };
       this.logOutcome("run_python", {}, result, Date.now() - started);
       return result;
     } catch (err) {
-      if (err instanceof SandboxError || err instanceof AttachmentError) return error(controller.signal.aborted || session.turnController?.signal.aborted ? "cancelled" : "invalid_arguments", err.message);
+      if (err instanceof PythonError || err instanceof AttachmentError) return error(controller.signal.aborted || session.turnController?.signal.aborted ? "cancelled" : "invalid_arguments", err.message);
       throw err;
     } finally { session.scriptControllers.delete(controller); }
   }

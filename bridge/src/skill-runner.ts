@@ -58,6 +58,14 @@ export interface SkillScriptResult {
 /** Inherited OS permissions apply: the path check limits entry points, not what trusted scripts can do. */
 export async function runSkillScript(store: SkillStore, input: RunSkillScriptInput, signal?: AbortSignal): Promise<SkillScriptResult> {
   const selected = resolveSkillScript(store, input);
+  return { name: input.name, file: input.file, ...await runLocalScript(selected, input, signal) };
+}
+
+export async function runLocalScript(
+  selected: { root: string; file: string; interpreter: string; python: boolean },
+  input: Pick<RunSkillScriptInput, "args" | "stdin" | "timeoutMs">,
+  signal?: AbortSignal,
+): Promise<Omit<SkillScriptResult, "name" | "file">> {
   if (signal?.aborted) throw new SkillError("Script execution cancelled.");
   // Do not pass bridge/provider credentials to child processes.
   const env: NodeJS.ProcessEnv = {};
@@ -112,7 +120,7 @@ export async function runSkillScript(store: SkillStore, input: RunSkillScriptInp
     });
     child.once("close", (exitCode, exitSignal) => {
       cleanup();
-      resolve({ name: input.name, file: input.file, exitCode, signal: exitSignal,
+      resolve({ exitCode, signal: exitSignal,
         stdout: Buffer.concat(stdout).toString("utf8"), stderr: Buffer.concat(stderr).toString("utf8"),
         timedOut, cancelled, outputTruncated });
     });

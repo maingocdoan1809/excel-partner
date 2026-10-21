@@ -2,7 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { strToU8, zipSync } from "fflate";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ReferenceError_, ReferenceFiles, toLocalPath, workbookFolderFromUrl } from "../bridge/src/reference-files.js";
 import { readSheetDetails, readWorkbookOverview } from "../bridge/src/xlsx-reader.js";
 import { SessionManager } from "../bridge/src/session-manager.js";
@@ -56,10 +56,13 @@ afterEach(() => fs.rmSync(root, { recursive: true, force: true }));
 
 describe("toLocalPath", () => {
   it("maps Windows and WSL UNC paths to Linux paths", () => {
-    expect(toLocalPath("C:\\Users\\me\\a b\\t.xlsx")).toBe("/mnt/c/Users/me/a b/t.xlsx");
-    expect(toLocalPath('"d:/data/x.xlsx"')).toBe("/mnt/d/data/x.xlsx");
-    expect(toLocalPath("\\\\wsl.localhost\\Ubuntu\\home\\me\\x.xlsx")).toBe("/home/me/x.xlsx");
-    expect(toLocalPath("/already/linux")).toBe("/already/linux");
+    vi.spyOn(process, "platform", "get").mockReturnValue("linux");
+    try {
+      expect(toLocalPath("C:\\Users\\me\\a b\\t.xlsx")).toBe("/mnt/c/Users/me/a b/t.xlsx");
+      expect(toLocalPath('"d:/data/x.xlsx"')).toBe("/mnt/d/data/x.xlsx");
+      expect(toLocalPath("\\\\wsl.localhost\\Ubuntu\\home\\me\\x.xlsx")).toBe("/home/me/x.xlsx");
+      expect(toLocalPath("/already/linux")).toBe("/already/linux");
+    } finally { vi.restoreAllMocks(); }
   });
 });
 
@@ -82,7 +85,7 @@ describe("ReferenceFiles", () => {
   it("allows paths inside the folder and rejects outside ones and traversal", () => {
     const refs = new ReferenceFiles([root]);
     expect(refs.resolve(path.join(root, "templates", "t.xlsx"))).toContain("t.xlsx");
-    expect(() => refs.resolve("/etc/passwd")).toThrow(/outside/);
+    expect(() => refs.resolve(process.execPath)).toThrow(/outside/);
     expect(() => refs.resolve(path.join(root, "..", "x"))).toThrow(ReferenceError_);
     expect(() => refs.resolve(path.join(root, "templates", "..", "..", "etc"))).toThrow(ReferenceError_);
   });
@@ -90,8 +93,8 @@ describe("ReferenceFiles", () => {
   it("does not follow a symlink out of the folder", () => {
     const outside = fs.mkdtempSync(path.join(os.tmpdir(), "outside-"));
     fs.writeFileSync(path.join(outside, "secret.xlsx"), buildXlsx());
-    fs.symlinkSync(path.join(outside, "secret.xlsx"), path.join(root, "templates", "link.xlsx"));
-    expect(() => new ReferenceFiles([root]).readWorkbook(path.join(root, "templates", "link.xlsx"))).toThrow(/outside/);
+    fs.symlinkSync(outside, path.join(root, "templates", "linked"), process.platform === "win32" ? "junction" : "dir");
+    expect(() => new ReferenceFiles([root]).readWorkbook(path.join(root, "templates", "linked", "secret.xlsx"))).toThrow(/outside/);
     fs.rmSync(outside, { recursive: true, force: true });
   });
 

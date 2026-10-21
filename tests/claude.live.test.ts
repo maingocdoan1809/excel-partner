@@ -11,7 +11,7 @@ import { Harness } from "./support/harness.js";
  */
 function hasClaude(): boolean {
   try {
-    execFileSync(process.env.CLAUDE_BIN ?? "claude", ["--version"], { stdio: "ignore" });
+    execFileSync(process.env.CLAUDE_BIN ?? "claude", ["--version"], { stdio: "ignore", timeout: 5000, windowsHide: true });
     return true;
   } catch {
     return false;

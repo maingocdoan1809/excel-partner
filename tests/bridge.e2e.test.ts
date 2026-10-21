@@ -231,7 +231,7 @@ describe("bridge end to end", () => {
     const session = bridge!.sessions.getByToken(hello.sessionToken)!;
     expect(await bridge!.gateway.invoke({ sessionId: session.id, tool: "read_attached_image", args: { path: file.path } })).toMatchObject({ ok: true });
     await pane.close();
-    expect(session.attachments.size).toBe(0);
+    await expect.poll(() => session.attachments.size).toBe(0);
   });
 
   it("manages skill templates and exposes them to skill tools", async () => {
@@ -292,7 +292,7 @@ describe("bridge end to end", () => {
       const attachedNotes = await fetch(`${live.url}/session/workspaces/attach`, { method: "POST", headers: { ...auth, "content-type": "application/json" }, body: JSON.stringify({ path: notes }) });
       expect(await attachedNotes.json()).toMatchObject({ path: notes, kind: "file" });
       const session = bridge.sessions.getByToken(hello.sessionToken)!;
-      expect(session.attachments.size).toBe(0);
+      await expect.poll(() => session.attachments.size).toBe(0);
       expect(await bridge.gateway.invoke({ sessionId: session.id, tool: "read_attached_file", args: { path: notes } }))
         .toMatchObject({ ok: true, data: { content: "# Original file" } });
       expect(await bridge.gateway.invoke({ sessionId: session.id, tool: "read_attached_image", args: { path: image } }))

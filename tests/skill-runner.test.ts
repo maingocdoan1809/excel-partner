@@ -64,8 +64,10 @@ describe("skill script execution", () => {
     write("tools/run.py", "print('ok')");
     write("run.exe", "binary");
     fs.writeFileSync(path.join(root, "outside.py"), "print('outside')");
-    fs.symlinkSync(path.join(root, "outside.py"), path.join(root, "report", "tools", "link.py"));
-    for (const file of ["../outside.py", "/etc/passwd", "C:/run.py", "tools\\run.py", "run.exe", "tools/link.py", "tools/missing.py"]) {
+    fs.mkdirSync(path.join(root, "outside"));
+    fs.writeFileSync(path.join(root, "outside", "run.py"), "print('outside')");
+    fs.symlinkSync(path.join(root, "outside"), path.join(root, "report", "tools", "linked"), process.platform === "win32" ? "junction" : "dir");
+    for (const file of ["../outside.py", "/etc/passwd", "C:/run.py", "tools\\run.py", "run.exe", "tools/linked/run.py", "tools/missing.py"]) {
       expect(() => resolveSkillScript(store, input(file))).toThrow();
     }
   });
@@ -123,7 +125,7 @@ describe("gateway script permission and results", () => {
     write("run.py", 'open("result.json", "w").write(\'{"ok":true}\')\nprint("done")');
     const { session, gateway } = setup(true);
     const result = await gateway.invoke({ sessionId: session.id, tool: "run_skill_script", args: input("run.py", { outputFiles: ["result.json"] }) });
-    expect(result).toMatchObject({ ok: true, data: { exitCode: 0, stdout: "done\n", outputFiles: [{ name: "result.json", path: expect.stringMatching(/^attachment:\/\//) }] } });
+    expect(result).toMatchObject({ ok: true, data: { exitCode: 0, stdout: process.platform === "win32" ? "done\r\n" : "done\n", outputFiles: [{ name: "result.json", path: expect.stringMatching(/^attachment:\/\//) }] } });
     const attachment = [...session.attachments.values()][0]!;
     const read = await gateway.invoke({ sessionId: session.id, tool: "read_attached_file", args: { path: `attachment://${attachment.id}` } });
     expect(read.ok).toBe(true);
@@ -134,7 +136,7 @@ describe("gateway script permission and results", () => {
     write("run.py", 'import sys\nprint("missing dependency", file=sys.stderr)\nsys.exit(3)');
     const { session, gateway } = setup(true);
     expect(await gateway.invoke({ sessionId: session.id, tool: "run_skill_script", args: input("run.py") }))
-      .toMatchObject({ ok: false, error: { detail: { exitCode: 3, stderr: "missing dependency\n" } } });
+      .toMatchObject({ ok: false, error: { detail: { exitCode: 3, stderr: process.platform === "win32" ? "missing dependency\r\n" : "missing dependency\n" } } });
   });
 
   it("cancels an approved script when its session closes even without an active provider turn", async () => {

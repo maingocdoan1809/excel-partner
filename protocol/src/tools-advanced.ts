@@ -531,18 +531,18 @@ export const RunSkillScriptInputSchema = z.object({
 }).strict();
 export type RunSkillScriptInput = z.infer<typeof RunSkillScriptInputSchema>;
 
-const SandboxPath = z.string().min(1).max(200).refine(value =>
+const PythonWorkspacePath = z.string().min(1).max(200).refine(value =>
   value.split("/").every(part => Boolean(part) && part !== "." && part !== ".." && !/[\\:\x00-\x1f]/.test(part)),
 "Use a relative path without traversal or drive letters.");
 export const RunPythonInputSchema = z.object({
-  code: z.string().min(1).max(190_000).describe("Python source to write as main.py and execute in an isolated Linux container. Standard library only by default."),
+  code: z.string().min(1).max(190_000).describe("Python source to write as main.py and execute with Python installed on the user's machine. Local user permissions and installed libraries apply."),
   args: z.array(z.string().max(4096).refine(value => !value.includes("\0"))).max(64).default([]),
   stdin: z.string().max(200_000).default(""),
   files: z.array(z.object({
-    path: SandboxPath.refine(value => value !== "main.py", "main.py is reserved for code"),
-    attachment: z.string().regex(/^attachment:\/\/[0-9a-f-]{36}$/).describe("Existing attachment:// reference to copy into the sandbox."),
+    path: PythonWorkspacePath.refine(value => value !== "main.py", "main.py is reserved for code"),
+    attachment: z.string().regex(/^attachment:\/\/[0-9a-f-]{36}$/).describe("Existing attachment:// reference to copy into a temporary Python working folder."),
   }).strict()).max(16).default([]),
-  outputFiles: z.array(SandboxPath).max(8).default([]).describe("Generated files to return as attachments; maximum 10 MB combined."),
+  outputFiles: z.array(PythonWorkspacePath).max(8).default([]).describe("Generated files to return as attachments; maximum 10 MB combined."),
   timeoutMs: z.number().int().min(100).max(60_000).default(30_000),
 }).strict();
 export type RunPythonInput = z.infer<typeof RunPythonInputSchema>;

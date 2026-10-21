@@ -856,6 +856,8 @@ export class Bridge {
     prompt = [context, projectTemplateReminder(this.skills), this.savedReferences.prompt(), expanded.prompt].filter(Boolean).join("\n\n");
 
     try {
+      const detection = await adapter.detect();
+      if (!detection.installed) throw new Error(detection.hint ?? "Provider CLI is not installed.");
       if (!session.providerSessionId) {
         session.providerSessionId = await adapter.startSession({
           workbookConnectionId: session.workbookConnectionId,

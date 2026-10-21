@@ -268,8 +268,8 @@ export class BridgeClient {
   private async handleToolRequest(message: ToolRequestMessage): Promise<void> {
     const result = message.tool === "__authorize_python"
       ? this.permissionMode === "auto" ? { ok: true as const, data: { approved: true } }
-        : { ok: true as const, data: { approved: await this.askPermission("Run Python in sandbox?",
-          "The assistant will run Python in a temporary container with no network or access to your computer's folders. Only supplied file copies enter the sandbox.",
+        : { ok: true as const, data: { approved: await this.askPermission("Run Python on this computer?",
+          "The assistant will run Python on your computer with your user permissions, including access to files and the network. Selected file copies and generated files use a temporary working folder.",
           "Run Python", message.timeoutMs, (message.args as { code: string }).code.slice(0, 8000)) } }
       : message.tool === "__authorize_skill_script"
       ? await authorizeSkillScript(this.permissionMode, message.args as RunSkillScriptInput,

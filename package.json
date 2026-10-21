@@ -1,6 +1,6 @@
 {
   "name": "excel-partner",
-  "version": "0.1.10",
+  "version": "0.1.11",
   "description": "Excel Partner: local Excel desktop AI add-in with Claude Code, GitHub Copilot CLI, Codex CLI and OpenCode CLI providers.",
   "type": "module",
   "bin": {

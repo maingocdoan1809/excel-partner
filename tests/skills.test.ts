@@ -77,8 +77,8 @@ describe("SkillStore", () => {
 
   it("refuses symlinks that leave the skill folder", () => {
     write("outside/secret.md", "nope");
-    fs.symlinkSync(path.join(root, "outside", "secret.md"), path.join(root, "alpha", "references", "link.md"));
-    expect(() => new SkillStore([root]).read("alpha", "references/link.md")).toThrow(SkillError);
+    fs.symlinkSync(path.join(root, "outside"), path.join(root, "alpha", "references", "linked"), process.platform === "win32" ? "junction" : "dir");
+    expect(() => new SkillStore([root]).read("alpha", "references/linked/secret.md")).toThrow(SkillError);
   });
 
   it("lists and reads Python and Shell scripts without executing them", () => {
