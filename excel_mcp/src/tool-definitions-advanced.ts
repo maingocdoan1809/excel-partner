@@ -114,15 +114,15 @@ const META: Partial<Record<ExcelToolName, Meta>> = {
       "do not run scripts that edit the open workbook on disk. Never claim success after a nonzero exit or timeout.",
   },
   run_python: {
-    title: "Run Python in sandbox",
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false },
+    title: "Run Python locally",
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false },
     description:
-      "EXECUTE. Write AI-generated Python as main.py in a fresh Docker Linux sandbox and run it. No network, no host folders, " +
-      "non-root user, read-only system, 256 MB RAM, one CPU and a 60-second maximum. Standard library only by default; no pip/network installs. " +
-      "Supply selected attachment:// files through files; only those copies enter the sandbox. Request outputFiles to receive attachment:// results " +
+      "EXECUTE. Write AI-generated Python as main.py in a temporary working folder and run it directly on the user's machine. " +
+      "Local user permissions, installed Python libraries, file access and network access apply. Execution is limited to 60 seconds and 512 KB of console output. " +
+      "Supply selected attachment:// files through files to copy them into the working folder. Request outputFiles to receive attachment:// results " +
       "(10 MB combined). Returns stdout, stderr, exitCode and timeout/output-limit status. Check these before claiming success. " +
-      "Ask/Auto permission applies. Requires a running Docker daemon and the configured sandbox image already installed; fails closed if unavailable. " +
-      "Use this for code you create, and Excel tools for the open workbook. Never use local skill scripts as a way to bypass the sandbox.",
+      "Ask/Auto permission applies. Requires local Python; BRIDGE_PYTHON_BIN selects its executable. Temporary files are removed after execution or cancellation. " +
+      "Use this for code you create, and Excel tools for the open workbook. Do not edit the open workbook on disk. Respect declined execution requests.",
   },
   list_reference_files: {
     title: "List reference files",
