@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+import { SavedReferences } from "./saved-references.js";
 import http from "node:http";
 import https from "node:https";
 import path from "node:path";
@@ -24,7 +26,7 @@ import { SkillStore, expandSkillPrompt, projectTemplateReminder } from "./skills
 import { SessionManager } from "./session-manager.js";
 import { WorkbookSession } from "./session.js";
 import { ToolGateway } from "./tool-gateway.js";
-import { activeWorkbookPath, pickWorkspaceFolder } from "./windows-workspace.js";
+import { activeWorkbookPath, pickWorkspaceFolder, pickReferenceFile } from "./windows-workspace.js";
 import { MockAdapter, ProviderRegistry, createDefaultRegistry } from "../../providers/src/index.js";
 import { ProviderLoginError, ProviderLoginManager } from "./provider-login.js";
 import type { McpEndpoint } from "../../providers/src/types.js";
@@ -46,6 +48,8 @@ export interface BridgeOptions {
   workspaceConfigPath?: string | null;
   skillUploadDir?: string;
   usageFile?: string | null;
+  savedReferencesFile?: string | null;
+  referencePicker?: () => Promise<string | null>;
 }
 
 const MAX_BODY_BYTES = 8 * 1024 * 1024;
@@ -61,6 +65,9 @@ export class Bridge {
   readonly gateway: ToolGateway;
   readonly providers: ProviderRegistry;
   private readonly references: ReferenceFiles;
+  private readonly savedReferences: SavedReferences;
+  private readonly referencePicker: () => Promise<string | null>;
+  private readonly referenceSelections = new WeakMap<WorkbookSession, { token: string; path: string }>();
   private readonly workspaceConfigPath: string | null;
 
   private server: http.Server | https.Server | null = null;
@@ -84,6 +91,10 @@ export class Bridge {
     this.skills = options.skills ?? new SkillStore(config.skillDirs);
     this.userSkills = new UserSkills(options.skillUploadDir ?? path.join(os.homedir(), ".excel-partner", "skills"));
     this.references = options.references ?? new ReferenceFiles(config.referenceDirs);
+    this.savedReferences = new SavedReferences(options.savedReferencesFile === undefined
+      ? path.join(os.homedir(), ".excel-partner", "references.json") : options.savedReferencesFile);
+    this.referencePicker = options.referencePicker ?? pickReferenceFile;
+    this.references.setSavedPaths(() => this.savedReferences.paths());
     this.workspaceConfigPath = options.workspaceConfigPath === undefined
       ? options.references ? null : (process.env.BRIDGE_CONFIG ?? path.join(PROJECT_ROOT, "excel-partner.config.json"))
       : options.workspaceConfigPath;
@@ -211,6 +222,7 @@ export class Bridge {
       return this.handleAttachment(req, res);
     }
     if (req.method === "GET" && url.pathname === "/session/models") return this.listProviderModels(req, res, url);
+    if (url.pathname === "/session/references" || url.pathname === "/session/references/pick") return this.handleSavedReferences(req, res, url);
     if (url.pathname === "/session/skills") return this.handleUserSkills(req, res);
     if (url.pathname === "/session/skill-templates" && req.method === "GET") return this.listSkillTemplates(req, res, url);
     if (url.pathname === "/session/skill-templates" && req.method === "POST") return this.addSkillTemplate(req, res);
@@ -268,6 +280,50 @@ export class Bridge {
     createReadStream(filePath)
       .on("error", () => res.destroy())
       .pipe(res);
+  }
+
+  private async handleSavedReferences(req: http.IncomingMessage, res: http.ServerResponse, url: URL): Promise<void> {
+    const session = this.workspaceSession(req);
+    if (!session) return this.sendJson(res, 401, { error: "unauthorized" });
+    res.setHeader("cache-control", "no-store");
+    try {
+      if (url.pathname.endsWith("/pick")) {
+        if (req.method !== "POST") return this.sendJson(res, 405, { error: "method_not_allowed" });
+        let selected: string | null;
+        try { selected = await this.referencePicker(); }
+        catch { return this.sendJson(res, 500, { error: "Could not open the Windows file picker." }); }
+        if (!selected) return this.sendJson(res, 200, { cancelled: true });
+        const file = this.references.permissionTargetAny(selected);
+        const token = randomUUID();
+        this.referenceSelections.set(session, { token, path: file });
+        return this.sendJson(res, 200, { cancelled: false, selectionId: token, path: file, name: path.basename(file) });
+      }
+      if (req.method === "GET") return this.sendJson(res, 200, { references: this.savedReferences.list() });
+      if (req.method !== "POST" && req.method !== "DELETE") return this.sendJson(res, 405, { error: "method_not_allowed" });
+      const body = JSON.parse(await readBody(req)) as Record<string, unknown>;
+      if (!body || typeof body !== "object") throw new ReferenceError_("Invalid reference metadata.");
+      if (req.method === "DELETE") {
+        if (typeof body.id !== "string") throw new ReferenceError_("Specify a reference ID.");
+        this.savedReferences.remove(body.id);
+        return this.sendJson(res, 200, { removed: true });
+      }
+      if (typeof body.name !== "string" || typeof body.description !== "string" || (body.id !== undefined && typeof body.id !== "string")) throw new ReferenceError_("Specify a name and description.");
+      const existing = this.savedReferences.list().find(e => e.id === body.id);
+      const selection = this.referenceSelections.get(session);
+      let file = existing?.path;
+      if (body.selectionId !== undefined) {
+        if (!selection || selection.token !== body.selectionId) throw new ReferenceError_("Choose the file again using the file picker.");
+        file = this.references.permissionTargetAny(selection.path);
+        if (file !== selection.path) throw new ReferenceError_("The selected file changed. Choose it again.");
+      }
+      if (!file) throw new ReferenceError_("Choose a file using the file picker.");
+      const reference = this.savedReferences.save({ id: body.id as string | undefined, name: body.name, description: body.description, path: file });
+      this.referenceSelections.delete(session);
+      return this.sendJson(res, 200, { reference });
+    } catch (error) {
+      if (error instanceof ReferenceError_ || error instanceof SyntaxError) return this.sendJson(res, 400, { error: error.message });
+      throw error;
+    }
   }
 
   private async handleUserSkills(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
@@ -813,7 +869,7 @@ export class Bridge {
     // `/skill-name request` loads the skill's instructions into this turn.
     const expanded = expandSkillPrompt(prompt, this.skills);
     if (expanded.skill) this.logger.info("skill invoked", { skill: expanded.skill });
-    prompt = [context, projectTemplateReminder(this.skills), expanded.prompt].filter(Boolean).join("\n\n");
+    prompt = [context, projectTemplateReminder(this.skills), this.savedReferences.prompt(), expanded.prompt].filter(Boolean).join("\n\n");
 
     try {
       if (!session.providerSessionId) {

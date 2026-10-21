@@ -228,6 +228,14 @@ Only the provider you use needs to be installed. Install or update it using the 
 
 After installation or login, restart the bridge and select the provider again in Excel. Follow any minimum-version or account-access hint shown in the pane.
 
+### Shared reference files
+
+Open **Settings → Reference files → Add reference file**. In the popup, use **Choose file…** to select a local file in Windows Explorer, then enter a display name and description. References are shared across all skills and chats on this machine.
+
+Only the name, path and description are stored in `~/.excel-partner/references.json`; the original file is never copied or uploaded. The assistant receives the catalog and reads relevant files on demand, using their latest contents. Registering a file grants read access to that exact file. Existing file-reading format and size limits still apply.
+
+Use **Edit** to change the description or choose a new location. Missing files are marked in the list. **Remove link** removes the saved metadata and its read access; it leaves the original file on disk.
+
 ### A file cannot be opened
 
 Use **Choose local files** to attach it, or add its folder as a workspace. For persistent workspace access, add the folder to `referenceDirs` in the configuration file and restart the bridge.

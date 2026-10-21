@@ -23,6 +23,8 @@ export interface UploadedAttachment { id?: string; name: string; kind: "workbook
 export interface SkillTemplate { name: string; kind: "workbook" | "image" | "text"; size: number; path: string }
 export interface AvailableSkill { name: string; description: string }
 export interface InstalledSkill extends AvailableSkill { removable: boolean }
+export interface SavedReference { id: string; name: string; path: string; description: string; available: boolean }
+export interface ReferenceSelection { cancelled: boolean; selectionId?: string; path?: string; name?: string }
 export interface ModelCatalog { models: Array<{ id: string; name: string }>; defaultModelId: string | null }
 
 export interface BridgeClientHandlers {
@@ -148,6 +150,23 @@ export class BridgeClient {
 
   async attachWorkspaceFile(path: string): Promise<UploadedAttachment> {
     return this.sessionFetch("/session/workspaces/attach", { method: "POST", body: JSON.stringify({ path }) });
+  }
+
+  async listSavedReferences(): Promise<SavedReference[]> {
+    const data = await this.sessionFetch<{ references: SavedReference[] }>("/session/references");
+    return data.references;
+  }
+
+  async pickReferenceFile(): Promise<ReferenceSelection> {
+    return this.sessionFetch("/session/references/pick", { method: "POST" });
+  }
+
+  async saveReference(input: { id?: string; selectionId?: string; name: string; description: string }): Promise<void> {
+    await this.sessionFetch("/session/references", { method: "POST", body: JSON.stringify(input) });
+  }
+
+  async removeReference(id: string): Promise<void> {
+    await this.sessionFetch("/session/references", { method: "DELETE", body: JSON.stringify({ id }) });
   }
 
   async listTemplateSkills(): Promise<AvailableSkill[]> {

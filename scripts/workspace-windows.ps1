@@ -1,6 +1,6 @@
 param(
   [Parameter(Mandatory = $true)]
-  [ValidateSet('pick', 'workbook', 'server')]
+  [ValidateSet('pick', 'file', 'workbook', 'server')]
   [string]$Mode,
   [string]$WorkbookName = ''
 )
@@ -27,7 +27,7 @@ function Get-WorkbookPath([string]$Name) {
 }
 
 function Show-WorkspacePicker {
-  return [WorkspacePicker.Dialog]::Choose()
+  return [WorkspacePicker.Dialog]::Choose($true)
 }
 
 # Windows PowerShell runs on .NET Framework, whose FolderBrowserDialog still uses
@@ -79,14 +79,14 @@ namespace WorkspacePicker {
   }
 
   public static class Dialog {
-    public static string Choose() {
+    public static string Choose(bool folders) {
       var dialog = (IFileDialog)new FileOpenDialogCom();
       var owner = new Form { TopMost = true, ShowInTaskbar = false, Opacity = 0 };
       try {
         uint options;
         dialog.GetOptions(out options);
-        dialog.SetOptions(options | 0x20u | 0x40u); // FOS_PICKFOLDERS | FOS_FORCEFILESYSTEM
-        dialog.SetTitle("Add workspace · Excel Partner");
+        dialog.SetOptions(options | 0x40u | 0x1000u | (folders ? 0x20u : 0u)); // FORCEFILESYSTEM | FILEMUSTEXIST | optional PICKFOLDERS
+        dialog.SetTitle(folders ? "Add workspace · Excel Partner" : "Choose reference file · Excel Partner");
         owner.Show();
         int result = dialog.Show(owner.Handle);
         if (result == unchecked((int)0x800704C7)) return null; // user cancelled
@@ -118,8 +118,8 @@ if ($Mode -eq 'workbook') {
   if ($result) { [Console]::WriteLine($result) }
   exit 0
 }
-if ($Mode -eq 'pick') {
-  $result = Show-WorkspacePicker
+if ($Mode -eq 'pick' -or $Mode -eq 'file') {
+  $result = [WorkspacePicker.Dialog]::Choose($Mode -eq 'pick')
   if ($result) { [Console]::WriteLine($result) }
   exit 0
 }
@@ -130,7 +130,7 @@ while ($true) {
   if ($null -eq $line) { break }
   try {
     $request = ConvertFrom-Json $line
-    $result = if ($request.mode -eq 'pick') { Show-WorkspacePicker } else { Get-WorkbookPath ([string]$request.workbookName) }
+    $result = if ($request.mode -eq 'pick') { Show-WorkspacePicker } elseif ($request.mode -eq 'file') { [WorkspacePicker.Dialog]::Choose($false) } else { Get-WorkbookPath ([string]$request.workbookName) }
     [Console]::WriteLine((ConvertTo-Json -Compress -InputObject @{ id = [string]$request.id; path = $result; error = $null }))
   } catch {
     [Console]::WriteLine((ConvertTo-Json -Compress -InputObject @{ id = [string]$request.id; path = $null; error = $_.Exception.Message }))

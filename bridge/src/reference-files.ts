@@ -52,6 +52,9 @@ export function workbookFolderFromUrl(documentUrl: string): string {
  */
 export class ReferenceFiles {
   private readonly roots: string[];
+  private savedPaths: () => string[] = () => [];
+
+  setSavedPaths(provider: () => string[]): void { this.savedPaths = provider; }
 
   constructor(dirs: string[]) {
     this.roots = dirs
@@ -99,7 +102,7 @@ export class ReferenceFiles {
     } catch {
       throw new ReferenceError_(`'${input}' does not exist or is not readable`);
     }
-    if (![...this.roots, ...grants].some((root) => real === root || real.startsWith(root + path.sep))) {
+    if (!this.savedPaths().includes(real) && ![...this.roots, ...grants].some((root) => real === root || real.startsWith(root + path.sep))) {
       throw new ReferenceError_(`'${input}' is outside the folders the assistant may read: ${this.roots.join(", ") || "none"}`, "outside");
     }
     return real;

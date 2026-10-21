@@ -534,3 +534,18 @@ body.login-active .auth-notice { display: none; }
 .user-skill p { margin: 5px 0 0; color: var(--muted); font-size: 11px; }
 .user-skill button { flex-shrink: 0; padding: 4px 7px; font-size: 10px; }
 @media (max-width: 290px) { .picker-button { font-size: 10px; gap: 2px; } .model-picker { max-width: calc(100% - 145px); } .auth-notice { padding: 9px 10px; gap: 7px; } .auth-notice span { font-size: 9px; } }
+
+.reference-row { padding: 12px; border: 1px solid var(--border); border-radius: 8px; overflow-wrap: anywhere; }
+.reference-row p { margin: 6px 0; color: var(--muted); font-size: 12px; white-space: pre-wrap; }
+.reference-row .reference-missing { color: var(--text); font-weight: 600; }
+.reference-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 10px; }
+.reference-dialog { box-sizing: border-box; width: min(420px, calc(100vw - 24px)); max-height: calc(100vh - 24px); padding: 18px; border: 1px solid var(--border); border-radius: 12px; color: var(--text); background: var(--panel); overflow-y: auto; }
+.reference-dialog::backdrop { background: #0006; }
+.reference-dialog h2 { margin: 0 0 14px; font-size: 18px; }
+.reference-dialog label { display: block; margin: 12px 0 6px; font-size: 12px; }
+.reference-dialog input, .reference-dialog textarea { box-sizing: border-box; width: 100%; }
+.reference-dialog textarea { resize: vertical; }
+.reference-dialog #reference-choose { margin-top: 8px; }
+.reference-dialog input, .reference-dialog textarea { font: inherit; padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px; color: var(--text); background: var(--bg); }
+.reference-dialog input[readonly] { color: var(--muted); }
+#reference-status { margin-top: 8px; }

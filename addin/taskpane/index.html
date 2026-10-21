@@ -39,6 +39,7 @@
         <div class="menu-sep"></div>
         <button id="menu-changes" type="button" class="menu-item" role="menuitem">Changes <span id="changes-count" class="badge" hidden>0</span></button>
         <button id="menu-history" type="button" class="menu-item" role="menuitem">History</button>
+        <button id="menu-references" type="button" class="menu-item" role="menuitem">Reference files</button>
         <button id="menu-templates" type="button" class="menu-item" role="menuitem">Skill templates</button>
         <button id="menu-skills" type="button" class="menu-item" role="menuitem">Manage skills</button>
         <button id="menu-new" type="button" class="menu-item" role="menuitem">New chat</button>
@@ -106,6 +107,33 @@
         <div id="history-list" class="panel-body"></div>
       </section>
 
+      <section id="panel-references" class="panel" hidden aria-label="Reference files">
+        <header class="panel-head">
+          <button type="button" class="back" data-close="references" aria-label="Back to chat">←</button>
+          <h2>Reference files</h2>
+        </header>
+        <p class="template-help">Register shared common or knowledge files for any skill. Only the name, path and description are saved. The assistant reads the original file when needed.</p>
+        <button id="reference-add" type="button" class="secondary">Add reference file</button>
+        <p id="reference-status" class="template-help" role="status" aria-live="polite"></p>
+        <div id="reference-list" class="panel-body"></div>
+      </section>
+      <dialog id="reference-dialog" class="reference-dialog" aria-labelledby="reference-heading">
+        <form id="reference-form">
+          <h2 id="reference-heading">Reference file</h2>
+          <label for="reference-name">Name</label>
+          <input id="reference-name" maxlength="200" required />
+          <label for="reference-path">File path</label>
+          <input id="reference-path" readonly placeholder="Choose a local file" />
+          <button id="reference-choose" type="button" class="secondary">Choose file…</button>
+          <label for="reference-description">Description</label>
+          <textarea id="reference-description" maxlength="4000" rows="4" placeholder="What does this file contain, and when should it be used?"></textarea>
+          <p id="reference-dialog-status" class="template-help" role="status" aria-live="polite"></p>
+          <div class="reference-actions">
+            <button id="reference-cancel" type="button" class="secondary">Cancel</button>
+            <button id="reference-save" type="submit">Save</button>
+          </div>
+        </form>
+      </dialog>
       <section id="panel-templates" class="panel" hidden aria-label="Skill templates">
         <header class="panel-head">
           <button type="button" class="back" data-close="templates" aria-label="Back to chat">←</button>

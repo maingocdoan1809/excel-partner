@@ -11,6 +11,7 @@ import { createSelfUpdater } from "./ui/self-update.js";
 import { setupProviderLogin } from "./ui/provider-login.js";
 import { setupComposerMenu } from "./ui/composer-menu.js";
 import { setupTheme } from "./ui/theme.js";
+import { setupSavedReferences } from "./ui/saved-references.js";
 import { setupUserSkills } from "./ui/user-skills.js";
 import {
   SessionStore,
@@ -40,6 +41,7 @@ const els = {
   providerHint: byId<HTMLElement>("provider-hint"),
   menuChanges: byId<HTMLButtonElement>("menu-changes"),
   menuHistory: byId<HTMLButtonElement>("menu-history"),
+  menuReferences: byId<HTMLButtonElement>("menu-references"),
   menuTemplates: byId<HTMLButtonElement>("menu-templates"),
   menuNew: byId<HTMLButtonElement>("menu-new"),
   changesCount: byId<HTMLSpanElement>("changes-count"),
@@ -48,6 +50,7 @@ const els = {
     login: byId<HTMLElement>("panel-login"),
     changes: byId<HTMLElement>("panel-changes"),
     history: byId<HTMLElement>("panel-history"),
+    references: byId<HTMLElement>("panel-references"),
     templates: byId<HTMLElement>("panel-templates"),
     session: byId<HTMLElement>("panel-session"),
   },
@@ -163,6 +166,7 @@ const slash = createSlashMenu({
   onBuiltin: (name) => name === "clear" && startNewChat(),
   onSelect: (name) => { selectedSlashToken = `/${name}`; },
 });
+const savedReferences = setupSavedReferences(() => client);
 const userSkills = setupUserSkills(() => client, () => slash.reload());
 
 Office.onReady((info) => {
@@ -253,6 +257,7 @@ Office.onReady((info) => {
   byId("tab-changes").addEventListener("click", () => showPanel("changes"));
   byId("tab-history").addEventListener("click", () => showPanel("history"));
   els.menuHistory.addEventListener("click", () => showPanel("history"));
+  els.menuReferences.addEventListener("click", () => showPanel("references"));
   els.menuTemplates.addEventListener("click", () => showPanel("templates"));
   byId("menu-skills").addEventListener("click", () => showPanel("skills"));
   els.menuNew.addEventListener("click", () => {
@@ -1191,14 +1196,15 @@ function saveModelChoice(): void {
 /* Panels: changes, history, past chat                                         */
 /* -------------------------------------------------------------------------- */
 
-function openPanel(): "changes" | "history" | "session" | "templates" | "login" | "skills" | null {
-  for (const name of ["changes", "history", "session", "templates", "login", "skills"] as const) if (!els.panels[name].hidden) return name;
+function openPanel(): "changes" | "history" | "session" | "templates" | "login" | "skills" | "references" | null {
+  for (const name of ["changes", "history", "session", "templates", "login", "skills", "references"] as const) if (!els.panels[name].hidden) return name;
   return null;
 }
 
-function showPanel(name: "changes" | "history" | "session" | "templates" | "login" | "skills" | null): void {
+function showPanel(name: "changes" | "history" | "session" | "templates" | "login" | "skills" | "references" | null): void {
   closeMenu();
-  for (const key of ["changes", "history", "session", "templates", "login", "skills"] as const) els.panels[key].hidden = key !== name;
+  for (const key of ["changes", "history", "session", "templates", "login", "skills", "references"] as const) els.panels[key].hidden = key !== name;
+  if (name === "references") void savedReferences.refresh();
   if (name === "skills") void userSkills.refresh();
   document.body.classList.toggle("login-active", name === "login");
   if (name === "login") {
