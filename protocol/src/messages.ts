@@ -35,7 +35,9 @@ export const PromptMessageSchema = z.object({
   type: z.literal("prompt"),
   requestId: z.string().min(1),
   prompt: z.string().min(1).max(32_000),
-  chatSessionId: z.string().min(1).max(128).optional(),
+  chatSessionId: z.string().min(1).max(160).optional(),
+  /** Native provider session to resume; never silently replaced with a new session. */
+  resumeSessionId: z.string().regex(/^[a-zA-Z0-9_-]{1,128}$/).optional(),
   /** Explicit CLI model ID; omitted for the provider's configured default. */
   model: z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9._/-]{0,79}$/).nullable().optional(),
   effort: z.enum(["low", "medium", "high"]).optional(),

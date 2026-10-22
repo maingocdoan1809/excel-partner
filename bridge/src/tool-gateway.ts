@@ -4,6 +4,7 @@ import {
   isExcelToolName,
   parseToolInput,
   rangeCellCount,
+  SelectionSnapshotSchema,
   type ExcelToolName,
   type ToolError,
   type ToolResult,
@@ -23,6 +24,7 @@ import fs from "node:fs";
 import pathModule from "node:path";
 import type { SessionManager } from "./session-manager.js";
 import type { Logger } from "./logger.js";
+import { enrichWindowsSelection, type SelectionEnricher } from "./windows-selection.js";
 
 export interface GatewayLimits {
   maxReadCells: number;
@@ -59,6 +61,7 @@ export class ToolGateway {
     private readonly skills: SkillStore | null = null,
     private readonly references: ReferenceFiles | null = null,
     private readonly userSkills: UserSkills | null = null,
+    private readonly enrichSelection: SelectionEnricher = enrichWindowsSelection,
   ) {}
 
   async invoke(request: InternalToolRequest): Promise<ToolResult> {
@@ -109,7 +112,11 @@ export class ToolGateway {
     session.touch();
     this.log?.debug("tool -> pane", { sessionId: session.id, tool: request.tool });
     const started = Date.now();
-    const result = await session.requestTool(request.tool, parsed, this.timeoutMs);
+    let result = await session.requestTool(request.tool, parsed, this.timeoutMs);
+    if (request.tool === "get_selection" && result.ok) {
+      const snapshot = SelectionSnapshotSchema.safeParse(result.data);
+      if (snapshot.success) result = { ok: true, data: await this.enrichSelection(snapshot.data, session.turnController?.signal) };
+    }
     this.logOutcome(request.tool, parsed, result, Date.now() - started);
     return result;
   }

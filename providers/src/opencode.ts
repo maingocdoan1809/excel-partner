@@ -8,7 +8,6 @@ import type {
   ProviderEvent,
   ProviderId,
 } from "../../protocol/src/index.js";
-import { TokenUsageSchema } from "../../protocol/src/usage.js";
 import { acpPermissionOutcome, contentText, toolNameOf } from "./acp.js";
 import { AsyncQueue } from "./async-queue.js";
 import { BaseCliAdapter, cliEnvironment, execCli, type CliProbe } from "./base.js";
@@ -18,6 +17,8 @@ import { buildTurnPrompt, SYSTEM_PROMPT } from "./prompt.js";
 import { CumulativeUsage } from "./usage.js";
 import { MCP_SERVER_NAME, type ProviderModelCatalog, type SendTurnInput, type StartSessionContext } from "./types.js";
 import { ensureWorkspaceDir } from "./workspace.js";
+import { nativeTitle, validNativeId } from "./session-metadata.js";
+import { parseOpencodeExport } from "./opencode-usage.js";
 
 /** One entry of the CLI's `session/new` / `config_option_update` config list. */
 export interface OpencodeConfigOption {
@@ -41,6 +42,8 @@ interface OpencodeSession {
   primed: boolean;
   active: ActiveTurn | null;
   usage?: CumulativeUsage;
+  usageBaselinePending?: boolean;
+  title?: string;
   /** Temp directory holding the permission config handed to the CLI. */
   configDir: string;
 }
@@ -85,6 +88,31 @@ export function parseOpencodeModels(options: OpencodeConfigOption[] | undefined)
  * rejects everything else when the CLI asks for permission.
  */
 export class OpencodeAdapter extends BaseCliAdapter {
+  private titleCache?: { at: number; value: Promise<Map<string, string>> };
+  async sessionTitle(id: string): Promise<string | undefined> {
+    if (!validNativeId(id)) return undefined;
+    if (!this.titleCache || Date.now() - this.titleCache.at > 5000) {
+      this.titleCache = { at: Date.now(), value: execCli(this.command,
+        ["session", "list", "--format", "json", "--max-count", "100", "--pure"], this.env, 5000).then(result => {
+        const titles = new Map<string, string>();
+        try {
+          if (result.code !== 0) return titles;
+          for (const item of JSON.parse(result.stdout)) {
+            const title = nativeTitle(item.title);
+            if (typeof item.id === "string" && title) titles.set(item.id, title);
+          }
+        } catch { /* Session titles remain optional on older CLI versions. */ }
+        return titles;
+      }) };
+    }
+    return (await this.titleCache.value).get(id);
+  }
+
+  private async originalUsage(id: string): Promise<ReturnType<typeof parseOpencodeExport>> {
+    const result = await execCli(this.command, ["export", id, "--pure"], this.env, 10_000);
+    if (result.code !== 0) throw new Error("OpenCode original session export is unavailable");
+    return parseOpencodeExport(JSON.parse(result.stdout), id);
+  }
   readonly id: ProviderId = "opencode";
   readonly capabilities: ProviderCapabilities = {
     streaming: true,
@@ -158,6 +186,7 @@ export class OpencodeAdapter extends BaseCliAdapter {
   }
 
   override async startSession(ctx: StartSessionContext): Promise<string> {
+    if (ctx.resumeSessionId && !validNativeId(ctx.resumeSessionId)) throw new Error("Invalid OpenCode resume session ID");
     const cwd = ensureWorkspaceDir();
     const providerSessionId = `opencode-${randomUUID()}`;
     const log = this.runtime.logger;
@@ -183,9 +212,10 @@ export class OpencodeAdapter extends BaseCliAdapter {
         clientCapabilities: {},
         clientInfo: { name: "excel-ai-addin", title: "Excel AI Add-in", version: "0.1.0" },
       });
-      const created = await peer.request<{ sessionId: string; configOptions?: OpencodeConfigOption[] }>(
-        "session/new",
+      const loaded = await peer.request<{ sessionId?: string; configOptions?: OpencodeConfigOption[] }>(
+        ctx.resumeSessionId ? "session/load" : "session/new",
         {
+          ...(ctx.resumeSessionId ? { sessionId: ctx.resumeSessionId } : {}),
           cwd,
           mcpServers: [
             {
@@ -199,15 +229,22 @@ export class OpencodeAdapter extends BaseCliAdapter {
         },
         30_000,
       );
+      const created = { ...loaded, sessionId: ctx.resumeSessionId ?? loaded.sessionId };
+      if (!created.sessionId) throw new Error("OpenCode returned no session ID");
       session = {
         peer,
         acpSessionId: created.sessionId,
         configOptions: created.configOptions ?? [],
         model: null,
-        primed: false,
+        primed: Boolean(ctx.resumeSessionId),
         active: null,
         configDir,
       };
+      if (ctx.resumeSessionId) {
+        session.usage = new CumulativeUsage();
+        try { session.usage.next((await this.originalUsage(created.sessionId)).usage); }
+        catch { session.usageBaselinePending = true; }
+      }
       this.sessions.set(providerSessionId, session);
       peer.onExit(() => {
         const current = this.sessions.get(providerSessionId);
@@ -238,6 +275,8 @@ export class OpencodeAdapter extends BaseCliAdapter {
     const queue = new AsyncQueue<ProviderEvent>();
     const active: ActiveTurn = { queue, requestId, text: "", tools: new Map(), finishedTools: new Set() };
     session.active = active;
+    yield { type: "session_info", requestId, provider: this.id, providerSessionId: session.acpSessionId,
+      title: session.title };
     yield { type: "turn_started", requestId };
 
     const cancel = () => session.peer.notify("session/cancel", { sessionId: session.acpSessionId });
@@ -271,17 +310,9 @@ export class OpencodeAdapter extends BaseCliAdapter {
     };
 
     run()
-      .then((response) => {
+      .then(async (response) => {
         this.flushText(active);
-        // The prompt response reports the session totals of all model calls.
-        // Convert them to the increment for this turn before the bridge adds it.
-        if (response.usage) {
-          const usage = TokenUsageSchema.safeParse({ ...response.usage, cachedInputTokens: response.usage.cachedReadTokens ?? 0 });
-          if (usage.success) {
-            session.usage ??= new CumulativeUsage();
-            queue.push({ type: "usage_update", requestId, usage: session.usage.next(usage.data) });
-          }
-        }
+        await this.reportUsage(session, active);
         const stop = response?.stopReason ?? "end_turn";
         if (stop === "cancelled") {
           queue.push({ type: "turn_finished", requestId, reason: "cancelled" });
@@ -298,8 +329,9 @@ export class OpencodeAdapter extends BaseCliAdapter {
         }
         queue.end();
       })
-      .catch((error) => {
+      .catch(async (error) => {
         this.flushText(active);
+        await this.reportUsage(session, active);
         if (input.signal.aborted) {
           queue.push({ type: "turn_finished", requestId, reason: "cancelled" });
         } else {
@@ -322,6 +354,22 @@ export class OpencodeAdapter extends BaseCliAdapter {
     } finally {
       input.signal.removeEventListener("abort", cancel);
       if (session.active === active) session.active = null;
+    }
+  }
+
+  private async reportUsage(session: OpencodeSession, active: ActiveTurn): Promise<void> {
+    try {
+      const snapshot = await this.originalUsage(session.acpSessionId);
+      session.title = snapshot.title ?? session.title;
+      active.queue.push({ type: "session_info", requestId: active.requestId, provider: this.id,
+        providerSessionId: session.acpSessionId, title: session.title });
+      session.usage ??= new CumulativeUsage();
+      const usage = session.usage.next(snapshot.usage);
+      if (session.usageBaselinePending) { session.usageBaselinePending = false; return; }
+      active.queue.push({ type: "usage_update", requestId: active.requestId, usage });
+    } catch (error) {
+      // ACP only reports the final model call; using it as the whole turn silently undercounts.
+      this.runtime.logger.warn("OpenCode original usage unavailable", { error: String(error) });
     }
   }
 

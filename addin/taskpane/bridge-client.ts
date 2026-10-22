@@ -112,8 +112,8 @@ export class BridgeClient {
     this.send({ type: "set_provider", provider });
   }
 
-  sendPrompt(requestId: string, prompt: string, selection: SelectionSnapshot | null, context?: string, attachmentIds?: string[], model?: string | null, referencePaths?: string[], effort: "low" | "medium" | "high" = "medium", chatSessionId?: string): void {
-    this.send({ type: "prompt", requestId, prompt, selection, chatSessionId, model: model ?? null, effort, ...(context ? { context } : {}), ...(attachmentIds?.length ? { attachmentIds } : {}), ...(referencePaths?.length ? { referencePaths } : {}) });
+  sendPrompt(requestId: string, prompt: string, selection: SelectionSnapshot | null, context?: string, attachmentIds?: string[], model?: string | null, referencePaths?: string[], effort: "low" | "medium" | "high" = "medium", chatSessionId?: string, resumeSessionId?: string): void {
+    this.send({ type: "prompt", requestId, prompt, selection, chatSessionId, resumeSessionId, model: model ?? null, effort, ...(context ? { context } : {}), ...(attachmentIds?.length ? { attachmentIds } : {}), ...(referencePaths?.length ? { referencePaths } : {}) });
   }
 
   async usageSummaries(sessionId?: string): Promise<import("../../protocol/src/index.js").UsageSummary[]> {

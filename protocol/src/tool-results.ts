@@ -16,8 +16,32 @@ export const GetSheetsResultSchema = z.object({
 });
 export type GetSheetsResult = z.infer<typeof GetSheetsResultSchema>;
 
+export const ShapeInfoSchema = z.object({
+  id: z.string().optional(),
+  parentGroupId: z.string().optional(),
+  rotation: z.number().optional(),
+  name: z.string(),
+  type: z.string(),
+  text: z.string().nullable(),
+  textReadStatus: z.enum(["read", "empty", "not_applicable", "unavailable"]).optional(),
+  readWarnings: z.array(z.object({ property: z.string(), code: z.string(), message: z.string() })).optional(),
+  left: z.number(),
+  top: z.number(),
+  width: z.number(),
+  height: z.number(),
+  connection: z.object({
+    from: z.object({ id: z.string(), name: z.string(), site: z.number() }).nullable(),
+    to: z.object({ id: z.string(), name: z.string(), site: z.number() }).nullable(),
+    connectorType: z.string(),
+    beginArrow: z.string(),
+    endArrow: z.string(),
+  }).optional(),
+});
+export type ShapeInfo = z.infer<typeof ShapeInfoSchema>;
+
 export const SelectionSnapshotSchema = z.object({
   workbookName: z.string(),
+  workbookUrl: z.string().optional(),
   sheet: z.string(),
   sheetId: z.string().nullable(),
   address: z.string(),
@@ -30,6 +54,13 @@ export const SelectionSnapshotSchema = z.object({
   truncated: z.boolean(),
   /** Set when the selection is not a cell range (a shape or chart is selected). */
   note: z.string().optional(),
+  activeShape: ShapeInfoSchema.optional(),
+  /** COM IDs are native IDs; use names when targeting Office.js shape tools. */
+  selectedShapes: z.array(z.object({ name: z.string(), nativeId: z.string(), nativeType: z.number().int(), connector: z.boolean() })).optional(),
+  selectedShapesSource: z.literal("windows_com").optional(),
+  selectedShapesStatus: z.enum(["complete", "unavailable"]).optional(),
+  selectedShapesNote: z.string().optional(),
+  shapeSelectionStatus: z.enum(["active", "unavailable", "none"]).optional(),
 });
 export type SelectionSnapshot = z.infer<typeof SelectionSnapshotSchema>;
 
@@ -93,17 +124,6 @@ export const ModifyStructureResultSchema = z.object({
   operation: z.string(),
   target: z.string(),
 });
-
-export const ShapeInfoSchema = z.object({
-  name: z.string(),
-  type: z.string(),
-  text: z.string().nullable(),
-  left: z.number(),
-  top: z.number(),
-  width: z.number(),
-  height: z.number(),
-});
-export type ShapeInfo = z.infer<typeof ShapeInfoSchema>;
 
 export const InsertRowsResultSchema = z.object({
   sheet: z.string(),

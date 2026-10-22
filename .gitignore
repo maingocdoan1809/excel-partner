@@ -12,4 +12,6 @@ certs/
 *.key
 *.pfx
 .DS_Store
+.playwright-cli/
+output/playwright/
 excel-partner.config.json

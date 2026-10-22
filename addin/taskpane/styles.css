@@ -12,7 +12,7 @@
   --ok: #30d158; --ok-soft: #1c3524; --error: #ff6961; --error-soft: #3a2224; --warning-text: #ffb340;
   --composer-bg: #272729; --composer-end: #1d1d1f;
   --subtle-bg: #333336; --subtle-text: #d2d2d7;
-  --assistant-bg: transparent; --assistant-border: transparent;
+  --assistant-bg: #2c2c2e; --assistant-border: #3a3a3c;
   --login-border: #424245; --login-gradient: #272729; --login-bg: #272729;
   --code-text: #f5f5f7; --code-bg: #333336; --code-border: #48484a;
   --user-bg: #0071e3; --user-text: #fff; --user-border: #0071e3;
@@ -31,7 +31,7 @@
   --ok: #1e7a35; --ok-soft: #e8f5ec; --error: #d70015; --error-soft: #fff0f0; --warning-text: #b25000;
   --composer-bg: #fff; --composer-end: #f5f5f7;
   --subtle-bg: #ebebef; --subtle-text: #424245;
-  --assistant-bg: transparent; --assistant-border: transparent;
+  --assistant-bg: #fff; --assistant-border: #dedee3;
   --login-border: #d2d2d7; --login-gradient: #fff; --login-bg: #fff;
   --code-text: #1d1d1f; --code-bg: #ebebef; --code-border: #d2d2d7;
   --user-bg: #0066cc; --user-text: #fff; --user-border: #0066cc;
@@ -132,12 +132,16 @@ button:disabled { cursor: default; }
 
 .tool {
   align-self: flex-start;
-  display: flex;
+  display: grid;
+  grid-template-columns: 12px minmax(0, 1fr);
   align-items: baseline;
   gap: 7px;
-  max-width: 94%;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
   padding: 3px 10px 3px 8px;
-  border-radius: 999px;
+  border-radius: 8px;
   background: var(--blue-50);
   border: 1px solid var(--border);
   color: var(--muted);
@@ -149,8 +153,9 @@ button:disabled { cursor: default; }
 .tool[data-state="ok"] .mark::before { content: "✓"; }
 .tool[data-state="error"] { color: var(--error); background: var(--error-soft); border-color: #764248; }
 .tool[data-state="error"] .mark::before { content: "✗"; }
-.tool .args { color: inherit; opacity: 0.75; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.tool-group { align-self: flex-start; max-width: 100%; color: var(--muted); font-size: 12px; }
+.tool .name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tool .args { grid-column: 2; min-width: 0; color: inherit; opacity: 0.75; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tool-group { align-self: flex-start; width: 100%; min-width: 0; max-width: 100%; color: var(--muted); font-size: 12px; }
 .tool-group summary { cursor: pointer; width: fit-content; padding: 5px 9px; border-radius: 8px; background: var(--blue-100); user-select: none; }
 .tool-group summary:hover { color: var(--accent-strong); }
 .tool-list { display: flex; flex-direction: column; align-items: flex-start; gap: 5px; padding: 7px 0 2px 12px; }
@@ -212,6 +217,12 @@ button:disabled { cursor: default; }
   white-space: nowrap;
   vertical-align: bottom;
 }
+/* Both layers need the same wrapping width, including the native scrollbar gutter. */
+.composer-card textarea, .prompt-display {
+  scrollbar-gutter: stable;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
 .composer-card textarea {
   display: block;
   width: 100%;
@@ -220,16 +231,20 @@ button:disabled { cursor: default; }
   min-height: 40px;
   resize: none;
   font: inherit;
+  /* Match the preview's inherited tracking so the caret stays beside its text. */
+  letter-spacing: inherit;
   padding: 2px 2px;
   border: 0;
   background: transparent;
-  color: transparent;
+  /* Hide only glyphs; keep a real text color for the native WebView caret. */
+  color: var(--text);
+  -webkit-text-fill-color: transparent;
   caret-color: var(--text);
   position: relative;
   z-index: 1;
 }
 .composer-card textarea:focus-visible { outline: none; }
-.composer-card textarea::placeholder { color: #839b8b; }
+.composer-card textarea::placeholder { color: #839b8b; -webkit-text-fill-color: currentColor; }
 .composer-input-wrap { position: relative; min-width: 0; }
 .prompt-display { position: absolute; inset: 0; overflow: hidden; pointer-events: none; padding: 2px; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--text); font: inherit; }
 .file-mention { border-radius: 6px; padding: 1px 4px; background: var(--blue-100); color: var(--accent-strong); white-space: break-spaces; }
@@ -573,7 +588,7 @@ button.ghost { background: none; color: var(--muted); border: 0; }
 /* surfaces */
 .bubble { font-size: 13px; line-height: 1.6; }
 .bubble.user { border-radius: 18px; border-bottom-right-radius: 6px; }
-.bubble.assistant { padding: 4px 2px; border: 0; box-shadow: none; border-radius: 0; max-width: 100%; }
+.bubble.assistant { padding: 10px 12px; border: 1px solid var(--assistant-border); box-shadow: none; border-radius: 18px; border-bottom-left-radius: 6px; max-width: 100%; }
 .bubble code { background: var(--code-bg); color: var(--code-text); border-radius: 6px; padding: 1px 6px; }
 .bubble pre { background: var(--code-bg); border: 0; border-radius: 12px; }
 .bubble.user code { background: rgba(255, 255, 255, .2); color: inherit; }

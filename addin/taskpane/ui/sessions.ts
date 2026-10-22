@@ -29,6 +29,10 @@ export interface StoredChange {
 export interface StoredSession {
   id: string;
   title: string;
+  providerSessionId?: string;
+  providerTitle?: string;
+  /** Distinguishes old chats with no recorded native identity from a new provisional chat. */
+  identityVersion?: 1;
   provider: string;
   startedAt: number;
   updatedAt: number;
@@ -40,6 +44,7 @@ export interface SessionSummary {
   id: string;
   title: string;
   provider: string;
+  providerSessionId?: string;
   startedAt: number;
   updatedAt: number;
   messageCount: number;
@@ -61,7 +66,7 @@ const NEW_TITLE = "New chat";
 
 export function newSession(provider: string, now = Date.now()): StoredSession {
   const id = `${now.toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
-  return { id, title: NEW_TITLE, provider, startedAt: now, updatedAt: now, messages: [], changes: [] };
+  return { id, title: NEW_TITLE, provider, identityVersion: 1, startedAt: now, updatedAt: now, messages: [], changes: [] };
 }
 
 /** First user message, one line, as the list title. */
@@ -77,10 +82,33 @@ export function trimSession(session: StoredSession): StoredSession {
   const clip = (text: string) => (text.length > LIMITS.textChars ? `${text.slice(0, LIMITS.textChars)}…` : text);
   return {
     ...session,
-    title: titleFrom(session.messages), // from the whole chat, before old messages are dropped
+    title: session.providerTitle || titleFrom(session.messages),
     messages: session.messages.slice(-LIMITS.messagesPerSession).map((m) => ({ ...m, text: clip(m.text) })),
     changes: session.changes.slice(-LIMITS.changesPerSession),
   };
+}
+
+/** Keep each native CLI session as one history item. Rebinding the same ID resumes
+ * it; a new ID moves only this request to a new item and preserves previous work.
+ */
+export function bindProviderSession(session: StoredSession,
+  info: { provider: string; providerSessionId: string; title?: string },
+  requestMessageIndex: number, requestChangeIndex: number, startedAt: number,
+): { current: StoredSession; previous: StoredSession | null } {
+  const id = `${info.provider}:${info.providerSessionId}`;
+  if (session.id === id) {
+    session.identityVersion = 1;
+    session.providerSessionId = info.providerSessionId;
+    if (info.title) { session.providerTitle = info.title; session.title = info.title; }
+    return { current: session, previous: null };
+  }
+  const previous = { ...session, messages: session.messages.slice(0, requestMessageIndex),
+    changes: session.changes.slice(0, requestChangeIndex) };
+  const current: StoredSession = { ...newSession(info.provider, startedAt), id,
+    providerSessionId: info.providerSessionId, providerTitle: info.title,
+    messages: session.messages.slice(requestMessageIndex), changes: session.changes.slice(requestChangeIndex) };
+  current.title = info.title || titleFrom(current.messages);
+  return { current, previous };
 }
 
 export class SessionStore {
@@ -130,6 +158,7 @@ export class SessionStore {
         id: s.id,
         title: s.title,
         provider: s.provider,
+        providerSessionId: s.providerSessionId,
         startedAt: s.startedAt,
         updatedAt: s.updatedAt,
         messageCount: s.messages.filter((m) => m.kind === "user" || m.kind === "assistant").length,

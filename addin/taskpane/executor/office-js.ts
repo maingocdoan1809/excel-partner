@@ -9,8 +9,8 @@ const AsyncFunction = Object.getPrototypeOf(async function () {
 }).constructor as new (...args: string[]) => (...values: unknown[]) => Promise<unknown>;
 
 /**
- * Opt-in escape hatch. The bridge only forwards this tool when it was started with
- * BRIDGE_ALLOW_OFFICE_JS=1, and the MCP server only lists it then. The code runs with the
+ * Office.js escape hatch, enabled by default. BRIDGE_ALLOW_OFFICE_JS=0 disables
+ * forwarding and MCP discovery. The code runs with the
  * task pane's Office access and can change or delete anything in the workbook.
  */
 export async function executeOfficeJs(input: ExecuteOfficeJsInput): Promise<unknown> {

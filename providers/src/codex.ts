@@ -11,13 +11,16 @@ import { JsonRpcPeer } from "./jsonrpc.js";
 import { buildTurnPrompt, SYSTEM_PROMPT } from "./prompt.js";
 import { MCP_SERVER_NAME, type ProviderModelCatalog, type SendTurnInput, type StartSessionContext } from "./types.js";
 import { ensureWorkspaceDir } from "./workspace.js";
+import { codexTokenBaseline, nativeTitle, validNativeId } from "./session-metadata.js";
 
 interface CodexSession {
   peer: JsonRpcPeer;
   threadId: string;
+  title?: string;
+  baselinePending?: boolean;
   tokenTotals?: import("../../protocol/src/index.js").TokenUsage;
   /** Sink for the turn currently running, if any. */
-  active: { queue: AsyncQueue<ProviderEvent>; requestId: string; turnId: string | null; interrupting: boolean; tokenBaseline?: import("../../protocol/src/index.js").TokenUsage } | null;
+  active: { queue: AsyncQueue<ProviderEvent>; requestId: string; turnId: string | null; interrupting: boolean; tokenBaseline?: import("../../protocol/src/index.js").TokenUsage; usageUnavailable?: boolean } | null;
 }
 
 interface TurnLike {
@@ -35,6 +38,15 @@ interface TurnLike {
  *                  turn/completed; cancel = turn/interrupt.
  */
 export class CodexAdapter extends BaseCliAdapter {
+  async sessionTitle(id: string): Promise<string | undefined> {
+    const session = [...this.sessions.values()].find(s => s.threadId === id);
+    if (!session) return undefined;
+    try {
+      const result = await session.peer.request<{ thread: { name?: string | null } }>("thread/read", { threadId: id, includeTurns: false }, 5000);
+      session.title = nativeTitle(result.thread.name) ?? session.title;
+    } catch { /* The thread can be busy or the CLI may not implement thread/read. */ }
+    return session.title;
+  }
   async listModels(): Promise<ProviderModelCatalog> {
     const peer = new JsonRpcPeer({ command: process.env.CODEX_BIN ?? "codex", args: ["app-server"], env: this.env });
     try {
@@ -89,6 +101,7 @@ export class CodexAdapter extends BaseCliAdapter {
   }
 
   override async startSession(ctx: StartSessionContext): Promise<string> {
+    if (ctx.resumeSessionId && !validNativeId(ctx.resumeSessionId)) throw new Error("Invalid Codex resume thread ID");
     const command = process.env.CODEX_BIN ?? "codex";
     const cwd = ensureWorkspaceDir();
     const providerSessionId = `codex-${randomUUID()}`;
@@ -112,12 +125,12 @@ export class CodexAdapter extends BaseCliAdapter {
       });
       peer.notify("initialized");
 
-      const started = await peer.request<{ thread: { id: string } }>("thread/start", {
+      const started = await peer.request<{ thread: { id: string; name?: string | null; path?: string | null } }>(ctx.resumeSessionId ? "thread/resume" : "thread/start", {
+        ...(ctx.resumeSessionId ? { threadId: ctx.resumeSessionId } : { ephemeral: false }),
         cwd,
         ...(ctx.model ? { model: ctx.model } : {}),
         approvalPolicy: "never",
         sandbox: "read-only",
-        ephemeral: true,
         developerInstructions: SYSTEM_PROMPT,
         config: {
           mcp_servers: {
@@ -134,7 +147,10 @@ export class CodexAdapter extends BaseCliAdapter {
         },
       });
 
-      session = { peer, threadId: started.thread.id, active: null };
+      if (ctx.resumeSessionId && started.thread.id !== ctx.resumeSessionId) throw new Error("Codex returned a different thread while resuming");
+      const baseline = ctx.resumeSessionId ? await codexTokenBaseline(started.thread.path) : undefined;
+      session = { peer, threadId: started.thread.id, title: nativeTitle(started.thread.name), active: null,
+        tokenTotals: baseline, baselinePending: Boolean(ctx.resumeSessionId && !baseline) };
       this.sessions.set(providerSessionId, session);
       peer.onExit(() => {
         const current = this.sessions.get(providerSessionId);
@@ -163,6 +179,7 @@ export class CodexAdapter extends BaseCliAdapter {
 
     const queue = new AsyncQueue<ProviderEvent>();
     session.active = { queue, requestId, turnId: null, interrupting: false };
+    yield { type: "session_info", requestId, provider: this.id, providerSessionId: session.threadId, title: session.title };
     yield { type: "turn_started", requestId };
 
     const onAbort = () => void this.interrupt(session);
@@ -193,6 +210,8 @@ export class CodexAdapter extends BaseCliAdapter {
 
     try {
       for await (const event of queue) {
+        if (event.type === "turn_finished") yield { type: "session_info", requestId, provider: this.id,
+          providerSessionId: session.threadId, title: await this.sessionTitle(session.threadId) };
         yield event;
         if (event.type === "turn_finished") break;
       }
@@ -237,24 +256,47 @@ export class CodexAdapter extends BaseCliAdapter {
 
   private onNotification(session: CodexSession, method: string, raw: unknown): void {
     const params = (raw ?? {}) as Record<string, any>;
+    if (params.threadId !== session.threadId) return;
+    if (method === "thread/name/updated") session.title = nativeTitle(params.threadName);
     const active = session.active;
-    if (!active || params.threadId !== session.threadId) return;
+    if (!active) return;
     const { queue, requestId } = active;
 
     switch (method) {
+      case "thread/name/updated":
+        queue.push({ type: "session_info", requestId, provider: this.id, providerSessionId: session.threadId, title: session.title });
+        break;
       case "thread/tokenUsage/updated": {
         if (params.turnId && active.turnId && params.turnId !== active.turnId) break;
         const total = params.tokenUsage?.total;
         if (!total || ![total.inputTokens, total.outputTokens, total.totalTokens].every((n) => Number.isSafeInteger(n) && n >= 0)) break;
-        active.tokenBaseline ??= session.tokenTotals ?? { inputTokens: 0, outputTokens: 0, cachedInputTokens: 0, totalTokens: 0 };
+        active.tokenBaseline ??= session.tokenTotals ?? { inputTokens: 0, outputTokens: 0, cachedInputTokens: 0, totalTokens: 0,
+          cacheWriteTokens: 0, uncachedInputTokens: 0, reasoningTokens: 0 };
         const current = { inputTokens: total.inputTokens, outputTokens: total.outputTokens,
-          cachedInputTokens: total.cachedInputTokens ?? 0, totalTokens: total.totalTokens };
+          cachedInputTokens: total.cachedInputTokens ?? 0, totalTokens: total.totalTokens,
+          ...(Number.isSafeInteger(total.cacheWriteInputTokens) && total.cacheWriteInputTokens >= 0 && (total.cachedInputTokens ?? 0) + total.cacheWriteInputTokens <= total.inputTokens
+            ? { cacheWriteTokens: total.cacheWriteInputTokens as number, uncachedInputTokens: total.inputTokens - (total.cachedInputTokens ?? 0) - total.cacheWriteInputTokens } : {}),
+          ...(Number.isSafeInteger(total.reasoningOutputTokens) && total.reasoningOutputTokens >= 0 ? { reasoningTokens: total.reasoningOutputTokens as number } : {}) };
+        if (session.baselinePending) {
+          session.tokenTotals = current;
+          active.tokenBaseline = current;
+          active.usageUnavailable = true;
+          session.baselinePending = false;
+          break;
+        }
+        if (active.usageUnavailable) { session.tokenTotals = current; break; }
         const baseline = active.tokenBaseline;
         queue.push({ type: "usage_update", requestId, usage: {
           inputTokens: Math.max(0, current.inputTokens - baseline.inputTokens),
           outputTokens: Math.max(0, current.outputTokens - baseline.outputTokens),
           cachedInputTokens: Math.max(0, current.cachedInputTokens - baseline.cachedInputTokens),
           totalTokens: Math.max(0, current.totalTokens - baseline.totalTokens),
+          source: "codex_thread", providerSessionId: session.threadId,
+          ...(current.cacheWriteTokens !== undefined && baseline.cacheWriteTokens !== undefined && current.uncachedInputTokens !== undefined && baseline.uncachedInputTokens !== undefined
+            ? { cacheWriteTokens: Math.max(0, current.cacheWriteTokens - baseline.cacheWriteTokens),
+              uncachedInputTokens: Math.max(0, current.uncachedInputTokens - baseline.uncachedInputTokens) } : {}),
+          ...(current.reasoningTokens !== undefined && baseline.reasoningTokens !== undefined
+            ? { reasoningTokens: Math.max(0, current.reasoningTokens - baseline.reasoningTokens) } : {}),
         } });
         session.tokenTotals = current;
         break;
@@ -303,6 +345,7 @@ export class CodexAdapter extends BaseCliAdapter {
         }
         break;
       case "turn/completed": {
+        queue.push({ type: "session_info", requestId, provider: this.id, providerSessionId: session.threadId, title: session.title });
         const turn = params.turn as TurnLike;
         if (turn.status === "failed") {
           queue.push({

@@ -28,7 +28,7 @@ describe.skipIf(!hasClaude())("claude adapter (real CLI, fake model)", () => {
     await fake.start();
     process.env.ANTHROPIC_BASE_URL = fake.url;
     process.env.ANTHROPIC_API_KEY = "sk-ant-fake";
-    harness = await Harness.start("claude");
+    harness = await Harness.start("claude", { allowOfficeJs: false });
     return harness;
   }
 
@@ -61,8 +61,10 @@ describe.skipIf(!hasClaude())("claude adapter (real CLI, fake model)", () => {
     expect(result.events.find((e) => e.type === "tool_finished")).toMatchObject({ ok: true });
 
     // Only the Excel MCP tools are exposed: no Bash/Edit/Read built-ins.
-    const toolNames: string[] = fake!.requests.find((r) => r.body.tools?.length)!.body.tools.map((t: any) => t.name);
-    expect(toolNames.every((n) => n.startsWith("mcp__excel__"))).toBe(true);
+    // Newer CLI versions include a non-callable deferred-tool schema placeholder.
+    const toolNames: string[] = fake!.requests.find((r) => r.body.tools?.length)!.body.tools.map((t: any) => t.name)
+      .filter((name: string) => name !== "DeferredToolPlaceholder");
+    expect(toolNames.every((n) => n.startsWith("mcp__excel__")), JSON.stringify(toolNames)).toBe(true);
     expect(toolNames).toHaveLength(exposedToolNames(false).length);
   }, 120_000);
 

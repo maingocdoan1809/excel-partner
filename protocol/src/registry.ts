@@ -14,6 +14,7 @@ import {
   AddConnectorInputSchema,
   DeleteShapesInputSchema,
   ListShapesInputSchema,
+  ValidateFlowchartInputSchema,
   UpdateShapeInputSchema,
 } from "./tools.js";
 import {
@@ -59,6 +60,7 @@ export const ToolInputSchemas = {
   read_range_image: ReadRangeImageInputSchema,
   get_objects: GetObjectsInputSchema,
   list_shapes: ListShapesInputSchema,
+  validate_flowchart: ValidateFlowchartInputSchema,
   // cells
   write_range: WriteRangeInputSchema,
   set_cells: SetCellsInputSchema,
@@ -110,7 +112,7 @@ export const EXCEL_TOOL_NAMES = Object.keys(ToolInputSchemas) as ExcelToolName[]
 /** Tools the bridge answers itself instead of forwarding to the task pane. */
 export const SERVER_TOOLS: readonly ExcelToolName[] = ["list_skills", "read_skill", "save_skill", "run_skill_script", "run_python", "list_reference_files", "read_workbook_file", "read_attached_image", "read_attached_file"];
 
-/** Tools that are off unless the bridge is started with BRIDGE_ALLOW_OFFICE_JS=1. */
+/** Tools controlled by allowOfficeJs (enabled by default; BRIDGE_ALLOW_OFFICE_JS=0 disables them). */
 export const OPT_IN_TOOLS: readonly ExcelToolName[] = ["execute_office_js"];
 
 /** Tool names a session exposes, given whether the opt-in tools are enabled. */

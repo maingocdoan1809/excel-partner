@@ -1,7 +1,8 @@
 import { beforeEach, describe, expect, it } from "vitest";
+import { getSelectionLabel } from "../addin/taskpane/executor/read.js";
 import { executeTool } from "../addin/taskpane/executor/index.js";
-import { parseToolInput } from "../protocol/src/index.js";
-import { MockWorkbook, MockSheet, installOfficeMock } from "./support/office-mock.js";
+import { parseToolInput, SelectionSnapshotSchema } from "../protocol/src/index.js";
+import { MockWorkbook, MockSheet, MockShape, installOfficeMock } from "./support/office-mock.js";
 
 let book: MockWorkbook;
 let sheet: MockSheet;
@@ -464,5 +465,228 @@ describe("lines and dashed connectors", () => {
   it("accepts a font name for shape text", async () => {
     await call("add_shape", { name: "p", type: "FlowChartProcess", anchor: "A1:C2", text: "x", fontName: "Arial", fontSize: 8 });
     expect(sheet.shapeList[0]!.textFont["name"]).toBe("Arial");
+  });
+});
+
+
+describe("shape selection and flow inspection", () => {
+  async function flow() {
+    await call("add_shape", { name: "start", type: "FlowChartTerminator", text: "Start", anchor: "A5:B6" });
+    await call("add_shape", { name: "step", type: "FlowChartProcess", text: "Process", anchor: "A9:B10" });
+    await call("add_connector", { name: "next", from: "start", to: "step" });
+  }
+
+  it("identifies the active shape even when getSelectedRange would return stale cells", async () => {
+    await flow();
+    book.activeShape = sheet.shapeList[1]!;
+    const result = await call("get_selection", {});
+    expect(result).toMatchObject({ ok: true, data: { address: "", values: [], shapeSelectionStatus: "active", activeShape: { name: "step", text: "Process", id: book.activeShape.id } } });
+    if (result.ok) expect(SelectionSnapshotSchema.parse(result.data).activeShape?.name).toBe("step");
+  });
+
+  it("reads an active connector's endpoints without accessing its text frame", async () => {
+    await flow();
+    book.invalidSelection = true;
+    book.activeShape = sheet.shapeList[2]!;
+    expect(await call("get_selection", {})).toMatchObject({ ok: true, data: { activeShape: { name: "next", connection: { from: { name: "start" }, to: { name: "step" }, endArrow: "Triangle" } } } });
+  });
+
+  it("explains unavailable shape identification on older hosts", async () => {
+    book.supportsActiveShape = false;
+    book.invalidSelection = true;
+    expect(await call("get_selection", {})).toMatchObject({ ok: true, data: { shapeSelectionStatus: "unavailable", note: expect.stringContaining("ExcelApi 1.19") } });
+  });
+
+  it("reads a connected flow and preserves connector IDs, sites and arrows", async () => {
+    await flow();
+    const result = await call("list_shapes", {});
+    expect(result).toMatchObject({ ok: true, data: { count: 3, hasMore: false, validation: { complete: true, nodeCount: 2, lineCount: 1, issues: [], components: [[sheet.shapeList[0]!.id, sheet.shapeList[1]!.id]] } } });
+    if (result.ok) expect((result.data as any).shapes[2].connection).toMatchObject({ from: { name: "start", site: 2 }, to: { name: "step", site: 0 }, endArrow: "Triangle" });
+  });
+
+  it("exposes nested groups with parent IDs", async () => {
+    await flow();
+    const nested = new MockShape("Group", "");
+    nested.name = "inner";
+    nested.children = sheet.shapeList.splice(0);
+    const outer = new MockShape("Group", "");
+    outer.name = "outer";
+    outer.children = [nested];
+    sheet.shapeList.push(outer);
+    expect(await call("list_shapes", {})).toMatchObject({ ok: true, data: { count: 5, shapes: [
+      { name: "outer" }, { name: "inner", parentGroupId: outer.id },
+      { name: "start", parentGroupId: nested.id }, { name: "step", parentGroupId: nested.id },
+      { name: "next", parentGroupId: nested.id, connection: { from: { name: "start" }, to: { name: "step" } } },
+    ] } });
+  });
+
+  it("reports unattached lines and isolated shapes without asserting business validity", async () => {
+    await flow();
+    sheet.shapeList[2]!.connections.end = undefined;
+    expect(await call("list_shapes", {})).toMatchObject({ ok: true, data: { validation: { issues: [
+      { code: "unattached_line", shapes: ["next"] }, { code: "isolated_shape", shapes: ["step"] },
+    ] } } });
+  });
+
+  it("paginates beyond 200 shapes and marks partial checks incomplete", async () => {
+    for (let i = 0; i < 205; i++) sheet.shapes.addGeometricShape("Rectangle").name = `n${i}`;
+    const first = await call("list_shapes", {});
+    expect(first).toMatchObject({ ok: true, data: { count: 205, returned: 200, nextOffset: 200, hasMore: true, validation: { complete: false, issues: [] } } });
+    const last = await call("list_shapes", { offset: 200 });
+    expect(last).toMatchObject({ ok: true, data: { returned: 5, nextOffset: null, hasMore: false, validation: { complete: false } } });
+    expect(await call("list_shapes", { limit: 1000 })).toMatchObject({ ok: true, data: { returned: 205, validation: { complete: true } } });
+  });
+});
+
+
+describe("validate_flowchart tool", () => {
+  it("runs the read-only validator through the registry and live executor", async () => {
+    await call("add_shape", { name: "a", type: "Rectangle", anchor: "A5:B6" });
+    await call("add_shape", { name: "b", type: "Rectangle", anchor: "A9:B10" });
+    await call("add_connector", { name: "link", from: "a", to: "b", connectorType: "Straight" });
+    const before = sheet.shapeList.map(s => ({ name: s.name, left: s.left, top: s.top }));
+    expect(await call("validate_flowchart", {})).toMatchObject({ ok: true, data: {
+      status: "no_issues_in_checked_geometry", scanned: 3, scanTruncated: false,
+      geometry: { complete: true, checkedConnectors: 1, issues: [] },
+    } });
+    expect(sheet.shapeList.map(s => ({ name: s.name, left: s.left, top: s.top }))).toEqual(before);
+  });
+
+  it("does not certify routed connectors or truncated scans", async () => {
+    await call("add_shape", { name: "a", type: "Rectangle", anchor: "A5:B6" });
+    await call("add_shape", { name: "b", type: "Rectangle", anchor: "A9:B10" });
+    await call("add_connector", { from: "a", to: "b", connectorType: "Elbow" });
+    expect(await call("validate_flowchart", {})).toMatchObject({ ok: true, data: { status: "needs_visual_review", geometry: { complete: false } } });
+    expect(await call("validate_flowchart", { maxShapes: 1 })).toMatchObject({ ok: true, data: { status: "needs_visual_review", scanTruncated: true } });
+  });
+});
+
+
+describe("optional shape text failures", () => {
+  async function sheetWithBrokenText(mode: "frame" | "range" | "hasTextSync" | "rangeSync") {
+    await call("add_shape", { name: "good", type: "Rectangle", anchor: "A5:B6", text: "Readable step" });
+    await call("add_shape", { name: "bad", type: "Rectangle", anchor: "A9:B10", text: "Unreachable text" });
+    await call("add_shape", { name: "after", type: "Rectangle", anchor: "A13:B14", text: "Still readable" });
+    await call("add_connector", { name: "link", from: "good", to: "bad", connectorType: "Straight" });
+    await call("add_connector", { name: "next", from: "bad", to: "after", connectorType: "Straight" });
+    sheet.shapeList[1]!.textReadFailure = mode;
+  }
+
+  it("does not navigate TextRange on an empty shape", async () => {
+    await call("add_shape", { name: "empty", type: "Rectangle", anchor: "A5:B6" });
+    const empty = sheet.shapeList[0]!;
+    empty.emptyTextRangeFails = true;
+    empty.textRangeAccesses = 0;
+    expect(await call("list_shapes", {})).toMatchObject({ ok: true, data: {
+      textReadComplete: true, readWarnings: [], shapes: [{ name: "empty", text: "", textReadStatus: "empty" }],
+    } });
+    expect(empty.textRangeAccesses).toBe(0);
+  });
+
+  it.each(["frame", "range", "hasTextSync", "rangeSync"] as const)("keeps the whole sheet and connector data when text fails at %s", async mode => {
+    await sheetWithBrokenText(mode);
+    const result = await call("list_shapes", {});
+    expect(result).toMatchObject({ ok: true, data: {
+      count: 5, returned: 5, textReadComplete: false,
+      readWarnings: [{ name: "bad", property: "text" }],
+      shapes: [
+        { name: "good", text: "Readable step", textReadStatus: "read" },
+        { name: "bad", text: null, textReadStatus: "unavailable", left: expect.any(Number) },
+        { name: "after", text: "Still readable", textReadStatus: "read" },
+        { name: "link", textReadStatus: "not_applicable", connection: { from: { name: "good" }, to: { name: "bad" } } },
+        { name: "next", connection: { from: { name: "bad" }, to: { name: "after" } } },
+      ],
+    } });
+    expect(sheet.shapeList).toHaveLength(5);
+    expect(sheet.shapeList.every(shape => !shape.deleted)).toBe(true);
+    // A rejected optional batch must not poison the next tool request.
+    expect(await call("get_sheets", {})).toMatchObject({ ok: true });
+  });
+
+  it("keeps distinct diagnostics for two unreadable shapes with the same name", async () => {
+    await sheetWithBrokenText("rangeSync");
+    sheet.shapeList[0]!.name = "Text Box 1";
+    sheet.shapeList[0]!.textReadFailure = "rangeSync";
+    sheet.shapeList[1]!.name = "Text Box 1";
+    const result = await call("list_shapes", {});
+    expect(result).toMatchObject({ ok: true, data: {
+      count: 5, textReadComplete: false,
+      shapes: [{ textReadStatus: "unavailable" }, { textReadStatus: "unavailable" }, { text: "Still readable" }, {}, {}],
+      readWarnings: [{ id: sheet.shapeList[0]!.id, name: "Text Box 1" }, { id: sheet.shapeList[1]!.id, name: "Text Box 1" }],
+    } });
+  });
+
+  it("continues geometric validation and reports the unreadable text separately", async () => {
+    await sheetWithBrokenText("rangeSync");
+    expect(await call("validate_flowchart", {})).toMatchObject({ ok: true, data: {
+      scanned: 5, status: "no_issues_in_checked_geometry", textReadComplete: false,
+      readWarnings: [{ name: "bad", property: "text" }],
+      geometry: { complete: true, checkedConnectors: 2, issues: [] },
+    } });
+  });
+
+  it("can identify a selected shape even when its text is unreadable", async () => {
+    await sheetWithBrokenText("range");
+    book.activeShape = sheet.shapeList[1]!;
+    const result = await call("get_selection", {});
+    expect(result).toMatchObject({ ok: true, data: { activeShape: { name: "bad", text: null, textReadStatus: "unavailable" } } });
+    if (result.ok) expect(SelectionSnapshotSchema.parse(result.data).activeShape?.readWarnings).toHaveLength(1);
+  });
+});
+
+
+describe("editing grouped shapes", () => {
+  it("updates the selected nested child directly without changing its siblings or group", async () => {
+    const child = new MockShape("GeometricShape", "Rectangle"); child.name = "フローチャート: 処理 33";
+    const sibling = new MockShape("GeometricShape", "Rectangle"); sibling.name = "Sibling";
+    const inner = new MockShape("Group", ""); inner.name = "Inner"; inner.children = [child, sibling];
+    const outer = new MockShape("Group", ""); outer.name = "Group 62"; outer.children = [inner];
+    sheet.shapeList.push(outer);
+    book.activeShape = child;
+    expect(await call("update_shape", { sheet: { name: "Sheet1" }, name: child.name, fillColor: "#FF0000" })).toMatchObject({ ok: true, data: { name: child.name } });
+    expect(child.fillColor).toBe("#FF0000");
+    expect(sibling.fillColor).toBeNull();
+    expect(outer.fillColor).toBeNull();
+    expect(book.activeShape).toBe(child);
+  });
+
+  it("updates grouped connectors using lineColor", async () => {
+    const line = new MockShape("Line", ""); line.name = "Selected connector";
+    const group = new MockShape("Group", ""); group.name = "Group"; group.children = [line];
+    sheet.shapeList.push(group);
+    expect(await call("update_shape", { name: line.name, lineColor: "#FF0000" })).toMatchObject({ ok: true });
+    expect(line.lineFormat.color).toBe("#FF0000");
+  });
+
+  it("rejects ambiguous names inside different groups before writing", async () => {
+    const children = [new MockShape("GeometricShape", "Rectangle"), new MockShape("GeometricShape", "Rectangle")];
+    for (const [index, child] of children.entries()) {
+      child.name = "Duplicate";
+      const group = new MockShape("Group", ""); group.name = `Group ${index}`; group.children = [child];
+      sheet.shapeList.push(group);
+    }
+    const result = await call("update_shape", { name: "Duplicate", fillColor: "#FF0000" });
+    expectError(result, "invalid_arguments");
+    expect(children.map(child => child.fillColor)).toEqual([null, null]);
+  });
+});
+
+describe("lightweight selection labels", () => {
+  it("reads connector names without accessing their text or connection metadata", async () => {
+    await call("add_line", { name: "Connector_A", from: "A5", to: "C5" });
+    await call("add_line", { name: "Connector_B", from: "A7", to: "C7" });
+    book.activeShape = sheet.shapeList[0]!;
+    expect(await getSelectionLabel()).toMatchObject({ label: "Connector_A", title: expect.stringContaining("line / connector") });
+    book.activeShape = sheet.shapeList[1]!;
+    expect(await getSelectionLabel()).toMatchObject({ label: "Connector_B" });
+    book.activeShape = null;
+    expect(await getSelectionLabel()).toMatchObject({ label: "Sheet1!A2:C2 · 3 cells" });
+  });
+
+  it("ignores broken text frames while identifying the selected shape", async () => {
+    await call("add_shape", { name: "broken text", type: "Rectangle", anchor: "A5:B6" });
+    book.activeShape = sheet.shapeList[0]!;
+    book.activeShape.textReadFailure = "frame";
+    expect(await getSelectionLabel()).toMatchObject({ label: "broken text" });
   });
 });

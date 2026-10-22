@@ -1,8 +1,11 @@
+import { watchShapeSelectionEvents } from "./executor/selection-events.js";
+import { getSelectionLabel } from "./executor/read.js";
+import { monitorSelection } from "./ui/selection.js";
 import type { UsageSummary, TokenUsage, ProviderEvent, ProviderId, ProviderConnectionStatus, ToolResult } from "../../protocol/src/index.js";
 import { BridgeClient, type ModelCatalog, type SavedReference, type SkillTemplate, type UploadedAttachment, type WorkspaceEntry, type WorkspaceRoot } from "./bridge-client.js";
 import type { PermissionMode } from "./permissions.js";
 import { WRITE_TOOLS, executeTool } from "./executor/index.js";
-import { formatDuration, usageCsv } from "./ui/usage.js";
+import { formatCredits, formatDuration, usageCsv } from "./ui/usage.js";
 import { setupUsagePopover } from "./ui/usage-popover.js";
 import { describeChange } from "./ui/changes.js";
 import { setupInputResizer } from "./ui/input-resizer.js";
@@ -16,6 +19,7 @@ import { setupUserSkills } from "./ui/user-skills.js";
 import {
   SessionStore,
   buildContextPreface,
+  bindProviderSession,
   formatWhen,
   newSession,
   type StoredChange,
@@ -31,6 +35,8 @@ const els = {
   usageStats: byId<HTMLElement>("usage-stats"),
   usageBreakdown: byId<HTMLElement>("usage-breakdown"),
   usageCredits: byId<HTMLElement>("usage-credits"),
+  usageCacheSplit: byId<HTMLElement>("usage-cache-split"),
+  usageSource: byId<HTMLElement>("usage-source"),
   usageExport: byId<HTMLButtonElement>("usage-export"),
   status: byId<HTMLSpanElement>("connection-status"),
   statusLabel: byId<HTMLSpanElement>("connection-label"),
@@ -126,6 +132,9 @@ let activeModel: string | null | undefined;
 let activeEffort: string | undefined;
 let permissionMode: PermissionMode = localStorage.getItem(PERMISSION_MODE_KEY) === "auto" ? "auto" : "ask";
 let session: StoredSession = newSession(provider);
+let requestMessageIndex = 0;
+let requestChangeIndex = 0;
+let requestStartedAt = 0;
 /** The provider process starts empty after a reload or when a past chat is continued; replay the transcript once. */
 let needsContext = false;
 let currentRequestId: string | null = null;
@@ -213,7 +222,12 @@ Office.onReady((info) => {
     },
     onProviderEvent: handleEvent,
     onError: (message) => append({ kind: "error", text: message }),
-    onToolExecuted: recordChange,
+    onToolExecuted: (tool, args, result) => {
+      recordChange(tool, args, result);
+      if (result.ok && ["add_shape", "add_connector", "add_line", "update_shape", "delete_shapes", "execute_office_js", "manage_sheet", "insert_sheets_from_file"].includes(tool)) {
+        refreshSelectionSubscriptions?.();
+      }
+    },
   });
   client.setPermissionMode(permissionMode);
   client.connect();
@@ -446,6 +460,7 @@ function renderToolCard(tool: StoredTool): HTMLElement {
   card.className = "tool";
   card.innerHTML = '<span class="mark"></span><span class="name"></span><span class="args"></span>';
   card.querySelector(".name")!.textContent = tool.name;
+  card.querySelector(".name")!.setAttribute("title", tool.name);
   paintTool(card, tool);
   return card;
 }
@@ -463,7 +478,7 @@ function bubble(kind: "user" | "assistant" | "error"): HTMLDivElement {
 function paintTool(card: HTMLElement, tool: StoredTool): void {
   card.dataset.state = tool.state;
   card.querySelector(".args")!.textContent = tool.error ?? tool.args;
-  if (tool.error) card.title = tool.error;
+  card.title = tool.error ?? tool.args;
 }
 
 /** Add a message to the current chat, show it and save. */
@@ -494,6 +509,10 @@ function renderWelcome(): void {
 async function submit(): Promise<void> {
   const prompt = els.input.value.trim() || (pendingAttachments.length ? "Please inspect the attached files." : "");
   if (!prompt || currentRequestId || !client.connected) return;
+  if (!session.identityVersion && !session.providerSessionId && session.messages.some(message => message.kind === "user")) {
+    append({ kind: "error", text: "This legacy chat has no saved CLI session ID, so it cannot be resumed reliably. Its history is preserved. Start a new chat to create a native session." });
+    return;
+  }
   const model = els.modelSelect.value || null;
   const effort = els.effortSelect.value as "low" | "medium" | "high";
   saveModelChoice();
@@ -518,6 +537,9 @@ async function submit(): Promise<void> {
   const context = needsContext || (activeModel !== undefined && activeModel !== model) || (activeEffort !== undefined && activeEffort !== effort)
     ? buildContextPreface(session) : undefined;
   needsContext = false;
+  requestMessageIndex = session.messages.length;
+  requestChangeIndex = session.changes.length;
+  requestStartedAt = Date.now();
   append({ kind: "user", text: prompt, attachments: pendingAttachments.map((item) => ({ name: item.name })) });
   showThinking();
   persistNow();
@@ -529,7 +551,8 @@ async function submit(): Promise<void> {
     const attachmentIds = pendingAttachments.flatMap((item) => item.reference.id ? [item.reference.id] : []);
     const referencePaths = pendingAttachments.flatMap((item) => item.reference.id ? [] : [item.reference.path]);
     if (cancelRequested) return finishLocalCancel(requestId);
-    client.sendPrompt(requestId, prompt, selection, context, attachmentIds, model, referencePaths, effort, session.id);
+    client.sendPrompt(requestId, prompt, selection, context, attachmentIds, model, referencePaths, effort, session.id,
+      session.provider === provider ? session.providerSessionId : undefined);
     clearAttachment();
     promptDispatched = true;
     activeModel = model;
@@ -877,6 +900,8 @@ function renderComposerPreview(): void {
     els.promptDisplay.append(badge);
     appendFileMentions(els.promptDisplay, text.slice(command.end), pendingAttachments.map((item) => item.name));
   } else appendFileMentions(els.promptDisplay, text, pendingAttachments.map((item) => item.name));
+  // A textarea keeps a caret line after a trailing newline; mirror that line too.
+  if (text.endsWith("\n")) els.promptDisplay.append(document.createTextNode("\u200b"));
   els.promptDisplay.scrollTop = els.input.scrollTop;
 }
 
@@ -908,6 +933,29 @@ function clearAttachment(): void {
 
 function handleEvent(event: ProviderEvent): void {
   switch (event.type) {
+    case "session_info": {
+      if (event.requestId !== currentRequestId) return;
+      const oldId = session.id;
+      const bound = bindProviderSession(session, event, requestMessageIndex, requestChangeIndex, requestStartedAt);
+      if (bound.previous) {
+        store.save(bound.previous); // Removes a provisional empty history item, preserves older sessions.
+        requestMessageIndex = 0;
+        requestChangeIndex = 0;
+      }
+      session = bound.current;
+      if (oldId !== session.id) {
+        usageSummary = undefined;
+        if (usageRequestId === event.requestId) usageSessionId = session.id;
+        // Metadata precedes output, so redraw only when a request moves to another native session.
+        clearThinking();
+        els.messages.replaceChildren();
+        for (const message of session.messages) renderMessage(els.messages, message);
+        showThinking();
+        renderChanges();
+      }
+      persistNow();
+      return;
+    }
     case "turn_started":
       if (event.requestId !== currentRequestId) return;
       usageSessionId = session.id;
@@ -1015,6 +1063,11 @@ async function refreshUsage(): Promise<void> {
     const summaries = await client.usageSummaries(id);
     if (session.id !== id) return;
     usageSummary = summaries[0];
+    if (usageSummary?.title) {
+      session.providerTitle = usageSummary.title;
+      session.title = usageSummary.title;
+      store.save(session);
+    }
     renderUsage();
   } catch {
     if (session.id === id) els.usageStats.textContent = "Usage statistics unavailable";
@@ -1034,16 +1087,30 @@ function renderUsage(): void {
   const cached = (summary?.cachedInputTokens ?? 0) + (running ? turnUsage?.cachedInputTokens ?? 0 : 0);
   const output = (summary?.outputTokens ?? 0) + (running ? turnUsage?.outputTokens ?? 0 : 0);
   els.usageBreakdown.textContent = reported || !turns
-    ? `Input: ${input.toLocaleString()} · Cached: ${cached.toLocaleString()} · Output: ${output.toLocaleString()}`
+    ? `Input: ${input.toLocaleString()} · Cache read: ${cached.toLocaleString()} · Output: ${output.toLocaleString()}`
     : "Provider has not reported token usage";
   els.usageBreakdown.title = "Cached tokens are included in input, not added again. Input includes instructions, tools, workbook context and conversation history.";
+  const splitTurns = (summary?.cacheSplitReportedTurns ?? 0) + (running && turnUsage?.cacheWriteTokens !== undefined && turnUsage?.uncachedInputTokens !== undefined ? 1 : 0);
+  const uncached = (summary?.uncachedInputTokens ?? 0) + (running ? turnUsage?.uncachedInputTokens ?? 0 : 0);
+  const cacheWrite = (summary?.cacheWriteTokens ?? 0) + (running ? turnUsage?.cacheWriteTokens ?? 0 : 0);
+  els.usageCacheSplit.textContent = splitTurns
+    ? `Uncached input: ${uncached.toLocaleString()} · Cache write: ${cacheWrite.toLocaleString()}${splitTurns < turns ? " (partial)" : ""}`
+    : "Uncached input / cache write: not reported";
+  els.usageCacheSplit.title = "Input = uncached input + cache read + cache write when the full split is available. Both cache buckets are already included in input.";
   const creditTurns = (summary?.creditReportedTurns ?? 0) + (running && turnUsage?.copilotCredits !== undefined ? 1 : 0);
   const credits = (summary?.copilotCredits ?? 0) + (running ? turnUsage?.copilotCredits ?? 0 : 0);
+  const exactCreditTurns = (summary?.exactCreditReportedTurns ?? 0) + (running && turnUsage?.copilotCreditNanoAiu !== undefined ? 1 : 0);
   els.usageCredits.hidden = provider !== "copilot" && creditTurns === 0;
   els.usageCredits.textContent = creditTurns
-    ? `Copilot credits: ≈ ${credits.toFixed(2)}${creditTurns < turns ? " (partial)" : ""}`
+    ? `Copilot credits: ${exactCreditTurns === creditTurns ? "" : "≈ "}${formatCredits(credits)}${creditTurns < turns ? " (partial)" : ""}${exactCreditTurns < creditTurns ? " (includes rounded legacy data)" : ""}`
     : "Copilot credits: not reported";
-  els.usageCredits.title = "Provider-reported AI Credits from Copilot /usage, rounded by the CLI. Separate from token counts; never estimated from tokens.";
+  els.usageCredits.title = "Original Copilot credits retain integer nano AI units (1 credit = 1,000,000,000 nano units). Old /usage records remain marked rounded. Credits are never estimated from tokens.";
+  const originalTurns = (summary?.originalReportedTurns ?? 0) + (running && turnUsage?.source && turnUsage.source !== "copilot_acp" ? 1 : 0);
+  const cliSessions = new Set(summary?.providerSessionIds ?? []);
+  if (running && turnUsage?.providerSessionId) cliSessions.add(turnUsage.providerSessionId);
+  els.usageSource.hidden = cliSessions.size === 0;
+  els.usageSource.textContent = `Original provider data: ${originalTurns}/${turns} turns · CLI sessions: ${cliSessions.size}`;
+  els.usageSource.title = `Each native CLI session has separate history and accounting. Session: ${[...cliSessions].join(", ") || "not recorded"}. Resuming keeps its ID and previously recorded usage. Background calls after turn completion are outside this report.`;
   els.usageStats.title = `This chat session: ${reported}/${turns} turns with token data. Total includes cached tokens. AI time includes provider/tool/approval waits while processing; idle time is excluded.`;
 }
 
@@ -1127,6 +1194,15 @@ function startNewChat(): void {
 /** Make a stored chat the current one (its messages are shown in the chat area). */
 function loadSession(stored: StoredSession): void {
   clearAttachment();
+  if (["claude", "copilot", "codex", "opencode"].includes(stored.provider) && stored.provider !== provider) {
+    provider = stored.provider as ProviderId;
+    localStorage.setItem(PROVIDER_KEY, provider);
+    if (client?.connected) client.setProvider(provider);
+    renderProviderMenu();
+    renderAuthNotice();
+    renderModelPicker();
+    void refreshModelCatalog(provider);
+  }
   session = stored;
   activeModel = undefined;
   needsContext = true;
@@ -1403,8 +1479,9 @@ async function goTo(target: { sheet: string; address: string }): Promise<void> {
   }
 }
 
-function renderHistory(): void {
+function renderHistory(refreshTitles = true): void {
   persistNow(); // so the current chat is listed too
+  if (refreshTitles) void refreshHistoryTitles();
   const items = store.list();
   els.historyClear.hidden = items.length === 0;
   if (items.length === 0) {
@@ -1427,6 +1504,7 @@ function renderHistory(): void {
       meta.textContent = [
         item.id === session.id ? "Current" : null,
         PROVIDER_NAMES[item.provider as ProviderId] ?? item.provider,
+        item.providerSessionId ? null : "Legacy chat",
         formatWhen(item.updatedAt),
         `${item.messageCount} message${item.messageCount === 1 ? "" : "s"}`,
         item.changeCount > 0 ? `${item.changeCount} change${item.changeCount === 1 ? "" : "s"}` : null,
@@ -1446,6 +1524,24 @@ function renderHistory(): void {
       return row;
     }),
   );
+}
+
+async function refreshHistoryTitles(): Promise<void> {
+  if (!client?.connected) return;
+  try {
+    const summaries = await client.usageSummaries();
+    let changed = false;
+    for (const summary of summaries) {
+      if (!summary.title) continue;
+      const stored = summary.sessionId === session.id ? session : store.get(summary.sessionId);
+      if (!stored || stored.providerTitle === summary.title) continue;
+      stored.providerTitle = summary.title;
+      stored.title = summary.title;
+      store.save(stored);
+      changed = true;
+    }
+    if (changed) renderHistory(false);
+  } catch { /* The local history remains usable while disconnected. */ }
 }
 
 function openSession(id: string): void {
@@ -1523,27 +1619,51 @@ function resetClearButton(): void {
 /* Selection chip                                                              */
 /* -------------------------------------------------------------------------- */
 
+let refreshSelectionSubscriptions: (() => void) | undefined;
+
 function watchSelection(): void {
-  let timer: number | undefined;
-  const refresh = async () => {
-    try {
-      await Excel.run(async (context) => {
-        const range = context.workbook.getSelectedRange();
-        range.load("address,rowCount,columnCount");
-        await context.sync();
-        const cells = range.rowCount * range.columnCount;
-        els.chip.textContent = cells > 1 ? `${range.address} · ${cells} cells` : range.address;
-      });
-    } catch (error) {
-      // A selected shape/chart cannot be read as a range: say so instead of "No selection".
+  const monitor = monitorSelection({
+    read: getSelectionLabel,
+    isVisible: () => document.visibilityState !== "hidden",
+    render: value => {
+      els.chip.textContent = value.label;
+      els.chip.setAttribute("aria-label", `Current selection: ${value.label}`);
+      els.chip.title = value.title;
+    },
+    onError: error => {
       els.chip.textContent = (error as { code?: string })?.code === "InvalidSelection" ? "Object selected (shape / chart)" : "No selection";
-    }
-  };
-  Office.context.document.addHandlerAsync(Office.EventType.DocumentSelectionChanged, () => {
-    window.clearTimeout(timer);
-    timer = window.setTimeout(() => void refresh(), 250);
+      els.chip.setAttribute("aria-label", `Current selection: ${els.chip.textContent}`);
+      els.chip.title = "Current selection could not be identified. Select an object again or focus this pane to retry.";
+    },
   });
-  void refresh();
+  // Let Excel finish its native activation/deactivation transition before reading
+  // the active object. This is a one-shot debounce, not a polling timer.
+  let selectionTimer: number | undefined;
+  const selectionChanged = () => {
+    window.clearTimeout(selectionTimer);
+    selectionTimer = window.setTimeout(() => monitor.refresh(), 80);
+  };
+  const events = watchShapeSelectionEvents({
+    onActivated: value => {
+      window.clearTimeout(selectionTimer);
+      monitor.show(value);
+    },
+    onSelection: selectionChanged,
+    onError: error => { console.warn("Shape selection event registration failed", error); },
+  });
+  const refresh = () => { monitor.refresh(); void events.refresh(); };
+  refreshSelectionSubscriptions = refresh;
+  Office.context.document.addHandlerAsync(Office.EventType.DocumentSelectionChanged, selectionChanged);
+  window.addEventListener("focus", refresh);
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState !== "hidden") refresh();
+  });
+  window.addEventListener("pagehide", () => {
+    window.clearTimeout(selectionTimer);
+    monitor.stop();
+    refreshSelectionSubscriptions = undefined;
+    void events.stop();
+  }, { once: true });
 }
 
 /* -------------------------------------------------------------------------- */

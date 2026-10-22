@@ -170,7 +170,7 @@
       <div class="composer-card">
         <div id="slash-menu" class="slash-menu" role="listbox" aria-label="Skills and commands" hidden></div>
         <div id="mention-menu" class="slash-menu workspace-menu" aria-label="Workspace files" hidden></div>
-        <div id="selection-chip" class="chip" title="Current selection (sent with your message)">No selection</div>
+        <div id="selection-chip" class="chip" role="status" aria-live="polite" aria-atomic="true" title="Current selection (sent with your message)">No selection</div>
         <div class="composer-input-wrap">
           <div id="prompt-display" class="prompt-display" aria-hidden="true"></div>
           <textarea
@@ -203,9 +203,11 @@
             <div id="usage-popover" class="picker-menu usage-popover" role="dialog" aria-label="Session usage" hidden>
               <strong>Session usage</strong>
               <p id="usage-stats">Session tokens: 0 · AI time: 0m 0s</p>
-              <p id="usage-breakdown">Input: 0 · Cached: 0 · Output: 0</p>
+              <p id="usage-breakdown">Input: 0 · Cache read: 0 · Output: 0</p>
+              <p id="usage-cache-split">Uncached input / cache write: not reported</p>
               <p id="usage-credits">Copilot credits: not reported yet</p>
-              <p class="usage-explanation">Input includes instructions, tools and conversation history. Cached tokens are included in input. Token counts are separate from Copilot credits.</p>
+              <p id="usage-source"></p>
+              <p class="usage-explanation">History and reports follow each provider's CLI session. Reconnecting resumes the same session. Input includes cache read and cache write; cache is not added again. Each provider's original usage is normalised separately. Credits are separate from tokens.</p>
               <button id="usage-export" type="button" class="secondary">Export CSV</button>
             </div>
           </div>

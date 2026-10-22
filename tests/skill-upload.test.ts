@@ -44,6 +44,15 @@ describe("user skill uploads", () => {
     expect(() => uploads.install("oversized.zip", Buffer.from(archive), () => false)).toThrow(/expanded total/);
   });
 
+  it("accepts up to 1024 entries and reports the entry limit separately from size limits", () => {
+    const files: Record<string, Uint8Array> = { "SKILL.md": strToU8(manifest) };
+    for (let i = 0; i < 1023; i++) files[`references/section-${i}.md`] = strToU8("Reference");
+    uploads.install("many-files.zip", Buffer.from(zipSync(files)), () => false);
+    expect(fs.readFileSync(path.join(uploads.root, "monthly-report", "references", "section-1022.md"), "utf8")).toBe("Reference");
+    files["references/one-too-many.md"] = strToU8("Reference");
+    expect(() => uploads.install("too-many-files.zip", Buffer.from(zipSync(files)), () => false)).toThrow("maximum 1024 files and folders");
+  });
+
   it("installs Markdown and makes it available to the existing skill engine", () => {
     const result = uploads.install("SKILL.md", Buffer.from(manifest), () => false);
     expect(result).toEqual({ name: "monthly-report", description: "Format a monthly report" });
@@ -113,9 +122,21 @@ describe("user skill uploads", () => {
   it("rejects archive paths that could escape the upload directory", () => {
     for (const invalid of ["../escape.md", "/absolute.md", "C:/escape.md", "references\\escape.md", "references/CON.txt"]) {
       const archive = zipSync({ "SKILL.md": strToU8(manifest), [invalid]: strToU8("Invalid") });
-      expect(() => uploads.install("report.zip", Buffer.from(archive), () => false)).toThrow(/paths|file names/);
+      expect(() => uploads.install("report.zip", Buffer.from(archive), () => false)).toThrow(`Invalid skill archive entry ${JSON.stringify(invalid)}`);
     }
     expect(fs.existsSync(uploads.root)).toBe(false);
+  });
+
+  it("accepts deeply nested skill folders and assets with valid file names", () => {
+    const prefix = "package/export/skills/report/";
+    const relative = "assets/templates/monthly/2026/report.xlsx";
+    const archive = zipSync({
+      [prefix.slice(0, -1)]: {},
+      [`${prefix}SKILL.md`]: strToU8(manifest),
+      [`${prefix}${relative}`]: strToU8("workbook"),
+    });
+    uploads.install("report.zip", Buffer.from(archive), () => false);
+    expect(fs.readFileSync(path.join(uploads.root, "monthly-report", relative), "utf8")).toBe("workbook");
   });
 
   it("rejects ambiguous archives and excessive expansion", () => {

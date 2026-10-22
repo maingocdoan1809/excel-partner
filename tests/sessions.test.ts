@@ -6,6 +6,7 @@ import {
   formatWhen,
   newSession,
   titleFrom,
+  bindProviderSession,
   type StoredMessage,
   type StoredSession,
 } from "../addin/taskpane/ui/sessions.js";
@@ -38,6 +39,37 @@ const chat = (id: string, at: number, messages: StoredMessage[], changes: Stored
 });
 
 describe("SessionStore", () => {
+  it.each(["claude", "copilot", "codex", "opencode"])("keeps %s native titles and resumes the same history item", provider => {
+    const store = new SessionStore(new MemoryStorage());
+    const first = bindProviderSession(chat("provisional", 10, [user("paint red")]),
+      { provider, providerSessionId: "native-1", title: "Change Shape Color to Red" }, 0, 0, 10);
+    store.save(first.current);
+    expect(store.list()[0]?.title).toBe("Change Shape Color to Red");
+    expect(first.previous?.messages).toEqual([]);
+    const restored = store.get(`${provider}:native-1`)!;
+    restored.messages.push(user("now blue"));
+    const resumed = bindProviderSession(restored, { provider, providerSessionId: "native-1" }, 1, 0, 20);
+    expect(resumed.previous).toBeNull();
+    store.save(resumed.current);
+    expect(store.list()).toHaveLength(1);
+    expect(store.get(`${provider}:native-1`)).toMatchObject({ providerSessionId: "native-1", title: "Change Shape Color to Red" });
+    const renamed = bindProviderSession(resumed.current,
+      { provider, providerSessionId: "native-1", title: "Updated Native Title" }, 1, 0, 20);
+    store.save(renamed.current);
+    expect(store.list()[0]?.title).toBe("Updated Native Title");
+  });
+
+  it("splits only the new request when the provider explicitly returns a different native session", () => {
+    const original = { ...chat("copilot:old", 10, [user("old task"), bot("done"), user("new task")]),
+      provider: "copilot", providerSessionId: "old", providerTitle: "Old Native Title" };
+    const result = bindProviderSession(original, { provider: "copilot", providerSessionId: "new" }, 2, 0, 30);
+    expect(result.previous?.messages).toHaveLength(2);
+    expect(result.previous?.providerTitle).toBe("Old Native Title");
+    expect(result.current.id).toBe("copilot:new");
+    expect(result.current.title).toBe("new task");
+    expect(result.current.messages).toEqual([user("new task")]);
+    expect(result.current.startedAt).toBe(30);
+  });
   it("saves, lists newest first and loads a session back", () => {
     const store = new SessionStore(new MemoryStorage());
     store.save(chat("a", 1000, [user("first question"), bot("answer")]));

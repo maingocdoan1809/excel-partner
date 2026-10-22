@@ -5,7 +5,7 @@ import { parseFrontmatter, SkillError } from "./skills.js";
 import { MAX_SKILL_UPLOAD_BYTES, MAX_SKILL_TEXT_BYTES, MAX_SKILL_EXPANDED_BYTES } from "../../protocol/src/skill-limits.js";
 
 export { MAX_SKILL_UPLOAD_BYTES } from "../../protocol/src/skill-limits.js";
-const MAX_FILES = 64;
+const MAX_FILES = 1024;
 const MAX_TEXT_BYTES = MAX_SKILL_TEXT_BYTES;
 const NAME = /^[a-z0-9][a-z0-9_-]{0,63}$/;
 
@@ -31,7 +31,8 @@ export class UserSkills {
           // Keep packaged assets and scripts, but do not extract nested ZIP archives.
           if (!file.name.endsWith("/") && path.extname(file.name).toLowerCase() === ".zip") return false;
           expanded += file.originalSize;
-          if (++entries > MAX_FILES || expanded > MAX_SKILL_EXPANDED_BYTES || file.originalSize > MAX_TEXT_BYTES) throw new SkillError("The archive exceeds the skill file or size limits (5 MB per file, 10 MB expanded total).");
+          if (++entries > MAX_FILES) throw new SkillError(`The archive contains too many entries (maximum ${MAX_FILES} files and folders).`);
+          if (expanded > MAX_SKILL_EXPANDED_BYTES || file.originalSize > MAX_TEXT_BYTES) throw new SkillError("The archive exceeds the skill size limits (5 MB per file, 10 MB expanded total).");
           const normalized = file.name.toLowerCase();
           if (seen.has(normalized)) throw new SkillError("The archive contains duplicate file paths.");
           seen.add(normalized);
@@ -111,8 +112,8 @@ export class UserSkills {
 
   private validatePath(name: string): void {
     const segments = name.split("/");
-    if (!name || segments.length > 4 || segments.some(segment => !segment || segment === "." || segment === ".." || /[\x00-\x1f<>:"|?*\\]/.test(segment) || /[. ]$/.test(segment) || /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(segment))) {
-      throw new SkillError("Skill archives cannot contain absolute paths, traversal paths or unsupported file names.");
+    if (!name || segments.some(segment => !segment || segment === "." || segment === ".." || /[\x00-\x1f<>:"|?*\\]/.test(segment) || /[. ]$/.test(segment) || /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(segment))) {
+      throw new SkillError(`Invalid skill archive entry ${JSON.stringify(name)}. Skill archives cannot contain absolute paths, traversal paths or unsupported file names.`);
     }
   }
 }

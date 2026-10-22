@@ -23,6 +23,7 @@ export class OfficeError extends Error {
  * enforce that for ranges, sheets and shapes, so executor code that forgets to load is caught by the tests.
  */
 const RAW = Symbol("raw");
+const pendingReadErrors: Error[] = [];
 const pendingLoads = new Set<{ commit(): void }>();
 
 function parseLoadNames(names: unknown): string[] {
@@ -46,7 +47,12 @@ function strict<T extends object>(target: T, loadable: readonly string[], label:
       if (key === "load") {
         return (names?: unknown) => {
           const requested = names === undefined ? [...loadable] : parseLoadNames(names);
-          for (const name of requested) pending.add(name);
+          for (const name of requested) {
+            if (label === "Shape" && name === "geometricShapeType" && (t as { type?: string }).type === "Line") {
+              throw new OfficeError("InvalidOperation", "Cannot load geometricShapeType on a line.");
+            }
+            pending.add(name);
+          }
           pendingLoads.add(handle);
           return proxy;
         };
@@ -75,7 +81,7 @@ function raw<T>(value: T): T {
 
 const RANGE_PROPS = ["address", "rowIndex", "columnIndex", "rowCount", "columnCount", "values", "formulas", "numberFormat", "left", "top", "width", "height"] as const;
 const SHEET_PROPS = ["name", "id", "position", "visibility", "tabColor"] as const;
-const SHAPE_PROPS = ["name", "type", "geometricShapeType", "left", "top", "width", "height"] as const;
+const SHAPE_PROPS = ["rotation", "id", "isNullObject", "name", "type", "geometricShapeType", "left", "top", "width", "height"] as const;
 
 function makeRange(sheet: MockSheet, rowIndex: number, columnIndex: number, rowCount: number, columnCount: number, isNullObject = false): MockRange {
   return strict(new MockRange(sheet, rowIndex, columnIndex, rowCount, columnCount, isNullObject), RANGE_PROPS, "Range");
@@ -151,7 +157,23 @@ function siteCount(geometric: string): number {
   return FOUR.includes(geometric) ? 4 : ["Ellipse", "FlowChartConnector"].includes(geometric) ? 8 : 6;
 }
 
+export class MockEvents {
+  readonly handlers = new Set<(args: any) => unknown>();
+  add(handler: (args: any) => unknown) {
+    this.handlers.add(handler);
+    return { remove: () => { this.handlers.delete(handler); } };
+  }
+  async emit(args: unknown = {}) { await Promise.all([...this.handlers].map(handler => handler(args))); }
+}
+
+let nextShapeId = 0;
 export class MockShape {
+  readonly onActivated = new MockEvents();
+  readonly onDeactivated = new MockEvents();
+  readonly id = `shape-${++nextShapeId}`;
+  rotation = 0;
+  children: MockShape[] = [];
+  get group() { return { shapes: { items: this.children.map(wrapShape), load: (names?: unknown) => loadItems(this.children.map(wrapShape), names) } }; }
   isNullObject = false;
   private _box = { left: 0, top: 0, width: 0, height: 0 };
   get left() { return this._box.left; }
@@ -188,11 +210,14 @@ export class MockShape {
     },
   });
   text = "";
+  textReadFailure: "frame" | "range" | "hasTextSync" | "rangeSync" | null = null;
+  emptyTextRangeFails = false;
+  textRangeAccesses = 0;
   textFont: Record<string, unknown> = {};
   frame: Record<string, unknown> = {};
   connections: { begin?: { shape: MockShape; site: number }; end?: { shape: MockShape; site: number } } = {};
   lineProps: Record<string, unknown> = {};
-  constructor(readonly type: "GeometricShape" | "Line" | "TextBox", geometric: string) {
+  constructor(readonly type: "GeometricShape" | "Line" | "TextBox" | "Group", geometric: string) {
     this._geometric = geometric;
   }
   load() { return this; }
@@ -205,11 +230,27 @@ export class MockShape {
   get textFrame() {
     const self = this;
     // Reading `shape.textFrame` on a line raises InvalidOperation in Excel (seen on a real install).
-    if (this.type === "Line") throw new OfficeError("InvalidOperation", "This operation is not permitted for the current object.");
+    if (this.type === "Line" || this.textReadFailure === "frame") throw new OfficeError("InvalidOperation", "This shape has no accessible text frame.");
     return new Proxy(this.frame, {
-      get: (t, key) => key === "textRange"
-        ? { load: () => undefined, get text() { return self.text; }, set text(v: string) { self.text = v; }, font: self.textFont }
-        : (t as any)[key],
+      get: (t, key) => {
+        if (key === "hasText") return Boolean(self.text);
+        if (key === "load") return () => {
+          if (self.textReadFailure === "hasTextSync") pendingReadErrors.push(new OfficeError("GeneralException", "TextFrame.hasText could not be loaded."));
+        };
+        if (key === "textRange") {
+          self.textRangeAccesses++;
+          if (self.textReadFailure === "range" || (self.emptyTextRangeFails && !self.text)) {
+            throw new OfficeError("GeneralException", "TextRange._OnAccess: shape has no accessible text story.");
+          }
+          return {
+            load: () => {
+              if (self.textReadFailure === "rangeSync") pendingReadErrors.push(new OfficeError("GeneralException", "TextRange._OnAccess failed during sync."));
+            },
+            get text() { return self.text; }, set text(v: string) { self.text = v; }, font: self.textFont,
+          };
+        }
+        return (t as any)[key];
+      },
       set: (t, key, value) => ((t as any)[key] = value, true),
     });
   }
@@ -221,7 +262,16 @@ export class MockShape {
       self.connections[end] = { shape, site };
     };
     return new Proxy(this.lineProps, {
-      get: (t, key) => key === "connectBeginShape" ? connect("begin") : key === "connectEndShape" ? connect("end") : (t as any)[key],
+      get: (t, key) => key === "load" ? () => undefined
+        : key === "isBeginConnected" ? Boolean(self.connections.begin)
+        : key === "isEndConnected" ? Boolean(self.connections.end)
+        : key === "beginConnectedShape" ? self.connections.begin?.shape
+        : key === "endConnectedShape" ? self.connections.end?.shape
+        : key === "beginConnectedSite" ? self.connections.begin?.site ?? null
+        : key === "endConnectedSite" ? self.connections.end?.site ?? null
+        : key === "connectorType" ? t[key] ?? "Straight"
+        : key === "beginArrowheadStyle" || key === "endArrowheadStyle" ? t[key] ?? "None"
+        : key === "connectBeginShape" ? connect("begin") : key === "connectEndShape" ? connect("end") : (t as any)[key],
       set: (t, key, value) => ((t as any)[key] = value, true),
     });
   }
@@ -660,6 +710,8 @@ function computeFormula(sheet: MockSheet, formula: string): number | string {
 }
 
 export class MockWorkbook {
+  readonly worksheetActivated = new MockEvents();
+  readonly trackedObjects = new Set<object>();
   sheets: MockSheet[] = [];
   active = 0;
   selection = { sheet: "Sheet1", address: "A1" };
@@ -670,6 +722,8 @@ export class MockWorkbook {
   supportsInsertFromFile = true;
   /** Simulates a shape/chart being selected: getSelectedRange throws like Excel does. */
   invalidSelection = false;
+  supportsActiveShape = true;
+  activeShape: MockShape | null = null;
   readonly inserted: Array<{ base64: string; options: { sheetNamesToInsert?: string[]; positionType: string; relativeTo?: string } }> = [];
 
   addSheet(name: string): MockSheet {
@@ -697,9 +751,15 @@ let current: MockWorkbook | null = null;
 let patched = false;
 
 export function installOfficeMock(book: MockWorkbook): void {
+  pendingReadErrors.length = 0;
   const context = {
+    trackedObjects: {
+      add: (object: object) => { book.trackedObjects.add(object); },
+      remove: (object: object) => { book.trackedObjects.delete(object); },
+    },
     workbook: {
       worksheets: {
+        onActivated: book.worksheetActivated,
         get items() {
           return book.sheets.map(wrapSheet);
         },
@@ -713,6 +773,12 @@ export function installOfficeMock(book: MockWorkbook): void {
         book.inserted.push({ base64, options });
         for (const name of options.sheetNamesToInsert ?? ["Template Sheet"]) book.addSheet(name);
       },
+      getActiveShapeOrNullObject: () => book.activeShape ? wrapShape(book.activeShape) : {
+        isNullObject: true,
+        load: (names?: unknown) => {
+          if (parseLoadNames(names).some(name => name !== "isNullObject")) throw new OfficeError("InvalidReference", "Reference isn't valid: no active shape.");
+        },
+      },
       getSelectedRange: () => {
         if (book.invalidSelection) throw new OfficeError("InvalidSelection", "The current selection is invalid for this operation.");
         return book.sheet(book.selection.sheet).getRange(book.selection.address);
@@ -721,6 +787,8 @@ export function installOfficeMock(book: MockWorkbook): void {
     sync: async () => {
       for (const handle of pendingLoads) handle.commit();
       pendingLoads.clear();
+      const errors = pendingReadErrors.splice(0);
+      if (errors.length) throw errors[0];
     },
   };
   current = book;
@@ -738,7 +806,8 @@ export function installOfficeMock(book: MockWorkbook): void {
   }
 
   (globalThis as any).Excel = {
-    run: async (cb: (ctx: typeof context) => Promise<unknown>) => cb(context),
+    run: async (ctxOrCallback: typeof context | ((ctx: typeof context) => Promise<unknown>), callback?: (ctx: typeof context) => Promise<unknown>) =>
+      (callback ?? (ctxOrCallback as (ctx: typeof context) => Promise<unknown>))(context),
     RangeUnderlineStyle: { single: "Single", none: "None" },
     InsertShiftDirection: { down: "Down", right: "Right" },
     DeleteShiftDirection: { up: "Up", left: "Left" },
@@ -757,7 +826,7 @@ export function installOfficeMock(book: MockWorkbook): void {
     context: {
       document: { url: "C:\\books\\test.xlsx" },
       requirements: { isSetSupported: (_name: string, version: string) =>
-        version === "1.18" ? current!.supportsNotes : version === "1.9" ? current!.supportsShapes : version === "1.13" ? current!.supportsInsertFromFile : true },
+        version === "1.19" ? current!.supportsActiveShape : version === "1.18" ? current!.supportsNotes : version === "1.9" ? current!.supportsShapes : version === "1.13" ? current!.supportsInsertFromFile : true },
     },
   };
 }

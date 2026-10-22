@@ -14,10 +14,38 @@ import {
   workbookName,
 } from "./common.js";
 
+import { readActiveShape } from "./shapes.js";
+
 /** Office.js cannot return a range while a shape, chart or other object is selected. */
 export const OBJECT_SELECTED_NOTE =
   "A shape, chart or other object is selected, not cells. Use list_shapes / get_objects to see what is on the sheet, " +
   "or ask the user to select the cells they mean.";
+
+/** Small identity read for the composer; never fetch cell values or shape text. */
+export async function getSelectionLabel(): Promise<{ label: string; title: string }> {
+  return Excel.run(async context => {
+    if (Office.context.requirements.isSetSupported("ExcelApi", "1.19")) {
+      const shape = context.workbook.getActiveShapeOrNullObject();
+      // A null active-shape proxy must be checked before asking for identity.
+      // Reading name/type on it can trigger Excel's "Reference isn't valid" dialog.
+      shape.load("isNullObject");
+      await context.sync();
+      if (!shape.isNullObject) {
+        shape.load("id,name,type");
+        await context.sync();
+        return { label: shape.name, title: `Selected ${shape.type === "Line" ? "line / connector" : "shape"}: ${shape.name} (${shape.id})` };
+      }
+    }
+    const range = context.workbook.getSelectedRange();
+    range.load("address,rowCount,columnCount");
+    await context.sync();
+    const cells = range.rowCount * range.columnCount;
+    return {
+      label: cells > 1 ? `${range.address} · ${cells} cells` : range.address,
+      title: "Current selection (sent with your message)",
+    };
+  });
+}
 
 export async function getSelection(): Promise<unknown> {
   try {
@@ -25,11 +53,13 @@ export async function getSelection(): Promise<unknown> {
   } catch (error) {
     if ((error as { code?: string })?.code !== "InvalidSelection") throw error;
     return Excel.run(async (context) => {
+      const selected = await readActiveShape(context);
       const sheet = context.workbook.worksheets.getActiveWorksheet();
       sheet.load("name,id");
       await context.sync();
       return {
         workbookName: workbookName(),
+        workbookUrl: Office.context.document.url,
         sheet: sheet.name,
         sheetId: sheet.id,
         address: "",
@@ -38,7 +68,10 @@ export async function getSelection(): Promise<unknown> {
         values: [],
         headers: null,
         truncated: false,
-        note: OBJECT_SELECTED_NOTE,
+        ...selected,
+        note: selected.shapeSelectionStatus === "unavailable"
+          ? OBJECT_SELECTED_NOTE + " Identifying the active shape requires ExcelApi 1.19; this host does not support it."
+          : OBJECT_SELECTED_NOTE,
       };
     });
   }
@@ -46,6 +79,18 @@ export async function getSelection(): Promise<unknown> {
 
 async function readSelection(): Promise<unknown> {
   return Excel.run(async (context) => {
+    const selected = await readActiveShape(context);
+    if (selected.activeShape) {
+      const sheet = context.workbook.worksheets.getActiveWorksheet();
+      sheet.load("name,id");
+      await context.sync();
+      return {
+        workbookName: workbookName(), workbookUrl: Office.context.document.url, sheet: sheet.name, sheetId: sheet.id,
+        address: "", rowCount: 0, columnCount: 0, values: [], headers: null, truncated: false,
+        ...selected,
+        note: "Active shape identified. This is the active shape, not an enumeration of a multi-selection. Use list_shapes (including groups and connections) to inspect the entire flow.",
+      };
+    }
     const range = context.workbook.getSelectedRange();
     range.load("address,rowCount,columnCount,rowIndex,columnIndex,values");
     const sheet = context.workbook.worksheets.getActiveWorksheet();
@@ -56,6 +101,7 @@ async function readSelection(): Promise<unknown> {
     const values = normalizeValues(range.values);
     return {
       workbookName: workbookName(),
+      workbookUrl: Office.context.document.url,
       sheet: sheet.name,
       sheetId: sheet.id,
       address: stripSheet(range.address),

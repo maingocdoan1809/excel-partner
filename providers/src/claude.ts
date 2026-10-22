@@ -15,6 +15,7 @@ import { BaseCliAdapter, cliEnvironment, execCli, type CliProbe } from "./base.j
 import { buildTurnPrompt, SYSTEM_PROMPT } from "./prompt.js";
 import { MCP_SERVER_NAME, type McpEndpoint, type ProviderModelCatalog, type SendTurnInput, type StartSessionContext } from "./types.js";
 import { ensureWorkspaceDir } from "./workspace.js";
+import { claudeTitle, validNativeId } from "./session-metadata.js";
 
 interface ClaudeSession {
   mcp: McpEndpoint;
@@ -63,6 +64,7 @@ const MCP_PREFIX = `mcp__${MCP_SERVER_NAME}__`;
  * running turn process; the conversation stays resumable.
  */
 export class ClaudeAdapter extends BaseCliAdapter {
+  async sessionTitle(id: string): Promise<string | undefined> { return claudeTitle(id, ensureWorkspaceDir(), this.env); }
   /**
    * Ask the CLI itself: the `initialize` control request of the stream-json
    * protocol returns the same account-filtered model list as `/model`
@@ -153,6 +155,7 @@ export class ClaudeAdapter extends BaseCliAdapter {
   }
 
   override async startSession(ctx: StartSessionContext): Promise<string> {
+    if (ctx.resumeSessionId && !validNativeId(ctx.resumeSessionId)) throw new Error("Invalid Claude resume session ID");
     const providerSessionId = `claude-${randomUUID()}`;
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "excel-ai-claude-"));
     const mcpConfigPath = path.join(dir, "mcp.json");
@@ -168,8 +171,8 @@ export class ClaudeAdapter extends BaseCliAdapter {
     this.sessions.set(providerSessionId, {
       mcp: ctx.mcp,
       mcpConfigPath,
-      conversationId: randomUUID(),
-      resumable: false,
+      conversationId: ctx.resumeSessionId ?? randomUUID(),
+      resumable: Boolean(ctx.resumeSessionId),
       child: null,
     });
     return providerSessionId;
@@ -183,6 +186,8 @@ export class ClaudeAdapter extends BaseCliAdapter {
       yield { type: "turn_finished", requestId, reason: "error" };
       return;
     }
+    yield { type: "session_info", requestId, provider: this.id, providerSessionId: session.conversationId,
+      title: await this.sessionTitle(session.conversationId) };
     yield { type: "turn_started", requestId };
     if (input.signal.aborted) {
       yield { type: "turn_finished", requestId, reason: "cancelled" };
@@ -256,16 +261,19 @@ export class ClaudeAdapter extends BaseCliAdapter {
         } catch {
           continue;
         }
-        if (message.type === "result" && !message.is_error && message.session_id) {
+        if ((message.type === "result" || (message.type === "system" && message.subtype === "init")) && message.session_id) {
           session.conversationId = String(message.session_id);
           session.resumable = true;
         }
+        if (message.type === "result") yield { type: "session_info", requestId, provider: this.id,
+          providerSessionId: session.conversationId, title: await this.sessionTitle(session.conversationId) };
         for (const event of translator.translate(message)) {
           if (event.type === "turn_finished") {
             finished = true;
             yield input.signal.aborted ? { ...event, reason: "cancelled" } : event;
           } else {
-            yield event;
+            yield event.type === "usage_update" ? { ...event, usage: { ...event.usage,
+              source: "claude_result", providerSessionId: session.conversationId } } : event;
           }
         }
       }
@@ -287,9 +295,6 @@ export class ClaudeAdapter extends BaseCliAdapter {
       }
     } finally {
       input.signal.removeEventListener("abort", onAbort);
-      // A turn that never completed may have left a half-created conversation;
-      // start the next attempt on a fresh id instead of colliding with it.
-      if (!session.resumable) session.conversationId = randomUUID();
       if (child.exitCode === null && child.signalCode === null) terminate(child);
       if (session.child === child) session.child = null;
     }
@@ -395,7 +400,9 @@ export class ClaudeStreamTranslator {
           const cachedInputTokens = Math.max(0, usage.cache_read_input_tokens ?? 0);
           const inputTokens = Math.max(0, usage.input_tokens) + cachedInputTokens + Math.max(0, usage.cache_creation_input_tokens ?? 0);
           const outputTokens = Math.max(0, usage.output_tokens);
-          events.push({ type: "usage_update", requestId, usage: { inputTokens, outputTokens, cachedInputTokens, totalTokens: inputTokens + outputTokens } });
+          events.push({ type: "usage_update", requestId, usage: { inputTokens, outputTokens, cachedInputTokens,
+            cacheWriteTokens: Math.max(0, usage.cache_creation_input_tokens ?? 0),
+            uncachedInputTokens: Math.max(0, usage.input_tokens), totalTokens: inputTokens + outputTokens } });
         }
         if (message.is_error) {
           const text = String(message.result ?? "claude reported an error");

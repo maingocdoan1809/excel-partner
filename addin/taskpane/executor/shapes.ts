@@ -16,7 +16,7 @@ import { ToolFailure, resolveSheet } from "./common.js";
 /** Cells are inset a little so shapes drawn "over" a range do not touch the gridlines. */
 const ANCHOR_INSET_PT = 2;
 /** Properties every shape has. `geometricShapeType` is separate: loading it on a line/connector raises InvalidOperation. */
-const BASE_PROPS = "name,type,left,top,width,height";
+const BASE_PROPS = "id,name,type,left,top,width,height,rotation";
 
 type Side = Exclude<ConnectorSide, "auto">;
 type Placement = Pick<AddShapeInput, "anchor" | "left" | "top" | "width" | "height">;
@@ -165,16 +165,23 @@ async function findShape(
   name: string,
   role = "shape",
 ): Promise<Excel.Shape> {
-  const shape = sheet.shapes.getItemOrNullObject(name);
-  shape.load("isNullObject");
+  sheet.shapes.load("items/name,items/type");
   await context.sync();
-  if (shape.isNullObject) {
-    sheet.shapes.load("items/name");
+  let level = sheet.shapes.items.filter(item => item.type === "Group");
+  const matches: Excel.Shape[] = sheet.shapes.items.filter(item => item.name === name);
+  for (let depth = 0; level.length > 0; depth++) {
+    if (depth >= 32) throw new ToolFailure("invalid_arguments", "Shape groups exceed the supported nesting depth (32).");
+    for (const group of level) group.group.shapes.load("items/name,items/type");
     await context.sync();
-    throw new ToolFailure("invalid_arguments", `${role} '${name}' not found on this sheet`, {
-      available: sheet.shapes.items.map((s) => s.name).slice(0, 100),
-    });
+    const children = level.flatMap(group => group.group.shapes.items);
+    matches.push(...children.filter(child => child.name === name));
+    level = children.filter(child => child.type === "Group");
   }
+  if (matches.length > 1) throw new ToolFailure("invalid_arguments", `${role} '${name}' matches multiple shapes; identify its parent group with list_shapes before editing.`, { matches: matches.length });
+  if (matches.length === 0) throw new ToolFailure("invalid_arguments", `${role} '${name}' not found on this sheet or in its groups`, {
+    available: sheet.shapes.items.map((s) => s.name).slice(0, 100),
+  });
+  const shape = matches[0]!;
   await loadShape(context, shape);
   return shape;
 }
@@ -182,6 +189,8 @@ async function findShape(
 function info(shape: Excel.Shape, text: string | null, warnings: string[] = []): ShapeInfo & { warnings?: string[] } {
   return {
     ...(warnings.length > 0 ? { warnings } : {}),
+    id: shape.id,
+    rotation: shape.rotation,
     name: shape.name,
     type: shapeKind(shape),
     text,
@@ -194,29 +203,197 @@ function info(shape: Excel.Shape, text: string | null, warnings: string[] = []):
 
 const round = (n: number) => Math.round(n * 100) / 100;
 
+type TextRead = Pick<ShapeInfo, "text" | "textReadStatus" | "readWarnings">;
+
+function unreadableText(error: unknown): TextRead {
+  const detail = error as { code?: string; message?: string };
+  return {
+    text: null,
+    textReadStatus: "unavailable",
+    readWarnings: [{
+      property: "text", code: detail?.code ?? "read_failed",
+      message: `Text could not be read; the shape and its geometry were retained. ${detail?.message ?? String(error)}`.slice(0, 600),
+    }],
+  };
+}
+
+/**
+ * Optional text reads must not invalidate shape/connector inspection. Try a batch
+ * first; if Excel rejects it during sync, retry each read to identify the offender.
+ * Store the loaded proxy rather than navigating textRange again during serialization.
+ */
+async function readShapeTexts(context: Excel.RequestContext, shapes: Excel.Shape[]): Promise<Map<Excel.Shape, TextRead>> {
+  const result = new Map<Excel.Shape, TextRead>();
+  const candidates = shapes.filter(shape => shape.type === "GeometricShape" || (shape.type as string) === "TextBox");
+  for (const shape of shapes) result.set(shape, { text: null, textReadStatus: "not_applicable" });
+
+  async function readBatch<T>(items: Excel.Shape[], prepare: (shape: Excel.Shape) => () => T): Promise<Map<Excel.Shape, T>> {
+    const values = new Map<Excel.Shape, T>();
+    const pending: { shape: Excel.Shape; read: () => T }[] = [];
+    for (const shape of items) {
+      try { pending.push({ shape, read: prepare(shape) }); }
+      catch (error) { result.set(shape, unreadableText(error)); }
+    }
+    let synced = false;
+    try { await context.sync(); synced = true; } catch { /* Retry separately below; the rejected batch has been consumed. */ }
+    for (const item of pending) {
+      try {
+        let read = item.read;
+        if (!synced) { read = prepare(item.shape); await context.sync(); }
+        values.set(item.shape, read());
+      } catch (error) { result.set(item.shape, unreadableText(error)); }
+    }
+    return values;
+  }
+
+  const hasText = await readBatch(candidates, shape => {
+    const frame = shape.textFrame;
+    frame.load("hasText");
+    return () => frame.hasText;
+  });
+  const withText: Excel.Shape[] = [];
+  for (const [shape, present] of hasText) {
+    if (present) withText.push(shape);
+    else result.set(shape, { text: "", textReadStatus: "empty" });
+  }
+  if (withText.length) {
+    const texts = await readBatch(withText, shape => {
+      const range = shape.textFrame.textRange;
+      range.load("text");
+      return () => range.text;
+    });
+    for (const [shape, text] of texts) result.set(shape, { text, textReadStatus: text ? "read" : "empty" });
+  }
+  return result;
+}
+
+/** Read type-specific properties only after the base type has been synced. */
+export async function describeShapes(context: Excel.RequestContext, shapes: Excel.Shape[]): Promise<ShapeInfo[]> {
+  for (const shape of shapes) {
+    if (shape.type === "GeometricShape") shape.load("geometricShapeType");
+    if (shape.type === "Line") shape.line.load("isBeginConnected,isEndConnected,beginConnectedSite,endConnectedSite,connectorType,beginArrowheadStyle,endArrowheadStyle");
+  }
+  await context.sync();
+  for (const shape of shapes) {
+    if (shape.type !== "Line") continue;
+    if (shape.line.isBeginConnected) shape.line.beginConnectedShape.load("id,name");
+    if (shape.line.isEndConnected) shape.line.endConnectedShape.load("id,name");
+  }
+  await context.sync();
+  const texts = await readShapeTexts(context, shapes);
+  return shapes.map(shape => ({
+    ...info(shape, texts.get(shape)!.text),
+    ...texts.get(shape),
+    ...(shape.type === "Line" ? {
+      connection: {
+        from: shape.line.isBeginConnected ? { id: shape.line.beginConnectedShape.id, name: shape.line.beginConnectedShape.name, site: shape.line.beginConnectedSite } : null,
+        to: shape.line.isEndConnected ? { id: shape.line.endConnectedShape.id, name: shape.line.endConnectedShape.name, site: shape.line.endConnectedSite } : null,
+        connectorType: String(shape.line.connectorType),
+        beginArrow: String(shape.line.beginArrowheadStyle),
+        endArrow: String(shape.line.endArrowheadStyle),
+      },
+    } : {}),
+  }));
+}
+
+export async function readActiveShape(context: Excel.RequestContext): Promise<{ activeShape?: ShapeInfo; shapeSelectionStatus: "active" | "none" | "unavailable" }> {
+  if (!Office.context.requirements.isSetSupported("ExcelApi", "1.19")) return { shapeSelectionStatus: "unavailable" };
+  const shape = context.workbook.getActiveShapeOrNullObject();
+  shape.load("isNullObject");
+  await context.sync();
+  if (shape.isNullObject) return { shapeSelectionStatus: "none" };
+  await loadShape(context, shape);
+  return { activeShape: (await describeShapes(context, [shape]))[0]!, shapeSelectionStatus: "active" };
+}
+
 export async function listShapes(input: ListShapesInput): Promise<unknown> {
   requireShapeApi();
   return Excel.run(async (context) => {
     const sheet = resolveSheet(context, input.sheet);
     sheet.load("name");
-    sheet.shapes.load(`items/${BASE_PROPS.split(",").join(",items/")},items/geometricShapeType`);
+    sheet.shapes.load(`items/${BASE_PROPS.split(",").join(",items/")}`);
     await context.sync();
 
-    const shapes = sheet.shapes.items.slice(0, 200);
-    const frames = shapes.map((shape) => {
-      if (shape.type !== "GeometricShape" && (shape.type as string) !== "TextBox") return null;
-      const range = shape.textFrame.textRange;
-      range.load("text");
-      return range;
-    });
-    await context.sync();
-
+    // Flatten groups in preorder; keep parent IDs so a whole flow can be reconstructed.
+    const all: { shape: Excel.Shape; parentGroupId?: string }[] = [];
+    const scan = async (shapes: Excel.Shape[], parentGroupId?: string, depth = 0): Promise<void> => {
+      if (depth > 32) throw new ToolFailure("invalid_arguments", "Shape groups exceed the supported nesting depth (32).");
+      for (const shape of shapes) {
+        all.push({ shape, parentGroupId });
+        if ((shape.type as string) === "Group") {
+          shape.group.shapes.load(`items/${BASE_PROPS.split(",").join(",items/")}`);
+          await context.sync();
+          await scan(shape.group.shapes.items, shape.id, depth + 1);
+        }
+      }
+    };
+    await scan(sheet.shapes.items);
+    const offset = input.offset ?? 0;
+    const page = all.slice(offset, offset + (input.limit ?? 200));
+    const shapes = (await describeShapes(context, page.map(item => item.shape))).map((shape, i) => ({
+      ...shape, ...(page[i]!.parentGroupId ? { parentGroupId: page[i]!.parentGroupId } : {}),
+    }));
+    const hasMore = offset + shapes.length < all.length;
     return {
       sheet: sheet.name,
-      count: sheet.shapes.items.length,
-      shapes: shapes.map((shape, i) => info(shape, frames[i]?.text ?? null)),
+      count: all.length,
+      returned: shapes.length,
+      hasMore,
+      nextOffset: hasMore ? offset + shapes.length : null,
+      shapes,
+      readWarnings: shapes.flatMap(shape => (shape.readWarnings ?? []).map(warning => ({ id: shape.id, name: shape.name, ...warning }))),
+      textReadComplete: !shapes.some(shape => shape.textReadStatus === "unavailable"),
+      validation: validateFlow(shapes, offset > 0 || hasMore),
     };
   });
+}
+
+/** Structural evidence only: business correctness still needs the user's flow requirements. */
+export function validateFlow(shapes: ShapeInfo[], partial: boolean) {
+  const nodes = shapes.filter(s => s.type !== "Line" && s.type !== "Group" && s.type !== "TextBox" && s.type !== "Image");
+  const edges = shapes.filter(s => s.connection);
+  const linked = new Set(edges.flatMap(s => [s.connection!.from?.id, s.connection!.to?.id]).filter(Boolean));
+  const issues: { code: string; shapes: string[] }[] = [];
+  for (const edge of edges) {
+    const c = edge.connection!;
+    if (!c.from || !c.to) issues.push({ code: "unattached_line", shapes: [edge.name] });
+    if (c.from && c.to && c.from.id === c.to.id) issues.push({ code: "self_connection", shapes: [edge.name, c.from.name] });
+  }
+  const adjacency = new Map(nodes.map(node => [node.id!, new Set<string>()]));
+  for (const edge of edges) {
+    const { from, to } = edge.connection!;
+    if (from && to && adjacency.has(from.id) && adjacency.has(to.id)) {
+      adjacency.get(from.id)!.add(to.id);
+      adjacency.get(to.id)!.add(from.id);
+    }
+  }
+  const components: string[][] = [];
+  const visited = new Set<string>();
+  for (const node of nodes) {
+    if (visited.has(node.id!)) continue;
+    const component: string[] = [];
+    const queue = [node.id!];
+    while (queue.length) {
+      const id = queue.pop()!;
+      if (visited.has(id)) continue;
+      visited.add(id);
+      component.push(id);
+      queue.push(...adjacency.get(id)!);
+    }
+    components.push(component);
+  }
+  if (!partial && nodes.length > 1) {
+    for (const node of nodes) if (!linked.has(node.id)) issues.push({ code: "isolated_shape", shapes: [node.name] });
+  }
+  return {
+    scope: partial ? "partial_page" : "whole_sheet",
+    complete: !partial,
+    nodeCount: nodes.length,
+    lineCount: edges.length,
+    components,
+    issues,
+    note: "Structural checks only. Unattached lines may be intentional decorations; isolated shapes may belong to separate flows. Read every page before judging connectivity. Check business logic against the user's requirements; use an image for visual layout.",
+  };
 }
 
 export async function addShape(input: AddShapeInput): Promise<unknown> {
@@ -251,12 +428,8 @@ export async function addShape(input: AddShapeInput): Promise<unknown> {
 }
 
 /** Current text of a shape, so results never claim "no text" for a shape that has some. */
-async function currentText(context: Excel.RequestContext, shape: Excel.Shape): Promise<string | null> {
-  if (shape.type !== "GeometricShape" && (shape.type as string) !== "TextBox") return null;
-  const range = shape.textFrame.textRange;
-  range.load("text");
-  await context.sync();
-  return range.text;
+async function currentText(context: Excel.RequestContext, shape: Excel.Shape): Promise<TextRead> {
+  return (await readShapeTexts(context, [shape])).get(shape)!;
 }
 
 /** Properties that only make sense on shapes with a body; lines and connectors have an outline only. */
@@ -297,7 +470,8 @@ export async function updateShape(input: UpdateShapeInput): Promise<unknown> {
     }
     await context.sync();
     await loadShape(context, shape);
-    return info(shape, await currentText(context, shape), warnings);
+    const text = await currentText(context, shape);
+    return { ...info(shape, text.text, warnings), ...text };
   });
 }
 

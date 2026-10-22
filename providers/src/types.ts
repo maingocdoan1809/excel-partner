@@ -33,6 +33,7 @@ export interface StartSessionContext {
   sessionId: string;
   model?: string | null;
   effort?: "low" | "medium" | "high";
+  resumeSessionId?: string;
   mcp: McpEndpoint;
   /** Aborted when the workbook/task pane disconnects. */
   signal: AbortSignal;
@@ -69,6 +70,8 @@ export interface ProviderAdapter {
   detect(force?: boolean): Promise<ProviderDetection>;
   /** Models advertised by the installed CLI, when it offers a catalog. */
   listModels?(): Promise<ProviderModelCatalog>;
+  /** Read the native title without a model request. Missing titles stay unknown. */
+  sessionTitle?(nativeSessionId: string): Promise<string | undefined>;
   /** Whether the CLI is logged in and ready to accept a turn. */
   connectionStatus(): Promise<ProviderConnectionStatus>;
   /** Launch the CLI/session and return a provider-owned session id. */

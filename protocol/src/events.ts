@@ -11,6 +11,13 @@ export type TurnFinishReason = z.infer<typeof TurnFinishReasonSchema>;
  */
 export const ProviderEventSchema = z.discriminatedUnion("type", [
   z.object({
+    type: z.literal("session_info"),
+    requestId: z.string(),
+    provider: z.enum(["claude", "copilot", "codex", "opencode"]),
+    providerSessionId: z.string().min(1).max(128),
+    title: z.string().max(200).optional(),
+  }),
+  z.object({
     type: z.literal("usage_update"),
     requestId: z.string(),
     /** Cumulative snapshot for this turn, replacing earlier snapshots. */

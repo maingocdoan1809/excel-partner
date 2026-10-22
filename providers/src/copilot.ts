@@ -4,7 +4,9 @@ import os from "node:os";
 import path from "node:path";
 import { exposedToolNames } from "../../protocol/src/index.js";
 import { TokenUsageSchema } from "../../protocol/src/usage.js";
-import { CumulativeUsage, parseCopilotCredits } from "./usage.js";
+import { CumulativeUsage } from "./usage.js";
+import { CopilotUsageReader } from "./copilot-usage.js";
+import { copilotTitle, validNativeId } from "./session-metadata.js";
 import type {
   ProviderCapabilities,
   ProviderConnectionStatus,
@@ -29,9 +31,8 @@ interface CopilotSession {
   primed: boolean;
   active: ActiveTurn | null;
   usage?: CumulativeUsage;
-  supportsUsageCommand?: boolean;
-  usageReport?: string;
-  creditTotal?: number;
+  usageReader?: CopilotUsageReader;
+  usageBaselinePending?: boolean;
 }
 
 interface ActiveTurn {
@@ -52,6 +53,7 @@ interface ActiveTurn {
  *   tool_call_update); cancel = session/cancel notification.
  */
 export class CopilotAdapter extends BaseCliAdapter {
+  async sessionTitle(id: string): Promise<string | undefined> { return copilotTitle(id, this.env); }
   async listModels(): Promise<ProviderModelCatalog> {
     const peer = new JsonRpcPeer({
       command: this.command,
@@ -132,6 +134,7 @@ export class CopilotAdapter extends BaseCliAdapter {
   }
 
   override async startSession(ctx: StartSessionContext): Promise<string> {
+    if (ctx.resumeSessionId && !validNativeId(ctx.resumeSessionId)) throw new Error("Invalid Copilot resume session ID");
     const cwd = ensureWorkspaceDir();
     const providerSessionId = `copilot-${randomUUID()}`;
     const log = this.runtime.logger;
@@ -159,7 +162,6 @@ export class CopilotAdapter extends BaseCliAdapter {
     );
 
     let session: CopilotSession | null = null;
-    let supportsUsageCommand = false;
     const peer = new JsonRpcPeer({
       command: this.command,
       args: [
@@ -183,11 +185,6 @@ export class CopilotAdapter extends BaseCliAdapter {
       versionField: true,
       onStderr: (line) => log.debug(`copilot stderr: ${line}`),
       onNotification: (method, params) => {
-        const update = (params as { update?: { sessionUpdate?: string; availableCommands?: Array<{ name: string }> } })?.update;
-        if (method === "session/update" && update?.sessionUpdate === "available_commands_update") {
-          supportsUsageCommand = update.availableCommands?.some(command => command.name.replace(/^\//, "") === "usage") ?? false;
-          if (session) session.supportsUsageCommand = supportsUsageCommand;
-        }
         if (session) this.onNotification(session, method, params);
       },
       onRequest: (method, params) => this.onServerRequest(method, params),
@@ -199,17 +196,23 @@ export class CopilotAdapter extends BaseCliAdapter {
         clientCapabilities: {},
         clientInfo: { name: "excel-ai-addin", title: "Excel AI Add-in", version: "0.1.0" },
       });
-      const created = await peer.request<{ sessionId: string; configOptions?: EffortConfigOption[] }>(
-        "session/new",
-        {
-          cwd,
-          mcpServers: [],
-        },
-        30_000,
-      );
+      const created = ctx.resumeSessionId
+        ? { ...(await peer.request<{ configOptions?: EffortConfigOption[] }>("session/load",
+            { sessionId: ctx.resumeSessionId, cwd, mcpServers: [] }, 30_000)), sessionId: ctx.resumeSessionId }
+        : await peer.request<{ sessionId: string; configOptions?: EffortConfigOption[] }>("session/new", { cwd, mcpServers: [] }, 30_000);
       const effort = effortConfig(created.configOptions, ctx.effort ?? "medium");
       if (effort) await peer.request("session/set_config_option", { sessionId: created.sessionId, ...effort });
-      session = { peer, configDir, acpSessionId: created.sessionId, primed: false, active: null, supportsUsageCommand };
+      session = { peer, configDir, acpSessionId: created.sessionId, primed: Boolean(ctx.resumeSessionId), active: null,
+        usageReader: new CopilotUsageReader(path.join(this.env.COPILOT_HOME ?? path.join(os.homedir(), ".copilot"),
+          "session-state", created.sessionId, "events.jsonl"), created.sessionId) };
+      if (ctx.resumeSessionId) {
+        let baseline = null;
+        try { baseline = await session.usageReader!.snapshot(); }
+        catch (error) { log.warn("Copilot resume usage baseline unavailable", { error: String(error) }); }
+        session.usage = new CumulativeUsage();
+        if (baseline) session.usage.next(baseline);
+        else session.usageBaselinePending = true;
+      }
       this.sessions.set(providerSessionId, session);
       peer.onExit(() => {
         const current = this.sessions.get(providerSessionId);
@@ -239,6 +242,8 @@ export class CopilotAdapter extends BaseCliAdapter {
     const queue = new AsyncQueue<ProviderEvent>();
     const active: ActiveTurn = { queue, requestId, text: "", tools: new Map(), finishedTools: new Set() };
     session.active = active;
+    yield { type: "session_info", requestId, provider: this.id, providerSessionId: session.acpSessionId,
+      title: await this.sessionTitle(session.acpSessionId) };
     yield { type: "turn_started", requestId };
 
     const cancel = () => session.peer.notify("session/cancel", { sessionId: session.acpSessionId });
@@ -257,33 +262,7 @@ export class CopilotAdapter extends BaseCliAdapter {
       )
       .then(async (response) => {
         this.flushText(active);
-        // Copilot's ACP PromptResponse usage contains CLI-session totals.
-        // Convert to the increment for this turn before the bridge adds it.
-        // usage_update.used is context occupancy and must never be counted here.
-        if (response.usage) {
-          const usage = TokenUsageSchema.safeParse({ ...response.usage, cachedInputTokens: response.usage.cachedReadTokens ?? 0 });
-          if (usage.success) {
-            session.usage ??= new CumulativeUsage();
-            const increment = session.usage.next(usage.data);
-            if (session.supportsUsageCommand && !input.signal.aborted) {
-              try {
-                // Advertised informational slash command: no model call or credits consumed.
-                // Suppress its messages so the usage report never appears as an assistant reply.
-                session.usageReport = "";
-                await session.peer.request("session/prompt", { sessionId: session.acpSessionId,
-                  prompt: [{ type: "text", text: "/usage" }] }, 5000);
-                const total = parseCopilotCredits(session.usageReport);
-                if (total !== null) {
-                  increment.copilotCredits = Math.max(0, total - (session.creditTotal ?? 0));
-                  session.creditTotal = total;
-                }
-              } catch (error) {
-                this.runtime.logger.debug("Copilot credit report unavailable", { error: String(error) });
-              } finally { session.usageReport = undefined; }
-            }
-            queue.push({ type: "usage_update", requestId, usage: increment });
-          }
-        }
+        await this.reportUsage(session, active, response.usage);
         const stop = response?.stopReason ?? "end_turn";
         if (stop === "cancelled") {
           queue.push({ type: "turn_finished", requestId, reason: "cancelled" });
@@ -300,8 +279,9 @@ export class CopilotAdapter extends BaseCliAdapter {
         }
         queue.end();
       })
-      .catch((error) => {
+      .catch(async (error) => {
         this.flushText(active);
+        await this.reportUsage(session, active);
         if (input.signal.aborted) {
           queue.push({ type: "turn_finished", requestId, reason: "cancelled" });
         } else {
@@ -325,6 +305,30 @@ export class CopilotAdapter extends BaseCliAdapter {
       input.signal.removeEventListener("abort", cancel);
       if (session.active === active) session.active = null;
     }
+  }
+
+  private async reportUsage(session: CopilotSession, active: ActiveTurn,
+    acp?: { inputTokens: number; outputTokens: number; totalTokens: number; cachedReadTokens?: number }): Promise<void> {
+    active.queue.push({ type: "session_info", requestId: active.requestId, provider: this.id,
+      providerSessionId: session.acpSessionId, title: await this.sessionTitle(session.acpSessionId) });
+    const parsed = acp ? TokenUsageSchema.safeParse({ ...acp, cachedInputTokens: acp.cachedReadTokens ?? 0,
+      source: "copilot_acp", providerSessionId: session.acpSessionId }) : null;
+    let total = parsed?.success ? parsed.data : null;
+    try {
+      const raw = await session.usageReader?.snapshot();
+      // A delayed/partial journal must not replace a more recent ACP total.
+      if (raw && (!total || (raw.inputTokens === total.inputTokens && raw.outputTokens === total.outputTokens))) total = raw;
+    } catch (error) {
+      this.runtime.logger.warn("Copilot original usage unavailable; ACP tokens only", { error: String(error) });
+    }
+    if (!total) return;
+    session.usage ??= new CumulativeUsage();
+    if (session.usageBaselinePending) {
+      session.usage.next(total);
+      session.usageBaselinePending = false;
+      return; // Do not charge pre-resume history to this request when its baseline is unknown.
+    }
+    active.queue.push({ type: "usage_update", requestId: active.requestId, usage: session.usage.next(total) });
   }
 
   override async cancelTurn(providerSessionId: string): Promise<void> {
@@ -355,12 +359,6 @@ export class CopilotAdapter extends BaseCliAdapter {
     const params = (raw ?? {}) as { sessionId?: string; update?: Record<string, any> };
     const active = session.active;
     const update = params.update;
-    if (session.usageReport !== undefined) {
-      if (update?.sessionUpdate === "agent_message_chunk" && update.content?.type === "text") {
-        session.usageReport += String(update.content.text ?? "");
-      }
-      return;
-    }
     if (!active || !update || params.sessionId !== session.acpSessionId) return;
     const { queue, requestId } = active;
     if (update.sessionUpdate !== "agent_thought_chunk") {

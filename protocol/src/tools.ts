@@ -289,8 +289,18 @@ export const DeleteShapesInputSchema = z.object({
 });
 export type DeleteShapesInput = z.infer<typeof DeleteShapesInputSchema>;
 
-export const ListShapesInputSchema = z.object({ sheet: SheetRefSchema.optional() });
+export const ListShapesInputSchema = z.object({
+  sheet: SheetRefSchema.optional(),
+  offset: z.number().int().min(0).default(0),
+  limit: z.number().int().min(1).max(1000).default(200),
+});
 export type ListShapesInput = z.infer<typeof ListShapesInputSchema>;
+
+export const ValidateFlowchartInputSchema = z.object({
+  sheet: SheetRefSchema.optional(),
+  maxShapes: z.number().int().min(1).max(1000).default(1000),
+});
+export type ValidateFlowchartInput = z.infer<typeof ValidateFlowchartInputSchema>;
 
 export const InsertRowsInputSchema = z.object({
   sheet: SheetRefSchema.optional(),

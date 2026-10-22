@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { SelectionSnapshotSchema } from "../protocol/src/index.js";
 import { AsyncQueue } from "../providers/src/async-queue.js";
 import { compareVersions, extractVersion } from "../providers/src/base.js";
 import { ClaudeStreamTranslator } from "../providers/src/claude.js";
@@ -46,6 +47,17 @@ describe("version helpers", () => {
 describe("buildTurnPrompt", () => {
   it("passes the prompt through without a selection", () => {
     expect(buildTurnPrompt("hello", null)).toBe("hello");
+  });
+
+  it("keeps the selected shape through snapshot validation and prompt serialization", () => {
+    const selection = SelectionSnapshotSchema.parse({
+      workbookName: "flow.xlsx", sheet: "S", sheetId: null, address: "", rowCount: 0, columnCount: 0,
+      values: [], headers: null, truncated: false, shapeSelectionStatus: "active",
+      activeShape: { id: "s1", name: "Decision", type: "FlowChartDecision", text: "Approved?", left: 10, top: 20, width: 60, height: 30 },
+    });
+    const json = JSON.parse(buildTurnPrompt("validate this flow", selection).split("\n")[1]!);
+    expect(json.activeShape).toEqual(selection.activeShape);
+    expect(json.shapeSelectionStatus).toBe("active");
   });
 
   it("embeds the selection snapshot and truncates huge selections", () => {

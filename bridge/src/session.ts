@@ -44,6 +44,8 @@ export class WorkbookSession {
 
   provider: ProviderId | null = null;
   providerSessionId: string | null = null;
+  providerNativeSessionId: string | null = null;
+  providerChatSessionId: string | null = null;
   providerModel: string | null = null;
   providerEffort: "low" | "medium" | "high" = "medium";
   activeRequestId: string | null = null;

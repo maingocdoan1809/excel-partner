@@ -15,6 +15,7 @@ import type {
   InsertRowsInput,
   InsertSheetsFromFileInput,
   ListShapesInput,
+  ValidateFlowchartInput,
   ManageNamesInput,
   ManageSheetInput,
   MergeRangeInput,
@@ -36,6 +37,7 @@ import type {
 } from "../../../protocol/src/index.js";
 import { copyTo, getCellRanges, readRangeImage, resizeRange, setCells } from "./cells.js";
 import { toToolError } from "./common.js";
+import { validateFlowchart } from "./flowchart.js";
 import { filterRange, sortRange } from "./data.js";
 import { formatRange } from "./format.js";
 import { manageNames, mergeRange, pageLayout } from "./layout.js";
@@ -114,6 +116,8 @@ function run(tool: string, args: unknown): Promise<unknown> {
       return readRangeImage(args as ReadRangeImageInput);
     case "get_objects":
       return getObjects(args as GetObjectsInput);
+    case "validate_flowchart":
+      return validateFlowchart(args as ValidateFlowchartInput);
     case "list_shapes":
       return listShapes(args as ListShapesInput);
     case "write_range":

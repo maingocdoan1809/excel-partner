@@ -48,7 +48,8 @@ function readLocalConfig(): LocalConfig {
   try {
     const raw = JSON.parse(fs.readFileSync(process.env.BRIDGE_CONFIG ?? path.join(PROJECT_ROOT, "excel-partner.config.json"), "utf8")) as LocalConfig;
     const strings = (v: unknown) => (Array.isArray(v) ? v.filter((x): x is string => typeof x === "string" && x.trim() !== "") : []);
-    return { referenceDirs: strings(raw.referenceDirs), skillDirs: strings(raw.skillDirs), allowOfficeJs: raw.allowOfficeJs === true };
+    return { referenceDirs: strings(raw.referenceDirs), skillDirs: strings(raw.skillDirs),
+      allowOfficeJs: typeof raw.allowOfficeJs === "boolean" ? raw.allowOfficeJs : undefined };
   } catch {
     return {};
   }
@@ -78,7 +79,7 @@ export interface BridgeConfig {
   referenceDirs: string[];
   /** Folders searched for skills (`<dir>/<skill>/SKILL.md`); earlier folders win on name clashes. */
   skillDirs: string[];
-  /** Expose the opt-in execute_office_js tool (arbitrary Office.js). Off by default. */
+  /** Expose execute_office_js (arbitrary Office.js). On by default; can be disabled explicitly. */
   allowOfficeJs: boolean;
   logLevel: "debug" | "info" | "warn" | "error";
   /** Command used to launch the Excel MCP stdio server. */
@@ -114,7 +115,7 @@ export function loadConfig(overrides: Partial<BridgeConfig> = {}): BridgeConfig 
     },
     skillDirs: defaultSkillDirs(PROJECT_ROOT, [...(local.skillDirs ?? []), ...splitPaths(process.env.BRIDGE_SKILL_DIRS)]),
     referenceDirs: [...(local.referenceDirs ?? []), ...splitPaths(process.env.BRIDGE_REFERENCE_DIRS)],
-    allowOfficeJs: envBool("BRIDGE_ALLOW_OFFICE_JS", local.allowOfficeJs ?? false),
+    allowOfficeJs: envBool("BRIDGE_ALLOW_OFFICE_JS", local.allowOfficeJs ?? true),
     logLevel: (process.env.BRIDGE_LOG_LEVEL as BridgeConfig["logLevel"]) ?? "info",
     mcp: {
       command: process.env.BRIDGE_MCP_COMMAND ?? process.execPath,

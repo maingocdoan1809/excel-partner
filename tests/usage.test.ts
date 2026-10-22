@@ -97,7 +97,7 @@ describe("usage accounting", () => {
       store.append(record("chat", `turn-${i}`, usage.usage));
     }
     expect(deltas.map(usage => usage.totalTokens)).toEqual([13294, 13410, 0]);
-    expect(deltas[1]).toEqual({ inputTokens: 13396, outputTokens: 14, cachedInputTokens: 13277, totalTokens: 13410 });
+    expect(deltas[1]).toMatchObject({ inputTokens: 13396, outputTokens: 14, cachedInputTokens: 13277, totalTokens: 13410 });
     expect(store.summaries()[0]).toMatchObject({ totalTokens: 26704, inputTokens: 26676, outputTokens: 28, cachedInputTokens: 23582 });
     // A new CLI session starts its own baseline, even when the pane continues an existing chat.
     internal.sessions.set("new-provider-session", { acpSessionId: "new-cli-session", primed: false, active: null, peer: { ...session.peer,
@@ -110,36 +110,27 @@ describe("usage accounting", () => {
     expect(restartedUsage?.totalTokens).toBe(110);
   });
 
-  it("reads rounded Copilot credits from the non-model /usage command without exposing its report in chat", async () => {
+  it("does not substitute rounded /usage credits when the original journal is unavailable", async () => {
     const adapter = new CopilotAdapter({ bridgeUrl: "", mcp: { command: "", args: [] }, logger: { debug() {}, warn() {} } });
-    const internal = adapter as unknown as { sessions: Map<string, unknown>; onNotification(session: unknown, method: string, params: unknown): void };
-    const creditTotals = [0.45, 1.58];
-    let turn = 0;
+    const internal = adapter as unknown as { sessions: Map<string, unknown> };
+    const prompts: string[] = [];
     const session = { acpSessionId: "billing-session", primed: false, active: null, supportsUsageCommand: true,
       peer: { alive: true, notify() {}, request: async (_method: string, params: { prompt: Array<{ text: string }> }) => {
-        if (params.prompt[0]!.text === "/usage") {
-          internal.onNotification(session, "session/update", { sessionId: "billing-session", update: {
-            sessionUpdate: "agent_message_chunk", content: { type: "text", text: `Session Usage\nRequests: ${creditTotals[turn - 1]} AI Credits (1m 0s)\nTokens: input 13k` },
-          } });
-          return { stopReason: "end_turn" };
-        }
-        turn++;
-        return { stopReason: "end_turn", usage: { inputTokens: turn * 100, outputTokens: turn * 10, totalTokens: turn * 110 } };
+        prompts.push(params.prompt[0]!.text);
+        return { stopReason: "end_turn", usage: { inputTokens: 100, outputTokens: 10, totalTokens: 110 } };
       } },
     };
     internal.sessions.set("billing", session);
-    const store = new UsageStore(null);
-    for (let i = 0; i < 2; i++) {
-      const events: ProviderEvent[] = [];
-      for await (const event of adapter.sendTurn({ providerSessionId: "billing", requestId: `billing-${i}`,
-        prompt: "hello", selection: null, signal: new AbortController().signal })) events.push(event);
-      expect(events.some(event => event.type === "message_delta")).toBe(false);
-      const usage = events.find(event => event.type === "usage_update");
-      if (usage?.type !== "usage_update") throw new Error("missing usage");
-      store.append(record("chat", `billing-${i}`, usage.usage));
-    }
-    expect(store.summaries()[0]).toMatchObject({ totalTokens: 220, copilotCredits: 1.58, creditReportedTurns: 2 });
-    expect(usageCsv(store.summaries())).toContain('"1.58","2","complete (rounded)"');
+    const events: ProviderEvent[] = [];
+    for await (const event of adapter.sendTurn({ providerSessionId: "billing", requestId: "request",
+      prompt: "hello", selection: null, signal: new AbortController().signal })) events.push(event);
+    const usage = events.find(event => event.type === "usage_update");
+    expect(usage).toMatchObject({ usage: { totalTokens: 110, source: "copilot_acp", providerSessionId: "billing-session" } });
+    if (usage?.type !== "usage_update") throw new Error("missing usage");
+    expect(usage.usage.copilotCredits).toBeUndefined();
+    expect(prompts).toHaveLength(1);
+    expect(prompts.some(prompt => prompt === "/usage")).toBe(false);
+    // Historical rounded credit parsing remains supported for old records.
     expect(parseCopilotCredits("Requests: 0 AI Credits (1s)")).toBe(0);
     expect(parseCopilotCredits("Requests: 3 premium requests")).toBeNull();
     expect(parseCopilotCredits("Requests: <0.01 AI Credits")).toBeNull();

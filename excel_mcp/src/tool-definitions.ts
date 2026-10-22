@@ -102,7 +102,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
     name: "get_selection",
     title: "Get selection",
     description:
-      "READ. The range the user currently has selected: sheet, address, values and column headers. " +
+      "READ. Current cell range with values/headers, or activeShape with ID, name, text and connector endpoints (ExcelApi 1.19+). On Windows, selectedShapes lists the full native selection when selectedShapesStatus=complete; use names for Office.js tools, as nativeId is a COM ID. If unavailable, activeShape identifies only one object. " +
       "Call this first to understand what the user is pointing at.",
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
     annotations: READ,
@@ -309,9 +309,28 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
     name: "list_shapes",
     title: "List shapes",
     description:
-      "READ. Shapes, text boxes and connectors on a sheet: name, type, text and position in points. " +
-      "Use it to find existing shapes before adding, connecting or moving.",
-    inputSchema: { type: "object", properties: { sheet: sheetRef }, additionalProperties: false },
+      "READ. Paginated shapes including nested group children, IDs, text, geometry and actual connector endpoints/arrow direction. " +
+      "Includes structural validation clues (unattached lines, self connections, isolated nodes). Follow nextOffset until hasMore=false to inspect a whole flow. " +
+      "Business logic and visual layout require requirements and image review; structural clues are not a pass/fail verdict.",
+    inputSchema: { type: "object", properties: {
+      sheet: sheetRef,
+      offset: { type: "integer", minimum: 0, default: 0 },
+      limit: { type: "integer", minimum: 1, maximum: 1000, default: 200 },
+    }, additionalProperties: false },
+    annotations: READ,
+  },
+  {
+    name: "validate_flowchart",
+    title: "Validate flowchart",
+    description:
+      "READ. Validate connected shapes on a sheet: disconnected nodes, unattached connectors, overlapping node bounds, " +
+      "straight connector crossings, collinear overlaps and lines through unrelated shape bounds. Returns affected names/IDs and coordinates. " +
+      "Elbow/curve routes and unsupported connection sites need visual review because Office.js does not expose their full path. " +
+      "Does not reroute or modify shapes. After requested fixes, call again; never treat incomplete geometry checks as proof of a clean diagram.",
+    inputSchema: { type: "object", properties: {
+      sheet: sheetRef,
+      maxShapes: { type: "integer", minimum: 1, maximum: 1000, default: 1000 },
+    }, additionalProperties: false },
     annotations: READ,
   },
   {
@@ -376,7 +395,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
     name: "update_shape",
     title: "Update shape",
     description:
-      "WRITE. Change an existing shape by name: text, position/size, colours, font, or rename it. Only the " +
+      "WRITE. Change an existing shape by exact name, including inside nested groups: text, position/size, colours, font, or rename it. For the selected shape, use its name and sheet:{name: selection.sheet}; native COM IDs are not names. Only the " +
       "properties you pass change; connectors follow a moved shape.",
     inputSchema: {
       type: "object",

@@ -8,6 +8,8 @@ const RecordSchema = z.object({
   requestId: z.string(),
   provider: z.string(),
   model: z.string().nullable(),
+  providerSessionId: z.string().optional(),
+  title: z.string().max(200).optional(),
   startedAt: z.number(),
   durationMs: z.number().nonnegative(),
   reason: z.enum(["completed", "cancelled", "error"]),
@@ -47,15 +49,20 @@ export class UsageStore {
 
   summaries(): UsageSummary[] {
     const sessions = new Map<string, UsageSummary>();
+    const legacyCredits = new Map<string, number>();
     for (const record of this.records) {
       let summary = sessions.get(record.sessionId);
       if (!summary) {
         summary = { sessionId: record.sessionId, turns: 0, reportedTurns: 0, creditReportedTurns: 0, durationMs: 0,
+          provider: record.provider,
+          exactCreditReportedTurns: 0, cacheSplitReportedTurns: 0, originalReportedTurns: 0, reasoningReportedTurns: 0, providerSessionIds: [],
           inputTokens: 0, outputTokens: 0, cachedInputTokens: 0, totalTokens: 0,
           startedAt: record.startedAt, updatedAt: record.startedAt };
         sessions.set(record.sessionId, summary);
       }
       summary.turns++;
+      if (record.title) summary.title = record.title;
+      if (record.providerSessionId && !summary.providerSessionIds!.includes(record.providerSessionId)) summary.providerSessionIds!.push(record.providerSessionId);
       summary.durationMs += record.durationMs;
       summary.startedAt = Math.min(summary.startedAt, record.startedAt);
       summary.updatedAt = Math.max(summary.updatedAt, record.startedAt + record.durationMs);
@@ -65,9 +72,27 @@ export class UsageStore {
         summary.outputTokens += record.usage.outputTokens;
         summary.cachedInputTokens += record.usage.cachedInputTokens;
         summary.totalTokens += record.usage.totalTokens;
+        if (record.usage.reasoningTokens !== undefined) {
+          summary.reasoningReportedTurns!++;
+          summary.reasoningTokens = (summary.reasoningTokens ?? 0) + record.usage.reasoningTokens;
+        }
+        if (record.usage.source && record.usage.source !== "copilot_acp") summary.originalReportedTurns!++;
+        const providerId = record.usage.providerSessionId;
+        if (providerId && !summary.providerSessionIds!.includes(providerId)) summary.providerSessionIds!.push(providerId);
+        if (record.usage.cacheWriteTokens !== undefined && record.usage.uncachedInputTokens !== undefined) {
+          summary.cacheSplitReportedTurns!++;
+          summary.cacheWriteTokens = (summary.cacheWriteTokens ?? 0) + record.usage.cacheWriteTokens;
+          summary.uncachedInputTokens = (summary.uncachedInputTokens ?? 0) + record.usage.uncachedInputTokens;
+        }
         if (record.usage.copilotCredits !== undefined) {
           summary.creditReportedTurns++;
-          summary.copilotCredits = (summary.copilotCredits ?? 0) + record.usage.copilotCredits;
+          if (record.usage.copilotCreditNanoAiu !== undefined) {
+            summary.exactCreditReportedTurns!++;
+            summary.copilotCreditNanoAiu = (summary.copilotCreditNanoAiu ?? 0) + record.usage.copilotCreditNanoAiu;
+          } else {
+            legacyCredits.set(record.sessionId, (legacyCredits.get(record.sessionId) ?? 0) + record.usage.copilotCredits);
+          }
+          summary.copilotCredits = (summary.copilotCreditNanoAiu ?? 0) / 1e9 + (legacyCredits.get(record.sessionId) ?? 0);
         }
       }
     }

@@ -9,6 +9,7 @@ import { WebSocketServer, type WebSocket, type RawData } from "ws";
 import {
   PROTOCOL_VERSION,
   ProviderIdSchema,
+  providerSessionKey,
   type ClientMessage,
   type ProviderId,
   type SelectionSnapshot,
@@ -25,6 +26,7 @@ import { SkillStore, expandSkillPrompt, projectTemplateReminder } from "./skills
 import { SessionManager } from "./session-manager.js";
 import { WorkbookSession } from "./session.js";
 import { ToolGateway } from "./tool-gateway.js";
+import { enrichWindowsSelection, type SelectionEnricher } from "./windows-selection.js";
 import { activeWorkbookPath, pickWorkspaceFolder } from "./windows-workspace.js";
 import { MockAdapter, ProviderRegistry, createDefaultRegistry } from "../../providers/src/index.js";
 import { ProviderLoginError, ProviderLoginManager } from "./provider-login.js";
@@ -37,6 +39,7 @@ interface SocketState {
 }
 
 export interface BridgeOptions {
+  selectionEnricher?: SelectionEnricher;
   registry?: ProviderRegistry;
   logger?: Logger;
   /** Override where skills are loaded from (tests). */
@@ -54,6 +57,7 @@ const MAX_BODY_BYTES = 8 * 1024 * 1024;
 
 /** Wires the HTTP(S) + WebSocket surface to the session manager and providers. */
 export class Bridge {
+  private readonly enrichSelection: SelectionEnricher;
   private readonly usage: UsageStore;
   private readonly activeUsage = new Map<string, UsageRecord>();
   private readonly skills: SkillStore;
@@ -77,6 +81,7 @@ export class Bridge {
 
   constructor(config: BridgeConfig, options: BridgeOptions = {}) {
     this.config = config;
+    this.enrichSelection = options.selectionEnricher ?? enrichWindowsSelection;
     this.usage = new UsageStore(options.usageFile === undefined
       ? process.env.BRIDGE_USAGE_FILE ?? path.join(PROJECT_ROOT, "run", "usage.jsonl") : options.usageFile);
     this.logger = options.logger ?? new Logger("bridge", config.logLevel);
@@ -102,6 +107,7 @@ export class Bridge {
       this.skills,
       this.references,
       this.userSkills,
+      this.enrichSelection,
     );
 
     const runtime = {
@@ -211,7 +217,16 @@ export class Bridge {
       const session = this.sessions.getByToken(bearerToken(req.headers.authorization) ?? "");
       if (!session?.isConnected) return this.sendJson(res, 401, { error: "unauthorized" });
       const id = url.searchParams.get("sessionId");
-      return this.sendJson(res, 200, { sessions: this.usage.summaries().filter((item) => !id || item.sessionId === id) });
+      const summaries = this.usage.summaries().filter((item) => !id || item.sessionId === id);
+      await Promise.all(summaries.map(async item => {
+        const provider = ProviderIdSchema.safeParse(item.provider);
+        const nativeId = item.providerSessionIds?.at(-1);
+        if (!provider.success || !nativeId || item.sessionId !== providerSessionKey(provider.data, nativeId)) return;
+        try {
+          item.title = await this.providers.get(provider.data)?.sessionTitle?.(nativeId) ?? item.title;
+        } catch { /* Preserve the last recorded title when the CLI is unavailable. */ }
+      }));
+      return this.sendJson(res, 200, { sessions: summaries });
     }
     if (req.method === "POST" && url.pathname === "/session/attachment") {
       return this.handleAttachment(req, res);
@@ -695,7 +710,7 @@ export class Bridge {
       case "set_provider":
         return this.onSetProvider(session, message.provider);
       case "prompt":
-        return this.onPrompt(session, message.requestId, message.prompt, message.selection, message.context, message.attachmentIds, message.model, message.referencePaths, message.effort, message.chatSessionId);
+        return this.onPrompt(session, message.requestId, message.prompt, message.selection, message.context, message.attachmentIds, message.model, message.referencePaths, message.effort, message.chatSessionId, message.resumeSessionId);
       case "cancel":
         session.abortTurn();
         return this.onCancel(session, message.requestId);
@@ -778,8 +793,9 @@ export class Bridge {
     referencePaths?: string[],
     effort: "low" | "medium" | "high" = "medium",
     chatSessionId?: string,
+    resumeSessionId?: string,
   ): Promise<void> {
-    return this.runPrompt(session, requestId, prompt, selection, context, attachmentIds, model, referencePaths, effort, chatSessionId);
+    return this.runPrompt(session, requestId, prompt, selection, context, attachmentIds, model, referencePaths, effort, chatSessionId, resumeSessionId);
   }
 
   private async runPrompt(
@@ -793,6 +809,7 @@ export class Bridge {
     referencePaths?: string[],
     effort: "low" | "medium" | "high" = "medium",
     chatSessionId?: string,
+    resumeSessionId?: string,
   ): Promise<void> {
     if (!session.provider) {
       return void session.send({
@@ -841,21 +858,28 @@ export class Bridge {
     }
 
     const selectedModel = model ?? null;
+    if (session.providerSessionId && ((resumeSessionId && resumeSessionId !== session.providerNativeSessionId)
+      || (!resumeSessionId && chatSessionId && session.providerChatSessionId && chatSessionId !== session.providerChatSessionId))) {
+      await this.closeProviderProcess(session, "chat_change");
+    }
     if (session.providerSessionId && (session.providerModel !== selectedModel || session.providerEffort !== effort)) {
       await this.closeProviderProcess(session, "model_change");
     }
     const adapter = this.providers.require(session.provider);
     const controller = session.beginTurn(requestId);
     this.activeUsage.set(`${session.id}:${requestId}`, {
-      sessionId: chatSessionId ?? session.id, requestId, provider: session.provider,
+      sessionId: resumeSessionId ? providerSessionKey(session.provider, resumeSessionId) : chatSessionId ?? session.id,
+      providerSessionId: resumeSessionId, requestId, provider: session.provider,
       model: selectedModel, startedAt: Date.now(), durationMs: 0, reason: "completed", usage: null,
     });
     // `/skill-name request` loads the skill's instructions into this turn.
     const expanded = expandSkillPrompt(prompt, this.skills);
     if (expanded.skill) this.logger.info("skill invoked", { skill: expanded.skill });
-    prompt = [context, projectTemplateReminder(this.skills), this.savedReferences.prompt(), expanded.prompt].filter(Boolean).join("\n\n");
+    prompt = [resumeSessionId ? undefined : context, projectTemplateReminder(this.skills), this.savedReferences.prompt(), expanded.prompt].filter(Boolean).join("\n\n");
 
     try {
+      if (selection) selection = await this.enrichSelection(selection, controller.signal);
+      controller.signal.throwIfAborted();
       const detection = await adapter.detect();
       if (!detection.installed) throw new Error(detection.hint ?? "Provider CLI is not installed.");
       if (!session.providerSessionId) {
@@ -864,11 +888,13 @@ export class Bridge {
           sessionId: session.id,
           model: selectedModel,
           effort,
+          resumeSessionId,
           mcp: this.mcpEndpointFor(session),
           signal: controller.signal,
         });
         session.providerModel = selectedModel;
         session.providerEffort = effort;
+        session.providerChatSessionId = chatSessionId ?? session.id;
       }
 
       for await (const event of adapter.sendTurn({
@@ -883,6 +909,16 @@ export class Bridge {
         if (event.type === "turn_finished") {
           this.finishTurn(session, requestId, event.reason);
         } else if (!session.hasFinished(requestId)) {
+          if (event.type === "session_info" && event.requestId === requestId && event.provider === session.provider) {
+            session.providerNativeSessionId = event.providerSessionId;
+            session.providerChatSessionId = providerSessionKey(event.provider, event.providerSessionId);
+            const record = this.activeUsage.get(`${session.id}:${requestId}`);
+            if (record) {
+              record.sessionId = session.providerChatSessionId;
+              record.providerSessionId = event.providerSessionId;
+              if (event.title) record.title = event.title;
+            }
+          }
           if (event.type === "usage_update") {
             const record = this.activeUsage.get(`${session.id}:${requestId}`);
             if (record) record.usage = event.usage;
@@ -896,8 +932,8 @@ export class Bridge {
       if (!session.hasFinished(requestId)) session.send({
         type: "error",
         requestId,
-        code: aborted ? "cancelled" : "provider_error",
-        message: aborted ? "turn cancelled" : String(error instanceof Error ? error.message : error),
+        code: aborted ? "cancelled" : resumeSessionId && !session.providerSessionId ? "resume_failed" : "provider_error",
+        message: aborted ? "turn cancelled" : `${resumeSessionId && !session.providerSessionId ? "Could not resume the saved CLI session. No replacement session was created. " : ""}${String(error instanceof Error ? error.message : error)}`,
       });
       this.finishTurn(session, requestId, aborted ? "cancelled" : "error");
     } finally {
@@ -959,6 +995,8 @@ export class Bridge {
     const provider = session.provider;
     const providerSessionId = session.providerSessionId;
     session.providerSessionId = null;
+    session.providerNativeSessionId = null;
+    session.providerChatSessionId = null;
     session.providerModel = null;
     session.activeRequestId = null;
     if (!provider || !providerSessionId) return;

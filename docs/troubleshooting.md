@@ -46,8 +46,25 @@ picks up the current tool list. Shapes need ExcelApi 1.9; cell notes need ExcelA
 
 ## `get_selection` says a shape or chart is selected
 
-When a shape/chart is selected Excel cannot return a cell range. The tool reports `note: "A shape, chart or other
-object is selected"` (no error); select the cells you mean, or ask the assistant to use `list_shapes` / `get_objects`.
+On hosts supporting ExcelApi 1.19, `get_selection` returns `activeShape` with its ID, name, text, geometry and connector endpoints. This identifies one active shape. A Windows bridge additionally reads the selected group through COM: `selectedShapesStatus: "complete"` means `selectedShapes` contains the selected names, native IDs, native types and connector flags. The same reader enriches the message context sent to the AI. Native IDs may differ from Office.js IDs; use shape names with tools and `list_shapes` for details. This read is independent of `execute_office_js`.
+
+COM reading attaches to Excel's actual workbook window using `AccessibleObjectFromWindow` (`EXCEL7` / `OBJID_NATIVEOM`), avoiding stale `GetActiveObject` registrations. It requires exactly one matching workbook window, checked by workbook name, worksheet and the workbook path when provided. A mismatch, ambiguous windows, busy Excel or timeout falls back to Office.js and reports `selectedShapesStatus: "unavailable"`; the model must not treat one active shape as the full group. Other bridge platforms retain the Office.js behavior. Older Office.js hosts return `shapeSelectionStatus: "unavailable"` when identifying an object requires ExcelApi 1.19. See [Microsoft's active-shape API](https://learn.microsoft.com/en-us/javascript/api/excel/excel.workbook?view=excel-js-1.19#excel-excel-workbook-getactiveshapeornullobject-member(1)).
+
+The selection label above the prompt uses native `Shape.onActivated` / `onDeactivated` events (ExcelApi 1.9), alongside document selection events for cells. There is no periodic selection polling. Shape event subscriptions refresh on worksheet activation, successful shape tools, and pane focus. Group children are included. Selection reads fetch only identity/range dimensions and do not change the prompt text.
+
+`list_shapes` includes nested group children, parent IDs, text, geometry, and actual connector attachments and arrows. Follow `nextOffset` while `hasMore` is true; the default page has 200 shapes and `limit` can be increased to 1,000.
+
+## Validate flowchart connections and connector overlaps
+
+Ask the assistant: **Validate this flowchart: find disconnected shapes, crossing or overlapping connectors, and lines going through other shapes. Report the affected shape names before making changes.**
+
+The read-only `validate_flowchart` tool scans up to 1,000 shapes on the active sheet (or the supplied `sheet`). It reports structural clues and geometric issues, including crossing straight connectors, shared line segments, overlapping node bounds, and connectors passing through unrelated node bounds. Shared connector endpoints are allowed. Rectangle bounds are a screening model; they do not describe every curved shape outline.
+
+Elbow/curve connector routes, unsupported connection sites, grouped coordinates, and rotations require visual review; the tool reports incomplete coverage rather than inventing routes. `no_issues_in_checked_geometry` only describes the checked model, not business correctness. `scanTruncated` means the entire sheet was not checked. The tool does not move shapes or reroute connectors. After requested layout changes, run it again.
+
+If Excel rejects a text read (for example, `TextRange._OnAccess`), the tools keep the shape geometry and connections. They check `hasText` before opening a text range and retry rejected text batches individually. The affected shape has `textReadStatus: "unavailable"`, `text: null`, and a `readWarnings` entry naming the failed property. Empty supported shapes return `text: ""` and `textReadStatus: "empty"`; lines have `not_applicable`. Both tools expose `textReadComplete` separately from geometric validation. A text warning does not justify deleting a shape or claiming that the whole sheet cannot be checked.
+
+After updating, restart the bridge, reload the add-in, and start a new provider session so the new tool is exposed.
 
 ## The assistant says it cannot open a file by path
 
