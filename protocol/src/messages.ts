@@ -55,6 +55,14 @@ export const CancelMessageSchema = z.object({
   type: z.literal("cancel"),
   requestId: z.string().min(1),
 });
+export const FollowupMessageSchema = z.object({
+  type: z.literal("followup"),
+  requestId: z.string().min(1),
+  id: z.string().min(1).max(128),
+  prompt: z.string().min(1).max(32_000),
+  referencePaths: z.array(z.string().min(1).max(500)).max(10).optional(),
+  attachmentIds: z.array(z.string().uuid()).max(10).optional(),
+});
 
 export const ToolResultMessageSchema = z.object({
   type: z.literal("tool_result"),
@@ -72,6 +80,7 @@ export const ClientMessageSchema = z.discriminatedUnion("type", [
   SetProviderMessageSchema,
   PromptMessageSchema,
   CancelMessageSchema,
+  FollowupMessageSchema,
   ToolResultMessageSchema,
   ClientPongSchema,
 ]);

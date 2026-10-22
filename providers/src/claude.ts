@@ -21,7 +21,7 @@ interface ClaudeSession {
   mcp: McpEndpoint;
   /** Path of the 0600 MCP config file holding the session token. */
   mcpConfigPath: string;
-  /** Conversation id; becomes resumable after the first successful turn. */
+  /** Conversation id; becomes resumable when the CLI confirms initialization. */
   conversationId: string;
   resumable: boolean;
   child: ChildProcess | null;
@@ -186,8 +186,10 @@ export class ClaudeAdapter extends BaseCliAdapter {
       yield { type: "turn_finished", requestId, reason: "error" };
       return;
     }
-    yield { type: "session_info", requestId, provider: this.id, providerSessionId: session.conversationId,
-      title: await this.sessionTitle(session.conversationId) };
+    if (session.resumable) {
+      yield { type: "session_info", requestId, provider: this.id, providerSessionId: session.conversationId,
+        title: await this.sessionTitle(session.conversationId) };
+    }
     yield { type: "turn_started", requestId };
     if (input.signal.aborted) {
       yield { type: "turn_finished", requestId, reason: "cancelled" };
@@ -212,7 +214,7 @@ export class ClaudeAdapter extends BaseCliAdapter {
       "--permission-mode",
       "dontAsk",
       "--system-prompt",
-      SYSTEM_PROMPT,
+      input.systemPrompt ?? SYSTEM_PROMPT,
       "--disable-slash-commands",
       // The scratch cwd is empty, so this skips the user's own hooks, CLAUDE.md
       // and plugins (auth is unaffected) and keeps the Excel session predictable.
@@ -261,11 +263,13 @@ export class ClaudeAdapter extends BaseCliAdapter {
         } catch {
           continue;
         }
-        if ((message.type === "result" || (message.type === "system" && message.subtype === "init")) && message.session_id) {
-          session.conversationId = String(message.session_id);
+        const confirmsSession = (message.type === "result" || (message.type === "system" && message.subtype === "init"))
+          && typeof message.session_id === "string" && validNativeId(message.session_id);
+        if (confirmsSession) {
+          session.conversationId = message.session_id;
           session.resumable = true;
         }
-        if (message.type === "result") yield { type: "session_info", requestId, provider: this.id,
+        if (confirmsSession || (message.type === "result" && session.resumable)) yield { type: "session_info", requestId, provider: this.id,
           providerSessionId: session.conversationId, title: await this.sessionTitle(session.conversationId) };
         for (const event of translator.translate(message)) {
           if (event.type === "turn_finished") {

@@ -24,6 +24,7 @@ export interface UploadedAttachment { id?: string; name: string; kind: "workbook
 export interface SkillTemplate { name: string; kind: "workbook" | "image" | "text"; size: number; path: string }
 export interface AvailableSkill { name: string; description: string }
 export interface InstalledSkill extends AvailableSkill { removable: boolean }
+export interface SkillTextFile { file: string; content: string; revision: string }
 export interface SavedReference { id: string; name: string; path: string; description: string; available: boolean }
 export interface ModelCatalog { models: Array<{ id: string; name: string }>; defaultModelId: string | null }
 
@@ -188,6 +189,26 @@ export class BridgeClient {
     await this.sessionFetch("/session/skills", { method: "DELETE", body: JSON.stringify({ name }) });
   }
 
+  async skillTextFiles(name: string): Promise<string[]> {
+    return (await this.sessionFetch<{ files: string[] }>(`/session/skills?name=${encodeURIComponent(name)}`)).files;
+  }
+
+  async systemPrompt(): Promise<SkillTextFile> {
+    return { file: "System prompt", ...await this.sessionFetch<{ content: string; revision: string }>("/session/system-prompt") };
+  }
+
+  async saveSystemPrompt(content: string | null, revision: string): Promise<SkillTextFile> {
+    return { file: "System prompt", ...await this.sessionFetch<{ content: string; revision: string }>("/session/system-prompt", { method: "PUT", body: JSON.stringify({ content, revision }) }) };
+  }
+
+  async readSkillText(name: string, file: string): Promise<SkillTextFile> {
+    return (await this.sessionFetch<{ document: SkillTextFile }>(`/session/skills?name=${encodeURIComponent(name)}&file=${encodeURIComponent(file)}`)).document;
+  }
+
+  async saveSkillText(name: string, document: SkillTextFile): Promise<SkillTextFile> {
+    return (await this.sessionFetch<{ document: SkillTextFile }>("/session/skills", { method: "PUT", body: JSON.stringify({ name, ...document }) })).document;
+  }
+
   async providerLogin(method: "GET" | "POST" | "DELETE" = "GET"): Promise<ProviderLoginStatus> {
     return this.sessionFetch("/session/provider-login", { method });
   }
@@ -222,6 +243,10 @@ export class BridgeClient {
 
   cancel(requestId: string): void {
     this.send({ type: "cancel", requestId });
+  }
+
+  queuePrompt(requestId: string, id: string, prompt: string, referencePaths: string[], attachmentIds: string[]): void {
+    this.send({ type: "followup", requestId, id, prompt, referencePaths, attachmentIds });
   }
 
   /* ----------------------------------------------------------------------- */
@@ -266,7 +291,11 @@ export class BridgeClient {
   }
 
   private async handleToolRequest(message: ToolRequestMessage): Promise<void> {
-    const result = message.tool === "__authorize_python"
+    const result = message.tool === "__authorize_skill_edit"
+      ? { ok: true as const, data: { approved: this.permissionMode === "auto" || await this.askPermission("Update installed skill?",
+        `Save changes to /${(message.args as { name: string }).name}/${(message.args as { file: string }).file}?`, "Save skill", message.timeoutMs,
+        (message.args as { content: string }).content.slice(0, 8000)) } }
+      : message.tool === "__authorize_python"
       ? this.permissionMode === "auto" ? { ok: true as const, data: { approved: true } }
         : { ok: true as const, data: { approved: await this.askPermission("Run Python on this computer?",
           "The assistant will run Python on your computer with your user permissions, including access to files and the network. Selected file copies and generated files use a temporary working folder.",

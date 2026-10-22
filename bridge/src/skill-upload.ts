@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { createHash, randomUUID } from "node:crypto";
 import { unzipSync } from "fflate";
 import { parseFrontmatter, SkillError } from "./skills.js";
 import { MAX_SKILL_UPLOAD_BYTES, MAX_SKILL_TEXT_BYTES, MAX_SKILL_EXPANDED_BYTES } from "../../protocol/src/skill-limits.js";
@@ -8,6 +9,8 @@ export { MAX_SKILL_UPLOAD_BYTES } from "../../protocol/src/skill-limits.js";
 const MAX_FILES = 1024;
 const MAX_TEXT_BYTES = MAX_SKILL_TEXT_BYTES;
 const NAME = /^[a-z0-9][a-z0-9_-]{0,63}$/;
+export class SkillEditConflict extends SkillError {}
+export interface EditableSkillFile { file: string; content: string; revision: string }
 
 export class UserSkills {
   readonly root: string;
@@ -93,6 +96,92 @@ export class UserSkills {
 
   owns(name: string, directory: string): boolean {
     return NAME.test(name) && path.resolve(directory) === path.resolve(this.root, name);
+  }
+
+  textFiles(name: string): string[] {
+    const directory = this.editDirectory(name);
+    const files: string[] = [];
+    const walk = (folder: string, prefix = "") => {
+      for (const entry of fs.readdirSync(folder, { withFileTypes: true })) {
+        if (entry.isSymbolicLink() || entry.name.startsWith(".edit-")) continue;
+        const relative = prefix + entry.name;
+        if (entry.isDirectory()) walk(path.join(folder, entry.name), relative + "/");
+        else if (entry.isFile()) {
+          try { this.readTextFile(name, relative); files.push(relative); }
+          catch (error) { if (!(error instanceof SkillError)) throw error; }
+        }
+      }
+    };
+    walk(directory);
+    return files.sort((a, b) => a === "SKILL.md" ? -1 : b === "SKILL.md" ? 1 : a.localeCompare(b));
+  }
+
+  readTextFile(name: string, file: string): EditableSkillFile {
+    const target = this.editFile(name, file);
+    const stat = fs.statSync(target);
+    if (stat.size > MAX_TEXT_BYTES) throw new SkillError("Text files must be 5 MB or smaller.");
+    const bytes = fs.readFileSync(target);
+    if (bytes.includes(0)) throw new SkillError("Only UTF-8 text files can be edited.");
+    let content: string;
+    try { content = new TextDecoder("utf-8", { fatal: true }).decode(bytes); }
+    catch { throw new SkillError("Only UTF-8 text files can be edited."); }
+    return { file, content, revision: createHash("sha256").update(bytes).digest("hex") };
+  }
+
+  updateTextFile(name: string, file: string, content: string, revision: string): EditableSkillFile {
+    const current = this.readTextFile(name, file);
+    if (current.revision !== revision) throw new SkillEditConflict("This file changed since you opened it. Reopen the editor to load the latest version; your edits have not been saved.");
+    const bytes = Buffer.from(content, "utf8");
+    if (bytes.length > MAX_TEXT_BYTES || bytes.includes(0)) throw new SkillError("Save UTF-8 text without null characters, up to 5 MB per file.");
+    const target = this.editFile(name, file);
+    if (file.split("/").length === 1 && path.basename(target).toLowerCase() === "skill.md") {
+      const { meta, body } = parseFrontmatter(content);
+      if ((meta.name ?? name).trim() !== name) throw new SkillError("Keep the existing skill name when editing SKILL.md.");
+      if (!body.trim()) throw new SkillError("SKILL.md must include skill instructions.");
+    }
+    const directory = this.editDirectory(name);
+    let total = 0;
+    const measure = (folder: string) => {
+      for (const entry of fs.readdirSync(folder, { withFileTypes: true })) {
+        const child = path.join(folder, entry.name);
+        if (entry.isDirectory()) measure(child);
+        else if (entry.isFile() && path.relative(child, target) !== "") total += fs.statSync(child).size;
+      }
+    };
+    measure(directory);
+    if (total + bytes.length > MAX_SKILL_EXPANDED_BYTES) throw new SkillError("The skill exceeds the 10 MB total size limit.");
+    const temporary = path.join(path.dirname(target), `.edit-${randomUUID()}`);
+    try {
+      fs.writeFileSync(temporary, bytes, { flag: "wx", mode: 0o600 });
+      fs.renameSync(temporary, target);
+    } finally { if (fs.existsSync(temporary)) fs.unlinkSync(temporary); }
+    return this.readTextFile(name, file);
+  }
+
+  private editDirectory(name: string): string {
+    if (!NAME.test(name)) throw new SkillError("Invalid skill name.");
+    const target = path.resolve(this.root, name);
+    try {
+      if (fs.lstatSync(this.root).isSymbolicLink()) throw new Error("symlink");
+      this.assertInside(target);
+      if (!fs.lstatSync(target).isDirectory()) throw new Error("not a directory");
+    } catch { throw new SkillError("Uploaded skill folder not found or outside the upload folder."); }
+    return target;
+  }
+
+  private editFile(name: string, file: string): string {
+    this.validatePath(file);
+    const directory = this.editDirectory(name);
+    const target = path.resolve(directory, file);
+    try {
+      let current = directory;
+      for (const part of file.split("/")) {
+        current = path.join(current, part);
+        if (fs.lstatSync(current).isSymbolicLink()) throw new Error("symlink");
+      }
+      if (!fs.realpathSync(target).startsWith(fs.realpathSync(directory) + path.sep) || !fs.lstatSync(target).isFile()) throw new Error("outside");
+    } catch { throw new SkillError("Skill file not found or outside the skill folder."); }
+    return target;
   }
 
   remove(name: string): void {

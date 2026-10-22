@@ -13,6 +13,8 @@ export interface StoredTool {
 export interface StoredMessage {
   kind: "user" | "assistant" | "error" | "note" | "tool" | "tool_group";
   text: string;
+  delivery?: "pending" | "held";
+  queueId?: string;
   attachments?: Array<{ name: string }>;
   tool?: StoredTool;
   tools?: StoredTool[];

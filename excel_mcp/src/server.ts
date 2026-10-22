@@ -82,7 +82,11 @@ export function createExcelMcpServer(forwarder: ToolForwarder, options: ExcelMcp
     }
 
     const result = await forwarder.call(name, parsed);
-    return result.ok ? ok(result.data) : fail(result.error);
+    const response = result.ok ? ok(result.data) : fail(result.error);
+    if (result.additional_user_messages?.length) {
+      response.content.push({ type: "text", text: "Additional messages sent directly by the user while this request was running. Read them before your next action:\n" + JSON.stringify({ additional_user_messages: result.additional_user_messages }) });
+    }
+    return response;
   });
 
   return server;

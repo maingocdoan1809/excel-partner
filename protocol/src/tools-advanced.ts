@@ -513,9 +513,17 @@ export const SaveSkillInputSchema = z.object({
   instructions: z.string().min(1).max(190_000).describe("Markdown instructions only, without YAML frontmatter. Saved as SKILL.md in the user's Excel Partner skills folder."),
 }).strict();
 export type SaveSkillInput = z.infer<typeof SaveSkillInputSchema>;
+export const UpdateSkillInputSchema = z.object({
+  name: z.string().regex(/^[a-z0-9][a-z0-9_-]{0,63}$/),
+  file: z.string().min(1).max(200).default("SKILL.md"),
+  content: z.string().max(5 * 1024 * 1024),
+  revision: z.string().regex(/^[a-f0-9]{64}$/).describe("Revision returned by read_skill with forEditing=true. Prevents overwriting newer edits."),
+}).strict();
+export type UpdateSkillInput = z.infer<typeof UpdateSkillInputSchema>;
 export const ReadSkillInputSchema = z.object({
   name: z.string().min(1).max(64).describe("Skill name from list_skills."),
   file: z.string().min(1).max(200).optional().describe("Reference file listed by a previous read_skill, e.g. references/diagram-style.md."),
+  forEditing: z.boolean().optional().describe("Return the exact UTF-8 file and its revision for update_skill; use this before changing any installed skill file."),
 });
 export type ReadSkillInput = z.infer<typeof ReadSkillInputSchema>;
 

@@ -77,6 +77,18 @@ describe.skipIf(!hasClaude())("claude adapter (real CLI, fake model)", () => {
     expect(JSON.stringify(last)).toContain("ZEBRA");
   }, 180_000);
 
+  it("passes a pending user message through the next MCP tool result to the real CLI", async () => {
+    const h = await setup([{ tool: "get_selection", input: {} }, { text: "Received the update." }]);
+    const running = h.turn("Inspect the workbook");
+    await h.pane.waitFor(message => message.type === "turn_started");
+    h.pane.send({ type: "followup", requestId: "h-1", id: "followup-real-cli", prompt: "Also keep all existing formulas intact." });
+    await h.pane.waitFor(message => message.type === "followup_status" && message.id === "followup-real-cli" && message.state === "pending");
+    expect((await running).finished.reason).toBe("completed");
+    expect(h.pane.received.some(message => message.type === "followup_status" && message.id === "followup-real-cli" && message.state === "delivered")).toBe(true);
+    const afterTool = fake!.requests.filter(request => request.body.tools?.length).at(-1)!;
+    expect(JSON.stringify(afterTool.body.messages)).toContain("Also keep all existing formulas intact.");
+  }, 120_000);
+
   it("reports tool errors from the pane without crashing the turn", async () => {
     const h = await setup([
       { tool: "read_range", input: { address: "A1", sheet: { name: "Nope" } } },

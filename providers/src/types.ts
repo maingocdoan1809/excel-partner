@@ -29,6 +29,7 @@ export interface McpEndpoint {
 export const MCP_SERVER_NAME = "excel";
 
 export interface StartSessionContext {
+  systemPrompt?: string;
   workbookConnectionId: string;
   sessionId: string;
   model?: string | null;
@@ -40,6 +41,7 @@ export interface StartSessionContext {
 }
 
 export interface SendTurnInput {
+  systemPrompt?: string;
   providerSessionId: string;
   requestId: string;
   model?: string | null;

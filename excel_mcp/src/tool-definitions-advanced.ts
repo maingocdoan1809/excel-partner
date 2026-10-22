@@ -95,6 +95,11 @@ const META: Partial<Record<ExcelToolName, Meta>> = {
       "~/.excel-partner/skills/<name>/SKILL.md with generated name/description frontmatter. Appears in Manage skills " +
       "and the / menu; use read_skill to verify. No arbitrary paths or overwriting existing skills. Does not modify the workbook.",
   },
+  update_skill: {
+    title: "Update an installed skill file",
+    annotations: WRITE,
+    description: "Update an existing UTF-8 text file in a user-installed skill, including SKILL.md, references or scripts. First call read_skill with forEditing=true to get its exact content and revision. Preserve unrelated instructions and keep the skill name unchanged. Changes follow Ask/Auto permission. Does not execute scripts or modify the workbook.",
+  },
   read_skill: {
     title: "Read skill",
     annotations: READ,

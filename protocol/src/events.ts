@@ -11,6 +11,13 @@ export type TurnFinishReason = z.infer<typeof TurnFinishReasonSchema>;
  */
 export const ProviderEventSchema = z.discriminatedUnion("type", [
   z.object({
+    type: z.literal("followup_status"),
+    requestId: z.string(),
+    id: z.string(),
+    state: z.enum(["pending", "delivered", "next_turn", "rejected"]),
+    message: z.string().optional(),
+  }),
+  z.object({
     type: z.literal("session_info"),
     requestId: z.string(),
     provider: z.enum(["claude", "copilot", "codex", "opencode"]),

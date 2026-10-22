@@ -30,6 +30,7 @@ import {
   ListReferenceFilesInputSchema,
   ListSkillsInputSchema,
   SaveSkillInputSchema,
+  UpdateSkillInputSchema,
   ReadWorkbookFileInputSchema,
   ReadAttachedImageInputSchema,
   ReadAttachedFileInputSchema,
@@ -93,6 +94,7 @@ export const ToolInputSchemas = {
   // skills (answered by the bridge itself)
   list_skills: ListSkillsInputSchema,
   save_skill: SaveSkillInputSchema,
+  update_skill: UpdateSkillInputSchema,
   read_skill: ReadSkillInputSchema,
   run_skill_script: RunSkillScriptInputSchema,
   run_python: RunPythonInputSchema,
@@ -110,7 +112,7 @@ export type ExcelToolName = keyof typeof ToolInputSchemas;
 export const EXCEL_TOOL_NAMES = Object.keys(ToolInputSchemas) as ExcelToolName[];
 
 /** Tools the bridge answers itself instead of forwarding to the task pane. */
-export const SERVER_TOOLS: readonly ExcelToolName[] = ["list_skills", "read_skill", "save_skill", "run_skill_script", "run_python", "list_reference_files", "read_workbook_file", "read_attached_image", "read_attached_file"];
+export const SERVER_TOOLS: readonly ExcelToolName[] = ["list_skills", "read_skill", "save_skill", "update_skill", "run_skill_script", "run_python", "list_reference_files", "read_workbook_file", "read_attached_image", "read_attached_file"];
 
 /** Tools controlled by allowOfficeJs (enabled by default; BRIDGE_ALLOW_OFFICE_JS=0 disables them). */
 export const OPT_IN_TOOLS: readonly ExcelToolName[] = ["execute_office_js"];

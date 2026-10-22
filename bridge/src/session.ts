@@ -47,6 +47,7 @@ export class WorkbookSession {
   providerNativeSessionId: string | null = null;
   providerChatSessionId: string | null = null;
   providerModel: string | null = null;
+  systemPromptRevision: string | null = null;
   providerEffort: "low" | "medium" | "high" = "medium";
   activeRequestId: string | null = null;
   turnController: AbortController | null = null;
@@ -58,6 +59,24 @@ export class WorkbookSession {
   defaultWorkspace: string | null = null;
   /** File bytes explicitly selected in the pane; never written to disk. */
   readonly attachments = new Map<string, SessionAttachment>();
+  private readonly followups = new Map<string, { requestId: string; text: string }>();
+
+  queueFollowup(requestId: string, id: string, text: string): void {
+    if (this.followups.has(id)) return;
+    if (this.followups.size >= 20 || [...this.followups.values()].reduce((total, item) => total + item.text.length, 0) + text.length > 64_000) throw new Error("Too many pending messages. Wait for the assistant to receive them.");
+    this.followups.set(id, { requestId, text });
+  }
+
+  takeFollowups(requestId: string, state: "delivered" | "next_turn"): Array<{ id: string; text: string }> {
+    const items: Array<{ id: string; text: string }> = [];
+    for (const [id, item] of this.followups) {
+      if (item.requestId !== requestId) continue;
+      this.followups.delete(id);
+      items.push({ id, text: item.text });
+      this.send({ type: "followup_status", requestId, id, state });
+    }
+    return items;
+  }
 
   /** Serialises write-ish tool calls so the pane applies them in order. */
   private toolChain: Promise<unknown> = Promise.resolve();
@@ -152,13 +171,17 @@ export class WorkbookSession {
    * per session so ordering of writes is preserved.
    */
   requestTool(tool: string, args: unknown, timeoutMs: number): Promise<ToolResult> {
-    const run = () => this.dispatchTool(tool, args, timeoutMs);
+    const requestId = this.activeRequestId;
+    const signal = this.turnController?.signal;
+    const run = (): Promise<ToolResult> => signal?.aborted || this.activeRequestId !== requestId
+      ? Promise.resolve({ ok: false, error: { code: "cancelled", message: "The request ended before this tool could run." } })
+      : this.dispatchTool(tool, args, timeoutMs, requestId);
     const result = this.toolChain.then(run, run);
     this.toolChain = result.catch(() => undefined);
     return result;
   }
 
-  private dispatchTool(tool: string, args: unknown, timeoutMs: number): Promise<ToolResult> {
+  private dispatchTool(tool: string, args: unknown, timeoutMs: number, requestId: string | null): Promise<ToolResult> {
     const callId = randomUUID();
     if (!this.isConnected) {
       return Promise.resolve({
@@ -181,7 +204,7 @@ export class WorkbookSession {
 
       const sent = this.send({
         type: "tool_request",
-        requestId: this.activeRequestId ?? "no-turn",
+        requestId: requestId ?? "no-turn",
         callId,
         tool,
         args,

@@ -134,9 +134,11 @@ button:disabled { cursor: default; }
   align-self: flex-start;
   display: grid;
   grid-template-columns: 12px minmax(0, 1fr);
-  align-items: baseline;
+  align-items: center;
+  align-content: center;
   gap: 7px;
   width: 100%;
+  min-height: 30px;
   min-width: 0;
   max-width: 100%;
   box-sizing: border-box;
@@ -146,6 +148,7 @@ button:disabled { cursor: default; }
   border: 1px solid var(--border);
   color: var(--muted);
   font: 11px ui-monospace, "Cascadia Code", monospace;
+  line-height: 18px;
 }
 .tool .mark { width: 12px; text-align: center; font-weight: 700; }
 .tool[data-state="running"] .mark::before { content: "…"; }
@@ -155,6 +158,7 @@ button:disabled { cursor: default; }
 .tool[data-state="error"] .mark::before { content: "✗"; }
 .tool .name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tool .args { grid-column: 2; min-width: 0; color: inherit; opacity: 0.75; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tool .args:empty { display: none; }
 .tool-group { align-self: flex-start; width: 100%; min-width: 0; max-width: 100%; color: var(--muted); font-size: 12px; }
 .tool-group summary { cursor: pointer; width: fit-content; padding: 5px 9px; border-radius: 8px; background: var(--blue-100); user-select: none; }
 .tool-group summary:hover { color: var(--accent-strong); }
@@ -541,6 +545,14 @@ body.login-active .auth-notice { display: none; }
 .user-skill strong { color: var(--accent-strong); font-size: 12px; font-weight: 500; }
 .user-skill p { margin: 5px 0 0; color: var(--muted); font-size: 11px; }
 .user-skill button { flex-shrink: 0; padding: 4px 7px; font-size: 10px; }
+.user-skill > .user-skill-actions { display: flex; flex: 0 0 auto; flex-wrap: wrap; gap: 5px; max-width: 110px; }
+.text-editor { width: min(720px, calc(100vw - 20px)); }
+.text-editor textarea { min-height: 250px; height: 48vh; font: 12px/1.5 ui-monospace, Consolas, monospace; tab-size: 2; }
+.text-editor select { width: 100%; margin: 6px 0; padding: 7px; border: 1px solid var(--border); border-radius: 8px; background: var(--float); color: var(--text); }
+.text-editor .reference-actions { flex-wrap: wrap; }
+.message-delivery { display: flex; align-items: center; gap: 8px; margin-top: 5px; font-size: 10px; opacity: .85; }
+.message-delivery button { padding: 2px 8px; border: 1px solid currentColor; background: transparent; color: inherit; font-size: 10px; }
+.composer-actions #stop-button { flex: 0 0 29px; width: 29px; height: 29px; padding: 0; justify-content: center; background: #d70015; color: #fff; }
 @media (max-width: 290px) { .picker-button { font-size: 10px; gap: 2px; } .model-picker { max-width: calc(100% - 145px); } .auth-notice { padding: 9px 10px; gap: 7px; } .auth-notice span { font-size: 9px; } }
 
 .reference-row { padding: 12px; border: 1px solid var(--border); border-radius: 8px; overflow-wrap: anywhere; }

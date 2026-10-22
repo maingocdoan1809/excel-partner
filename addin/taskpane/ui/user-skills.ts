@@ -1,4 +1,5 @@
 import type { BridgeClient } from "../bridge-client.js";
+import { createTextEditor } from "./text-editor.js";
 
 export function setupUserSkills(client: () => BridgeClient, changed: () => void): { refresh(): Promise<void> } {
   const list = document.getElementById("user-skills-list")!;
@@ -7,6 +8,7 @@ export function setupUserSkills(client: () => BridgeClient, changed: () => void)
   const input = document.getElementById("skill-upload-input") as HTMLInputElement;
   let busy = false;
   let request = 0;
+  const editor = createTextEditor();
 
   async function refresh(): Promise<void> {
     const current = ++request;
@@ -27,6 +29,26 @@ export function setupUserSkills(client: () => BridgeClient, changed: () => void)
         copy.append(title, detail);
         row.append(copy);
         if (skill.removable) {
+          const actions = document.createElement("div");
+          actions.className = "user-skill-actions";
+          const edit = document.createElement("button");
+          edit.type = "button";
+          edit.className = "secondary";
+          edit.textContent = "Edit";
+          edit.addEventListener("click", async () => {
+            if (busy) return;
+            busy = true;
+            edit.disabled = true;
+            try {
+              const files = await client().skillTextFiles(skill.name);
+              await editor.open({ title: `Edit /${skill.name}`, detail: "Edit text files in this skill. Workbook templates and images are preserved.", files,
+                load: file => client().readSkillText(skill.name, file),
+                save: document => client().saveSkillText(skill.name, document),
+                saved: () => { changed(); void refresh(); },
+              });
+            } catch (error) { message.textContent = error instanceof Error ? error.message : "Could not edit this skill."; }
+            finally { busy = false; edit.disabled = false; }
+          });
           const remove = document.createElement("button");
           remove.type = "button";
           remove.className = "secondary";
@@ -50,7 +72,8 @@ export function setupUserSkills(client: () => BridgeClient, changed: () => void)
             } catch (error) { message.textContent = error instanceof Error ? error.message : "Could not remove this skill."; }
             finally { busy = false; upload.disabled = false; remove.disabled = false; }
           });
-          row.append(remove);
+          actions.append(edit, remove);
+          row.append(actions);
         }
         list.append(row);
       }

@@ -78,6 +78,10 @@ GitHub Copilot also supports device-code sign-in through **Settings > Sign in to
 - Choose a provider, model, and reasoning effort from the task pane.
 - Attach local files or browse workspace files with `@`.
 - Add reusable instructions through **Settings > Manage skills**, then invoke them with `/skill-name`.
+- Edit installed skill text files through **Manage skills > Edit**, including instructions, references and scripts. Binary templates and images are preserved. Saving rejects a stale revision instead of overwriting newer edits.
+- Let the assistant update an installed skill with `read_skill` (`forEditing: true`) and `update_skill`. Ask/Auto applies to each save; updating a script does not run it.
+- Send another message while the assistant works. It appears as **Pending** and reaches the assistant with the next tool result, or starts the next turn if no tool follows. Stop and disconnect preserve unsent messages for manual resend.
+- Customize the complete shared system prompt through **Settings > System prompt**, or restore the default. Changes apply on the next request and preserve the native conversation where resume is supported.
 - Review workbook changes and return to conversations through chat history.
 
 Press **Enter** to send a message and **Ctrl+Enter** to insert a new line.

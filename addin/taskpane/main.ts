@@ -16,6 +16,7 @@ import { setupComposerMenu } from "./ui/composer-menu.js";
 import { setupTheme } from "./ui/theme.js";
 import { setupSavedReferences } from "./ui/saved-references.js";
 import { setupUserSkills } from "./ui/user-skills.js";
+import { createTextEditor } from "./ui/text-editor.js";
 import {
   SessionStore,
   buildContextPreface,
@@ -138,8 +139,19 @@ let requestStartedAt = 0;
 /** The provider process starts empty after a reload or when a past chat is continued; replay the transcript once. */
 let needsContext = false;
 let currentRequestId: string | null = null;
+let requestSession: StoredSession | null = null;
 let cancelRequested = false;
 let promptDispatched = false;
+interface PendingPrompt {
+  id: string;
+  parentRequestId: string;
+  prompt: string;
+  attachments: typeof pendingAttachments;
+  message: StoredMessage;
+  state: "pending" | "next_turn" | "held";
+}
+const pendingPrompts = new Map<string, PendingPrompt>();
+let autoQueueAllowed = true;
 let live: { element: HTMLElement; message: StoredMessage } | null = null;
 const liveTools = new Map<string, { card: HTMLElement; tool: StoredTool }>();
 let liveToolGroup: { element: HTMLDetailsElement; message: StoredMessage } | null = null;
@@ -194,6 +206,7 @@ const slash = createSlashMenu({
 });
 const savedReferences = setupSavedReferences(() => client);
 const userSkills = setupUserSkills(() => client, () => slash.reload());
+const promptEditor = createTextEditor();
 
 Office.onReady((info) => {
   if (info.host !== Office.HostType.Excel) return;
@@ -291,6 +304,13 @@ Office.onReady((info) => {
   els.menuReferences.addEventListener("click", () => showPanel("references"));
   els.menuTemplates.addEventListener("click", () => showPanel("templates"));
   byId("menu-skills").addEventListener("click", () => showPanel("skills"));
+  byId("menu-system-prompt").addEventListener("click", () => {
+    closeMenu();
+    void promptEditor.open({ title: "System prompt", detail: "Shared by all AI providers on this computer. Saved changes apply to the next request; an active response keeps its current instructions.", files: ["System prompt"],
+      load: () => client.systemPrompt(), save: document => client.saveSystemPrompt(document.content, document.revision),
+      reset: revision => client.saveSystemPrompt(null, revision),
+    });
+  });
   els.menuNew.addEventListener("click", () => {
     closeMenu();
     startNewChat();
@@ -333,9 +353,10 @@ Office.onReady((info) => {
   els.permissionMode.addEventListener("change", () => selectPermissionMode(els.permissionMode.value as PermissionMode));
   els.modelSelect.addEventListener("change", saveModelChoice);
   els.send.addEventListener("click", () => {
-    if (currentRequestId) stopCurrentTurn();
+    if (currentRequestId && !els.input.value.trim() && !pendingAttachments.length) stopCurrentTurn();
     else void submit();
   });
+  byId("stop-button").addEventListener("click", stopCurrentTurn);
   els.input.addEventListener("keydown", (event) => {
     if (event.isComposing || event.keyCode === 229) return;
     if (event.key === "Enter" && event.ctrlKey) {
@@ -419,6 +440,7 @@ function renderMessage(container: HTMLElement, message: StoredMessage): HTMLElem
         element.append(token);
         appendFileMentions(element, lead.rest, message.attachments?.map((item) => item.name) ?? []);
       } else appendFileMentions(element, message.text, message.attachments?.map((item) => item.name) ?? []);
+      if (message.delivery) renderDelivery(element, message);
       break;
     }
     case "assistant":
@@ -506,9 +528,74 @@ function renderWelcome(): void {
 /* Conversation                                                                */
 /* -------------------------------------------------------------------------- */
 
-async function submit(): Promise<void> {
-  const prompt = els.input.value.trim() || (pendingAttachments.length ? "Please inspect the attached files." : "");
-  if (!prompt || currentRequestId || !client.connected) return;
+function renderDelivery(element: HTMLElement, message: StoredMessage): void {
+  element.querySelector(".message-delivery")?.remove();
+  if (!message.delivery) return;
+  const label = document.createElement("span");
+  label.className = "message-delivery";
+  const pending = message.queueId ? pendingPrompts.get(message.queueId) : undefined;
+  label.textContent = message.delivery === "pending" && pending?.state !== "held" && pending ? "Pending" : "Not sent";
+  if (!pending || pending.state === "held") {
+    const send = document.createElement("button");
+    send.type = "button";
+    send.textContent = "Send";
+    send.addEventListener("click", () => {
+      if (currentRequestId || !client.connected) return;
+      void submit(pending ?? { id: message.queueId ?? randomId(), parentRequestId: "", prompt: message.text, attachments: [], message, state: "held" });
+    });
+    label.append(send);
+  }
+  element.append(label);
+  if (message.queueId) element.dataset.queueId = message.queueId;
+}
+
+function updateDelivery(item: PendingPrompt): void {
+  item.message.delivery = item.state === "held" ? "held" : "pending";
+  for (const element of els.messages.querySelectorAll<HTMLElement>(".bubble.user[data-queue-id]")) {
+    if (element.dataset.queueId === item.id) renderDelivery(element, item.message);
+  }
+  schedulePersist();
+}
+
+function holdPendingPrompts(): void {
+  for (const item of pendingPrompts.values()) { item.state = "held"; updateDelivery(item); }
+}
+
+function sendNextPending(): void {
+  if (currentRequestId || !client.connected) return;
+  const next = [...pendingPrompts.values()].find(item => item.state === "next_turn" && session.messages.includes(item.message));
+  if (next) void submit(next);
+}
+
+async function submit(queued?: PendingPrompt): Promise<void> {
+  const prompt = queued?.prompt ?? (els.input.value.trim() || (pendingAttachments.length ? "Please inspect the attached files." : ""));
+  if (!prompt || !client.connected) return;
+  if (prompt.length > 32_000) { append({ kind: "error", text: "Messages must be 32,000 characters or fewer." }); return; }
+  const turnAttachments = queued?.attachments ?? pendingAttachments.slice();
+  if (!turnAttachments.length && /(?:^|\s)@[^\n]*\.(?:xlsx|xlsm|xltx|xltm|png|jpe?g|gif|webp|md|txt|json|csv|ya?ml|zip)(?=\s|$)/i.test(prompt)) {
+    append({ kind: "error", text: "The @ file is only text. Choose it from a workspace or the local file picker so I can read it." });
+    updateMentionMenu();
+    return;
+  }
+  if (currentRequestId) {
+    if (queued || cancelRequested) return;
+    if (pendingPrompts.size >= 20) { append({ kind: "error", text: "Wait for pending messages to be sent before adding more." }); return; }
+    const id = randomId();
+    const attachments = pendingAttachments.slice();
+    const message: StoredMessage = { kind: "user", text: prompt, delivery: "pending", queueId: id, attachments: attachments.map(item => ({ name: item.name })) };
+    const item: PendingPrompt = { id, parentRequestId: currentRequestId, prompt, attachments, message, state: "pending" };
+    pendingPrompts.set(id, item);
+    try {
+      client.queuePrompt(currentRequestId, id, prompt,
+        attachments.flatMap(item => item.reference.id ? [] : [item.reference.path]),
+        attachments.flatMap(item => item.reference.id ? [item.reference.id] : []));
+      append(message);
+      els.input.value = "";
+      clearAttachment();
+      persistNow();
+    } catch (error) { pendingPrompts.delete(id); append({ kind: "error", text: error instanceof Error ? error.message : String(error) }); }
+    return;
+  }
   if (!session.identityVersion && !session.providerSessionId && session.messages.some(message => message.kind === "user")) {
     append({ kind: "error", text: "This legacy chat has no saved CLI session ID, so it cannot be resumed reliably. Its history is preserved. Start a new chat to create a native session." });
     return;
@@ -516,11 +603,6 @@ async function submit(): Promise<void> {
   const model = els.modelSelect.value || null;
   const effort = els.effortSelect.value as "low" | "medium" | "high";
   saveModelChoice();
-  if (!pendingAttachments.length && /(?:^|\s)@[^\n]*\.(?:xlsx|xlsm|xltx|xltm|png|jpe?g|gif|webp|md|txt|json|csv|ya?ml|zip)(?=\s|$)/i.test(prompt)) {
-    append({ kind: "error", text: "The @ file is only text. Choose it from a workspace or the local file picker so I can read it." });
-    updateMentionMenu();
-    return;
-  }
   slash.close();
   if (prompt === "/clear") {
     els.input.value = "";
@@ -530,30 +612,38 @@ async function submit(): Promise<void> {
 
   const requestId = randomId();
   currentRequestId = requestId;
+  requestSession = session;
   setBusy(true);
-  els.input.value = "";
+  if (!queued) els.input.value = "";
   renderComposerPreview();
   showPanel(null);
   const context = needsContext || (activeModel !== undefined && activeModel !== model) || (activeEffort !== undefined && activeEffort !== effort)
     ? buildContextPreface(session) : undefined;
   needsContext = false;
-  requestMessageIndex = session.messages.length;
+  requestMessageIndex = queued ? Math.max(0, session.messages.indexOf(queued.message)) : session.messages.length;
   requestChangeIndex = session.changes.length;
   requestStartedAt = Date.now();
-  append({ kind: "user", text: prompt, attachments: pendingAttachments.map((item) => ({ name: item.name })) });
+  if (queued) {
+    queued.message.delivery = undefined;
+    pendingPrompts.delete(queued.id);
+    for (const element of els.messages.querySelectorAll<HTMLElement>(".bubble.user[data-queue-id]")) {
+      if (element.dataset.queueId === queued.id) renderDelivery(element, queued.message);
+    }
+  } else append({ kind: "user", text: prompt, attachments: turnAttachments.map((item) => ({ name: item.name })) });
+  if (!queued) clearAttachment();
   showThinking();
   persistNow();
 
   const result = await executeTool("get_selection", {});
+  if (currentRequestId !== requestId || requestSession !== session) return;
   const selection = result.ok ? (result.data as never) : null;
   if (cancelRequested) return finishLocalCancel(requestId);
   try {
-    const attachmentIds = pendingAttachments.flatMap((item) => item.reference.id ? [item.reference.id] : []);
-    const referencePaths = pendingAttachments.flatMap((item) => item.reference.id ? [] : [item.reference.path]);
+    const attachmentIds = turnAttachments.flatMap((item) => item.reference.id ? [item.reference.id] : []);
+    const referencePaths = turnAttachments.flatMap((item) => item.reference.id ? [] : [item.reference.path]);
     if (cancelRequested) return finishLocalCancel(requestId);
     client.sendPrompt(requestId, prompt, selection, context, attachmentIds, model, referencePaths, effort, session.id,
       session.provider === provider ? session.providerSessionId : undefined);
-    clearAttachment();
     promptDispatched = true;
     activeModel = model;
     activeEffort = effort;
@@ -562,7 +652,8 @@ async function submit(): Promise<void> {
     clearThinking();
     currentRequestId = null;
     setBusy(false);
-    els.input.value = prompt;
+    if (queued) { queued.state = "held"; pendingPrompts.set(queued.id, queued); updateDelivery(queued); }
+    else els.input.value = prompt;
     renderComposerPreview();
     append({ kind: "error", text: error instanceof Error ? error.message : String(error) });
   }
@@ -571,6 +662,7 @@ async function submit(): Promise<void> {
 function stopCurrentTurn(): void {
   if (!currentRequestId || cancelRequested) return;
   cancelRequested = true;
+  autoQueueAllowed = false;
   els.send.dataset.stopping = "true";
   els.send.disabled = true;
   els.send.setAttribute("aria-label", "Stopping response");
@@ -582,8 +674,9 @@ function finishLocalCancel(requestId: string): void {
   if (currentRequestId !== requestId) return;
   clearThinking();
   currentRequestId = null;
+  holdPendingPrompts();
   const last = session.messages[session.messages.length - 1];
-  if (last?.kind === "user") {
+  if (last?.kind === "user" && pendingPrompts.size === 0) {
     session.messages.pop();
     const bubbles = els.messages.querySelectorAll(".bubble.user");
     bubbles[bubbles.length - 1]?.remove();
@@ -890,6 +983,7 @@ function appendFileMentions(container: HTMLElement, text: string, names: readonl
 }
 
 function renderComposerPreview(): void {
+  updateSendControl();
   els.promptDisplay.replaceChildren();
   const text = els.input.value;
   const command = slashBadgeRange(text, selectedSlashToken);
@@ -932,9 +1026,32 @@ function clearAttachment(): void {
 }
 
 function handleEvent(event: ProviderEvent): void {
+  if (event.type !== "followup_status" && event.requestId !== null && event.requestId !== currentRequestId) return;
   switch (event.type) {
+    case "followup_status": {
+      const item = pendingPrompts.get(event.id);
+      if (!item || item.parentRequestId !== event.requestId) return;
+      if (item.state === "held" && event.state !== "delivered") return;
+      if (event.state === "delivered") {
+        item.message.delivery = undefined;
+        pendingPrompts.delete(item.id);
+        if (session.messages.includes(item.message)) {
+          for (const element of els.messages.querySelectorAll<HTMLElement>(".bubble.user[data-queue-id]")) {
+            if (element.dataset.queueId === item.id) renderDelivery(element, item.message);
+          }
+        }
+        schedulePersist();
+      } else {
+        item.state = event.state === "rejected" ? "held" : event.state;
+        if (!currentRequestId && !autoQueueAllowed) item.state = "held";
+        updateDelivery(item);
+        if (event.message) append({ kind: "error", text: event.message });
+        if (event.state === "next_turn" && autoQueueAllowed) sendNextPending();
+      }
+      return;
+    }
     case "session_info": {
-      if (event.requestId !== currentRequestId) return;
+      if (event.requestId !== currentRequestId || session !== requestSession) return;
       const oldId = session.id;
       const bound = bindProviderSession(session, event, requestMessageIndex, requestChangeIndex, requestStartedAt);
       if (bound.previous) {
@@ -943,6 +1060,7 @@ function handleEvent(event: ProviderEvent): void {
         requestChangeIndex = 0;
       }
       session = bound.current;
+      requestSession = session;
       if (oldId !== session.id) {
         usageSummary = undefined;
         if (usageRequestId === event.requestId) usageSessionId = session.id;
@@ -1015,6 +1133,8 @@ function handleEvent(event: ProviderEvent): void {
       return;
     }
     case "turn_finished":
+      if (event.requestId !== currentRequestId) return;
+      autoQueueAllowed = event.reason === "completed";
       if (event.requestId === usageRequestId) {
         window.clearInterval(usageTimer);
         usageStartedAt = null;
@@ -1037,7 +1157,9 @@ function handleEvent(event: ProviderEvent): void {
       liveToolGroup = null;
       setBusy(false);
       if (event.reason === "cancelled") append({ kind: "note", text: "Stopped." });
+      if (event.reason !== "completed") holdPendingPrompts();
       persistNow();
+      sendNextPending();
       updater.reloadIfIdle();
       return;
     case "error":
@@ -1174,7 +1296,7 @@ function persistNow(): void {
 }
 
 function startNewChat(): void {
-  if (currentRequestId) client.cancel(currentRequestId);
+  abandonRequest();
   clearAttachment();
   persistNow();
   session = newSession(provider);
@@ -1193,6 +1315,7 @@ function startNewChat(): void {
 
 /** Make a stored chat the current one (its messages are shown in the chat area). */
 function loadSession(stored: StoredSession): void {
+  abandonRequest();
   clearAttachment();
   if (["claude", "copilot", "codex", "opencode"].includes(stored.provider) && stored.provider !== provider) {
     provider = stored.provider as ProviderId;
@@ -1577,6 +1700,7 @@ function deleteViewedSession(): void {
 function deleteSession(id: string): void {
   store.delete(id);
   if (id === session.id) {
+    abandonRequest();
     // The open chat was removed: carry on in an empty one.
     session = newSession(provider);
     needsContext = false;
@@ -1601,6 +1725,7 @@ function clearHistory(): void {
   window.clearTimeout(confirmClearTimer);
   resetClearButton();
   store.clear();
+  abandonRequest();
   session = newSession(provider);
   needsContext = false;
   els.messages.replaceChildren();
@@ -1675,6 +1800,8 @@ function renderState(state: string): void {
   els.status.dataset.state = state;
   els.send.disabled = state !== "open" || els.send.dataset.stopping === "true";
   if (state === "closed" && currentRequestId) {
+    autoQueueAllowed = false;
+    holdPendingPrompts();
     // The bridge dropped mid-turn; the running request can no longer finish, so free the UI.
     window.clearInterval(usageTimer);
     usageStartedAt = null;
@@ -1690,6 +1817,7 @@ function renderState(state: string): void {
 
 /** The send control becomes a red Stop button while a turn is running. */
 function setBusy(busy: boolean): void {
+  if (busy) autoQueueAllowed = true;
   if (!busy) clearThinking();
   cancelRequested = false;
   promptDispatched = false;
@@ -1700,6 +1828,33 @@ function setBusy(busy: boolean): void {
   els.send.setAttribute("aria-label", busy ? "Stop response" : "Send message");
   els.send.title = busy ? "Stop response" : "Send message";
   els.status.dataset.busy = String(busy);
+  updateSendControl();
+}
+
+function abandonRequest(): void {
+  autoQueueAllowed = false;
+  if (currentRequestId) client.cancel(currentRequestId);
+  holdPendingPrompts();
+  pendingPrompts.clear();
+  currentRequestId = null;
+  requestSession = null;
+  window.clearInterval(usageTimer);
+  usageStartedAt = null;
+  usageRequestId = null;
+  turnUsage = null;
+  setBusy(false);
+}
+
+function updateSendControl(): void {
+  const running = currentRequestId !== null;
+  const hasPrompt = !!els.input.value.trim() || pendingAttachments.length > 0;
+  const stop = running && !hasPrompt;
+  els.send.dataset.mode = stop ? "stop" : "send";
+  const label = stop ? "Stop response" : running ? "Queue message" : "Send message";
+  els.sendLabel.textContent = stop ? "Stop" : running ? "Queue" : "Send";
+  els.send.setAttribute("aria-label", label);
+  els.send.title = label;
+  byId("stop-button").hidden = !running || !hasPrompt;
 }
 
 function scrollToEnd(): void {

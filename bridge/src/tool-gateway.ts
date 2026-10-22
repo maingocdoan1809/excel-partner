@@ -12,7 +12,7 @@ import {
 import { ReferenceError_, type ReferenceFiles } from "./reference-files.js";
 import { SkillError, parseSkillTemplateUri, type SkillStore } from "./skills.js";
 import type { UserSkills } from "./skill-upload.js";
-import type { SaveSkillInput } from "../../protocol/src/index.js";
+import type { SaveSkillInput, UpdateSkillInput } from "../../protocol/src/index.js";
 import type { RunSkillScriptInput } from "../../protocol/src/index.js";
 import { resolveSkillScript, runSkillScript, skillFile } from "./skill-runner.js";
 import { runPython, PythonError, PYTHON_FILE_BYTES } from "./python-runner.js";
@@ -66,6 +66,15 @@ export class ToolGateway {
 
   async invoke(request: InternalToolRequest): Promise<ToolResult> {
     const session = this.sessions.get(request.sessionId);
+    const requestId = session?.activeRequestId;
+    const result = await this.invokeTool(request);
+    if (!session || !requestId || session.activeRequestId !== requestId || session.turnController?.signal.aborted) return result;
+    const followups = session.takeFollowups(requestId, "delivered");
+    return followups.length ? { ...result, additional_user_messages: followups } : result;
+  }
+
+  private async invokeTool(request: InternalToolRequest): Promise<ToolResult> {
+    const session = this.sessions.get(request.sessionId);
     if (!session) {
       return error("disconnected", `unknown or expired session '${request.sessionId}'`);
     }
@@ -92,6 +101,23 @@ export class ToolGateway {
 
     if (request.tool === "list_skills" || request.tool === "read_skill" || request.tool === "save_skill") {
       return this.answerSkillTool(request.tool, parsed);
+    }
+    if (request.tool === "update_skill") {
+      const input = parsed as UpdateSkillInput;
+      const skill = this.skills?.get(input.name);
+      if (!skill || !this.userSkills?.owns(skill.name, skill.dir)) return error("invalid_arguments", "Only user-installed skills can be updated.");
+      try {
+        const current = this.userSkills.readTextFile(input.name, input.file);
+        if (current.revision !== input.revision) return error("invalid_arguments", "This skill file changed. Read it again with forEditing=true before updating.");
+        const requestId = session.activeRequestId;
+        const signal = session.turnController?.signal;
+        const allowed = await session.requestTool("__authorize_skill_edit", { name: input.name, file: input.file, content: input.content }, this.timeoutMs);
+        if (!allowed.ok) return allowed;
+        if (!(allowed.data as { approved?: boolean })?.approved) return error("cancelled", "The user declined this skill update.");
+        if (signal?.aborted || session.activeRequestId !== requestId) return error("cancelled", "The request was cancelled before saving the skill.");
+        const updated = this.userSkills.updateTextFile(input.name, input.file, input.content, input.revision);
+        return { ok: true, data: { name: input.name, file: updated.file, revision: updated.revision, saved: true } };
+      } catch (err) { if (err instanceof SkillError) return error("invalid_arguments", err.message); throw err; }
     }
     if (request.tool === "run_skill_script") {
       return this.answerScriptTool(session, parsed as RunSkillScriptInput);
@@ -353,7 +379,12 @@ export class ToolGateway {
       if (tool === "list_skills") {
         return { ok: true, data: { skills: this.skills.list().map(({ name, description }) => ({ name, description })) } };
       }
-      const { name, file } = args as { name: string; file?: string };
+      const { name, file, forEditing } = args as { name: string; file?: string; forEditing?: boolean };
+      if (forEditing) {
+        const skill = this.skills.get(name);
+        if (!skill || !this.userSkills?.owns(skill.name, skill.dir)) return error("invalid_arguments", "Only user-installed skills can be edited.");
+        return { ok: true, data: { name, ...this.userSkills.readTextFile(name, file ?? "SKILL.md"), files: this.userSkills.textFiles(name) } };
+      }
       return { ok: true, data: this.skills.read(name, file) };
     } catch (err) {
       if (err instanceof SkillError) return error("invalid_arguments", err.message);

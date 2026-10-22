@@ -21,9 +21,10 @@ import { Logger } from "./logger.js";
 import { ReferenceError_, ReferenceFiles, workbookFolderFromUrl } from "./reference-files.js";
 import { AttachmentError, MAX_ATTACHMENT_BYTES, attachmentPath, createAttachment } from "./attachments.js";
 import { SkillError } from "./skills.js";
-import { UserSkills, MAX_SKILL_UPLOAD_BYTES } from "./skill-upload.js";
+import { UserSkills, SkillEditConflict, MAX_SKILL_UPLOAD_BYTES } from "./skill-upload.js";
 import { SkillStore, expandSkillPrompt, projectTemplateReminder } from "./skills.js";
 import { SessionManager } from "./session-manager.js";
+import { SystemPromptStore, PromptSettingsError, PromptSettingsConflict } from "./system-prompt.js";
 import { WorkbookSession } from "./session.js";
 import { ToolGateway } from "./tool-gateway.js";
 import { enrichWindowsSelection, type SelectionEnricher } from "./windows-selection.js";
@@ -49,6 +50,7 @@ export interface BridgeOptions {
   /** Where user-added workspaces are saved; null disables persistence in tests. */
   workspaceConfigPath?: string | null;
   skillUploadDir?: string;
+  systemPromptFile?: string | null;
   usageFile?: string | null;
   savedReferencesFile?: string | null;
 }
@@ -78,6 +80,7 @@ export class Bridge {
   private readonly sockets = new Map<WebSocket, SocketState>();
   private readonly logins = new ProviderLoginManager();
   private readonly userSkills: UserSkills;
+  private readonly systemPrompt: SystemPromptStore;
 
   constructor(config: BridgeConfig, options: BridgeOptions = {}) {
     this.config = config;
@@ -91,6 +94,9 @@ export class Bridge {
     });
     this.skills = options.skills ?? new SkillStore(config.skillDirs);
     this.userSkills = new UserSkills(options.skillUploadDir ?? path.join(os.homedir(), ".excel-partner", "skills"));
+    this.systemPrompt = new SystemPromptStore(options.systemPromptFile === undefined
+      ? process.env.BRIDGE_CONFIG ? path.join(path.dirname(process.env.BRIDGE_CONFIG), "system-prompt.txt") : path.join(PROJECT_ROOT, "run", "system-prompt.txt")
+      : options.systemPromptFile);
     this.references = options.references ?? new ReferenceFiles(config.referenceDirs);
     this.savedReferences = new SavedReferences(options.savedReferencesFile === undefined
       ? path.join(os.homedir(), ".excel-partner", "references.json") : options.savedReferencesFile);
@@ -233,7 +239,8 @@ export class Bridge {
     }
     if (req.method === "GET" && url.pathname === "/session/models") return this.listProviderModels(req, res, url);
     if (url.pathname === "/session/references") return this.handleSavedReferences(req, res, url);
-    if (url.pathname === "/session/skills") return this.handleUserSkills(req, res);
+    if (url.pathname === "/session/skills") return this.handleUserSkills(req, res, url);
+    if (url.pathname === "/session/system-prompt") return this.handleSystemPrompt(req, res);
     if (url.pathname === "/session/skill-templates" && req.method === "GET") return this.listSkillTemplates(req, res, url);
     if (url.pathname === "/session/skill-templates" && req.method === "POST") return this.addSkillTemplate(req, res);
     if (url.pathname === "/session/skill-templates" && req.method === "DELETE") return this.deleteSkillTemplate(req, res);
@@ -325,10 +332,38 @@ export class Bridge {
     }
   }
 
-  private async handleUserSkills(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+  private async handleSystemPrompt(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+    if (!this.workspaceSession(req)) return this.sendJson(res, 401, { error: "unauthorized" });
+    try {
+      if (req.method === "GET") return this.sendJson(res, 200, this.systemPrompt.read());
+      if (req.method !== "PUT") return this.sendJson(res, 405, { error: "method_not_allowed" });
+      const body = JSON.parse(await readBody(req)) as { content?: unknown; revision?: unknown };
+      if ((typeof body.content !== "string" && body.content !== null) || typeof body.revision !== "string") throw new PromptSettingsError("Specify prompt content and revision.");
+      return this.sendJson(res, 200, this.systemPrompt.update(body.content, body.revision));
+    } catch (error) {
+      if (error instanceof PromptSettingsConflict) return this.sendJson(res, 409, { error: error.message });
+      if (error instanceof PromptSettingsError || error instanceof SyntaxError) return this.sendJson(res, 400, { error: error.message });
+      throw error;
+    }
+  }
+
+  private async handleUserSkills(req: http.IncomingMessage, res: http.ServerResponse, url: URL): Promise<void> {
     if (!this.workspaceSession(req)) return this.sendJson(res, 401, { error: "unauthorized" });
     res.setHeader("cache-control", "no-store");
     try {
+      if ((req.method === "GET" && url.searchParams.has("name")) || req.method === "PUT") {
+        const body = req.method === "PUT" ? JSON.parse(await readBody(req, MAX_SKILL_UPLOAD_BYTES * 6 + 4096)) as Record<string, unknown> : null;
+        const name = body?.name ?? url.searchParams.get("name");
+        if (typeof name !== "string") throw new SkillError("Specify a skill name.");
+        const skill = this.skills.get(name);
+        if (!skill || !this.userSkills.owns(skill.name, skill.dir)) return this.sendJson(res, 403, { error: "Only your installed skills can be edited here." });
+        const file = body?.file ?? url.searchParams.get("file");
+        if (req.method === "GET") return this.sendJson(res, 200, file === null
+          ? { files: this.userSkills.textFiles(name) }
+          : { document: this.userSkills.readTextFile(name, String(file)) });
+        if (typeof file !== "string" || typeof body?.content !== "string" || typeof body.revision !== "string") throw new SkillError("Specify the file, text content and revision.");
+        return this.sendJson(res, 200, { document: this.userSkills.updateTextFile(name, file, body.content, body.revision) });
+      }
       if (req.method === "GET") return this.sendJson(res, 200, {
         skills: this.skills.list().map(({ name, description, dir }) => ({ name, description, removable: this.userSkills.owns(name, dir) })),
       });
@@ -350,6 +385,7 @@ export class Bridge {
       }
       return this.sendJson(res, 405, { error: "method_not_allowed" });
     } catch (error) {
+      if (error instanceof SkillEditConflict) return this.sendJson(res, 409, { error: error.message });
       if (error instanceof SkillError || error instanceof AttachmentError || error instanceof SyntaxError) return this.sendJson(res, 400, { error: error.message });
       throw error;
     }
@@ -711,8 +747,26 @@ export class Bridge {
         return this.onSetProvider(session, message.provider);
       case "prompt":
         return this.onPrompt(session, message.requestId, message.prompt, message.selection, message.context, message.attachmentIds, message.model, message.referencePaths, message.effort, message.chatSessionId, message.resumeSessionId);
+      case "followup": {
+        const respond = (state: "pending" | "next_turn" | "rejected", detail?: string) => session.send({ type: "followup_status", requestId: message.requestId, id: message.id, state, message: detail });
+        if (session.activeRequestId !== message.requestId || session.turnController?.signal.aborted) { respond("next_turn"); return; }
+        try {
+          let text = expandSkillPrompt(message.prompt, this.skills).prompt;
+          if (message.attachmentIds?.length) {
+            const files = message.attachmentIds.map(id => session.attachments.get(id));
+            if (files.some(file => !file)) throw new Error("Attached file is unavailable; select it again.");
+            text += "\n\n<user_attached_files>\n" + files.map(file => JSON.stringify({ name: file!.name, path: attachmentPath(file!.id), kind: file!.kind })).join("\n") + "\n</user_attached_files>";
+          }
+          if (message.referencePaths?.length) {
+            const files = message.referencePaths.map(file => this.references.selectedPath(file, session.referenceGrants));
+            text += "\n\n<user_attached_files>\n" + files.map(file => JSON.stringify({ name: path.basename(file), path: file, kind: "reference" })).join("\n") + "\n</user_attached_files>";
+          }
+          session.queueFollowup(message.requestId, message.id, text);
+          respond("pending");
+        } catch (error) { respond("rejected", error instanceof Error ? error.message : String(error)); }
+        return;
+      }
       case "cancel":
-        session.abortTurn();
         return this.onCancel(session, message.requestId);
       case "tool_result":
         session.resolveTool(message.callId, message.result);
@@ -858,6 +912,10 @@ export class Bridge {
     }
 
     const selectedModel = model ?? null;
+    const promptSettings = this.systemPrompt.read();
+    if (session.providerSessionId && session.systemPromptRevision !== promptSettings.revision) {
+      await this.closeProviderProcess(session, "system_prompt_change");
+    }
     if (session.providerSessionId && ((resumeSessionId && resumeSessionId !== session.providerNativeSessionId)
       || (!resumeSessionId && chatSessionId && session.providerChatSessionId && chatSessionId !== session.providerChatSessionId))) {
       await this.closeProviderProcess(session, "chat_change");
@@ -891,13 +949,16 @@ export class Bridge {
           resumeSessionId,
           mcp: this.mcpEndpointFor(session),
           signal: controller.signal,
+          systemPrompt: promptSettings.content,
         });
         session.providerModel = selectedModel;
+        session.systemPromptRevision = promptSettings.revision;
         session.providerEffort = effort;
         session.providerChatSessionId = chatSessionId ?? session.id;
       }
 
       for await (const event of adapter.sendTurn({
+        systemPrompt: promptSettings.content,
         providerSessionId: session.providerSessionId,
         requestId,
         model: selectedModel,
@@ -964,12 +1025,14 @@ export class Bridge {
     // Release the workbook before telling the pane, otherwise a client that
     // sends its next prompt on `turn_finished` races the adapter's cleanup
     // and gets a spurious `busy`.
+    session.takeFollowups(requestId, "next_turn");
     session.endTurn(requestId);
     session.send({ type: "turn_finished", requestId, reason });
   }
 
   private async onCancel(session: WorkbookSession, requestId: string): Promise<void> {
     if (session.activeRequestId !== requestId) return;
+    session.abortTurn();
     if (session.provider && session.providerSessionId) {
       try {
         await this.providers.get(session.provider)?.cancelTurn(session.providerSessionId);
@@ -991,6 +1054,7 @@ export class Bridge {
   }
 
   private async closeProviderProcess(session: WorkbookSession, reason: string): Promise<void> {
+    if (session.activeRequestId) session.takeFollowups(session.activeRequestId, "next_turn");
     session.abortTurn();
     const provider = session.provider;
     const providerSessionId = session.providerSessionId;
@@ -1087,13 +1151,13 @@ function bearerToken(header: string | undefined): string | null {
   return match ? match[1]!.trim() : null;
 }
 
-function readBody(req: http.IncomingMessage): Promise<string> {
+function readBody(req: http.IncomingMessage, limit = MAX_BODY_BYTES): Promise<string> {
   return new Promise((resolve, reject) => {
     let size = 0;
     const chunks: Buffer[] = [];
     req.on("data", (chunk: Buffer) => {
       size += chunk.length;
-      if (size > MAX_BODY_BYTES) {
+      if (size > limit) {
         reject(new Error("body too large"));
         req.destroy();
         return;

@@ -131,7 +131,7 @@ export class CodexAdapter extends BaseCliAdapter {
         ...(ctx.model ? { model: ctx.model } : {}),
         approvalPolicy: "never",
         sandbox: "read-only",
-        developerInstructions: SYSTEM_PROMPT,
+        developerInstructions: ctx.systemPrompt ?? SYSTEM_PROMPT,
         config: {
           mcp_servers: {
             [MCP_SERVER_NAME]: {

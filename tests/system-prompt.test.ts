@@ -1,0 +1,29 @@
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { describe, expect, it } from "vitest";
+import { SystemPromptStore } from "../bridge/src/system-prompt.js";
+import { SYSTEM_PROMPT } from "../providers/src/prompt.js";
+
+describe("system prompt settings", () => {
+  it("persists a full override, detects conflicting edits and restores the shipped default", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "system-prompt-"));
+    try {
+      const file = path.join(dir, "system-prompt.txt");
+      const store = new SystemPromptStore(file);
+      const initial = store.read();
+      expect(initial).toMatchObject({ content: SYSTEM_PROMPT, customized: false });
+      const saved = store.update("User's complete system prompt", initial.revision);
+      expect(new SystemPromptStore(file).read()).toEqual(saved);
+      expect(() => store.update("Stale edit", initial.revision)).toThrow(/changed/);
+      expect(() => store.update(" ", saved.revision)).toThrow(/contain text/);
+      expect(() => store.update("a".repeat(65537), saved.revision)).toThrow(/64 KB/);
+      expect(store.update(null, saved.revision)).toEqual(initial);
+      expect(fs.existsSync(file)).toBe(false);
+      const again = store.update("Custom", initial.revision);
+      fs.unlinkSync(file);
+      expect(store.read()).toEqual(initial);
+      expect(again.customized).toBe(true);
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  });
+});

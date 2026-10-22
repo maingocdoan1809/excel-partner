@@ -157,8 +157,8 @@ export const ToolErrorSchema = z.object({
 export type ToolError = z.infer<typeof ToolErrorSchema>;
 
 export const ToolResultSchema = z.discriminatedUnion("ok", [
-  z.object({ ok: z.literal(true), data: z.unknown() }),
-  z.object({ ok: z.literal(false), error: ToolErrorSchema }),
+  z.object({ ok: z.literal(true), data: z.unknown(), additional_user_messages: z.array(z.object({ id: z.string(), text: z.string() })).optional() }),
+  z.object({ ok: z.literal(false), error: ToolErrorSchema, additional_user_messages: z.array(z.object({ id: z.string(), text: z.string() })).optional() }),
 ]);
 export type ToolResult = z.infer<typeof ToolResultSchema>;
 
