@@ -12,8 +12,10 @@ import { buildTurnPrompt, SYSTEM_PROMPT } from "./prompt.js";
 import { MCP_SERVER_NAME, type ProviderModelCatalog, type SendTurnInput, type StartSessionContext } from "./types.js";
 import { ensureWorkspaceDir } from "./workspace.js";
 import { codexTokenBaseline, nativeTitle, validNativeId } from "./session-metadata.js";
+import { answerCodexQuestions, type RequestUserInput } from "./user-input.js";
 
 interface CodexSession {
+  questions: Map<number | string, AbortController>;
   peer: JsonRpcPeer;
   threadId: string;
   title?: string;
@@ -115,13 +117,13 @@ export class CodexAdapter extends BaseCliAdapter {
       env: this.env,
       onStderr: (line) => log.debug(`codex stderr: ${line}`),
       onNotification: (method, params) => session && this.onNotification(session, method, params),
-      onRequest: (method, params) => this.onServerRequest(method, params),
+      onRequest: (method, params, id) => this.onServerRequest(method, params, ctx.requestUserInput, session, id),
     });
 
     try {
       await peer.request("initialize", {
         clientInfo: { name: "excel-ai-addin", title: "Excel AI Add-in", version: "0.1.0" },
-        capabilities: null,
+        capabilities: { experimentalApi: true },
       });
       peer.notify("initialized");
 
@@ -155,10 +157,11 @@ export class CodexAdapter extends BaseCliAdapter {
 
       if (ctx.resumeSessionId && started.thread.id !== ctx.resumeSessionId) throw new Error("Codex returned a different thread while resuming");
       const baseline = ctx.resumeSessionId ? await codexTokenBaseline(started.thread.path) : undefined;
-      session = { peer, threadId: started.thread.id, title: nativeTitle(started.thread.name), active: null,
+      session = { peer, threadId: started.thread.id, title: nativeTitle(started.thread.name), active: null, questions: new Map(),
         tokenTotals: baseline, baselinePending: Boolean(ctx.resumeSessionId && !baseline) };
       this.sessions.set(providerSessionId, session);
       peer.onExit(() => {
+        for (const question of session?.questions.values() ?? []) question.abort();
         const current = this.sessions.get(providerSessionId);
         if (current?.active) {
           current.active.queue.fail(
@@ -222,6 +225,7 @@ export class CodexAdapter extends BaseCliAdapter {
         if (event.type === "turn_finished") break;
       }
     } finally {
+      for (const question of session.questions.values()) question.abort();
       input.signal.removeEventListener("abort", onAbort);
       if (session.active?.queue === queue) session.active = null;
     }
@@ -235,6 +239,7 @@ export class CodexAdapter extends BaseCliAdapter {
   override async closeSession(providerSessionId: string): Promise<void> {
     const session = this.sessions.get(providerSessionId);
     this.sessions.delete(providerSessionId);
+    for (const question of session?.questions.values() ?? []) question.abort();
     session?.active?.queue.end();
     await session?.peer.close();
   }
@@ -247,6 +252,7 @@ export class CodexAdapter extends BaseCliAdapter {
     const active = session.active;
     if (!active || active.interrupting) return;
     active.interrupting = true;
+    for (const question of session.questions.values()) question.abort();
     // The turn id arrives with the turn/start response or turn/started
     // notification; wait briefly if the user cancels immediately.
     for (let i = 0; i < 40 && !active.turnId && session.active === active; i++) {
@@ -263,6 +269,11 @@ export class CodexAdapter extends BaseCliAdapter {
   private onNotification(session: CodexSession, method: string, raw: unknown): void {
     const params = (raw ?? {}) as Record<string, any>;
     if (params.threadId !== session.threadId) return;
+    if (method === "serverRequest/resolved") {
+      session.questions.get(params.requestId)?.abort();
+      return;
+    }
+    if (method === "turn/completed") for (const question of session.questions.values()) question.abort();
     if (method === "thread/name/updated") session.title = nativeTitle(params.threadName);
     const active = session.active;
     if (!active) return;
@@ -376,8 +387,18 @@ export class CodexAdapter extends BaseCliAdapter {
     }
   }
 
-  private onServerRequest(method: string, params: unknown): unknown {
+  private onServerRequest(method: string, params: unknown, ask?: RequestUserInput, session?: CodexSession | null, id?: number | string): unknown {
     switch (method) {
+      case "item/tool/requestUserInput": {
+        const request = params as Record<string, any>;
+        if (!session?.active || session.active.interrupting || request.threadId !== session.threadId
+          || (session.active.turnId && request.turnId !== session.active.turnId)) return { answers: {} };
+        const controller = new AbortController();
+        if (id !== undefined) session.questions.set(id, controller);
+        return answerCodexQuestions(request, ask, controller.signal).finally(() => {
+          if (id !== undefined) session.questions.delete(id);
+        });
+      }
       case "mcpServer/elicitation/request": {
         // Tool-call approval for our own Excel server is auto-accepted; anything else is declined.
         const server = (params as { serverName?: string } | null)?.serverName;

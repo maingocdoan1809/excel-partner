@@ -8,6 +8,11 @@ import {
   type ServerMessage,
   type ToolResult,
   type ToolError,
+  UserInputRequestSchema,
+  validateUserInputResponse,
+  CANCELLED_USER_INPUT,
+  type UserInputRequest,
+  type UserInputResponse,
 } from "../../protocol/src/index.js";
 
 interface PendingToolCall {
@@ -127,6 +132,9 @@ export class WorkbookSession {
 
   endTurn(requestId: string): void {
     if (this.activeRequestId === requestId) {
+      for (const entry of this.pending.values()) {
+        if (entry.tool === "__request_user_input") entry.resolve({ ok: false, error: { code: "cancelled", message: "The turn ended." } });
+      }
       this.activeRequestId = null;
       this.turnController = null;
     }
@@ -135,6 +143,24 @@ export class WorkbookSession {
   abortTurn(): void {
     this.turnController?.abort();
     for (const controller of this.scriptControllers) controller.abort();
+  }
+
+  async requestUserInput(request: UserInputRequest, signal?: AbortSignal): Promise<UserInputResponse> {
+    const parsed = UserInputRequestSchema.parse(request);
+    const turnSignal = this.turnController?.signal;
+    if (!this.activeRequestId || !turnSignal || turnSignal.aborted || signal?.aborted) return CANCELLED_USER_INPUT;
+    // Native questions must not queue behind the very tool that is asking them.
+    const controller = new AbortController();
+    const abort = () => controller.abort();
+    turnSignal.addEventListener("abort", abort, { once: true });
+    signal?.addEventListener("abort", abort, { once: true });
+    try {
+      const result = await this.dispatchTool("__request_user_input", parsed, 600_000, this.activeRequestId, controller.signal);
+      return result.ok ? validateUserInputResponse(parsed, result.data) : CANCELLED_USER_INPUT;
+    } finally {
+      turnSignal.removeEventListener("abort", abort);
+      signal?.removeEventListener("abort", abort);
+    }
   }
 
   get isConnected(): boolean {
@@ -182,7 +208,7 @@ export class WorkbookSession {
     return result;
   }
 
-  private dispatchTool(tool: string, args: unknown, timeoutMs: number, requestId: string | null): Promise<ToolResult> {
+  private dispatchTool(tool: string, args: unknown, timeoutMs: number, requestId: string | null, signal?: AbortSignal): Promise<ToolResult> {
     const callId = randomUUID();
     if (!this.isConnected) {
       return Promise.resolve({
@@ -192,16 +218,28 @@ export class WorkbookSession {
     }
 
     return new Promise<ToolResult>((resolve) => {
-      const timer = setTimeout(() => {
+      let finished = false;
+      const finish = (result: ToolResult) => {
+        if (finished) return;
+        finished = true;
+        clearTimeout(timer);
         this.pending.delete(callId);
-        resolve({
+        signal?.removeEventListener("abort", abort);
+        if (tool === "__request_user_input") this.send({ type: "user_input_closed", callId });
+        resolve(result);
+      };
+      const abort = () => finish({ ok: false, error: { code: "cancelled", message: "Question cancelled." } });
+      const timer = setTimeout(() => {
+        finish({
           ok: false,
           error: { code: "timeout", message: `tool ${tool} timed out after ${timeoutMs}ms` },
         });
       }, timeoutMs);
       timer.unref?.();
 
-      this.pending.set(callId, { callId, tool, resolve, timer });
+      this.pending.set(callId, { callId, tool, resolve: finish, timer });
+      signal?.addEventListener("abort", abort, { once: true });
+      if (signal?.aborted) { abort(); return; }
 
       const sent = this.send({
         type: "tool_request",
@@ -215,7 +253,7 @@ export class WorkbookSession {
       if (!sent) {
         clearTimeout(timer);
         this.pending.delete(callId);
-        resolve({
+        finish({
           ok: false,
           error: { code: "disconnected", message: "failed to send tool_request to task pane" },
         });

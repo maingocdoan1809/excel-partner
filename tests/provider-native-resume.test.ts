@@ -76,11 +76,15 @@ describe("provider-native web search", () => {
       const launch = rpc.launches.at(-1)!;
       expect(launch.args.includes("web_search")).toBe(enabled);
       expect(launch.args.includes("web_fetch")).toBe(enabled);
+      expect(launch.args).not.toContain("github-mcp-server-web_search");
+      expect(launch.args).not.toContain("github-mcp-server(web_search)");
       expect(launch.args.includes("--disable-builtin-mcps")).toBe(!enabled);
       const options = [{ optionId: "yes", kind: "allow_once" }, { optionId: "no", kind: "reject_once" }];
       expect(launch.onRequest("session/request_permission", { toolCall: { title: "web_search" }, options }))
         .toEqual({ outcome: { outcome: "selected", optionId: enabled ? "yes" : "no" } });
       expect(launch.onRequest("session/request_permission", { toolCall: { title: "shell" }, options }))
+        .toEqual({ outcome: { outcome: "selected", optionId: "no" } });
+      expect(launch.onRequest("session/request_permission", { toolCall: { title: "github-mcp-server-web_search" }, options }))
         .toEqual({ outcome: { outcome: "selected", optionId: "no" } });
     } finally { await adapter.dispose(); }
   });

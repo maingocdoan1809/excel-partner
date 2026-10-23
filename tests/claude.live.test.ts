@@ -64,8 +64,29 @@ describe.skipIf(!hasClaude())("claude adapter (real CLI, fake model)", () => {
     // Newer CLI versions include a non-callable deferred-tool schema placeholder.
     const toolNames: string[] = fake!.requests.find((r) => r.body.tools?.length)!.body.tools.map((t: any) => t.name)
       .filter((name: string) => name !== "DeferredToolPlaceholder");
-    expect(toolNames.every((n) => n.startsWith("mcp__excel__")), JSON.stringify(toolNames)).toBe(true);
-    expect(toolNames).toHaveLength(exposedToolNames(false).length);
+    expect(toolNames.every((n) => n === "AskUserQuestion" || n.startsWith("mcp__excel__")), JSON.stringify(toolNames)).toBe(true);
+    expect(toolNames).toHaveLength(exposedToolNames(false).length + 1);
+  }, 120_000);
+
+  it("returns a native AskUserQuestion answer through the pane to the real CLI", async () => {
+    const h = await setup([
+      { tool: "AskUserQuestion", input: { questions: [{ question: "Where should the result go?", header: "Output",
+        options: [{ label: "Current sheet", description: "Use this sheet" }, { label: "New sheet", description: "Create a sheet" }], multiSelect: false }] } },
+      { text: "Received your choice." },
+    ]);
+    const normalHandler = h.pane.onMessage;
+    h.pane.onMessage = message => {
+      if (message.type === "tool_request" && message.tool === "__request_user_input") {
+        h.pane.send({ type: "tool_result", callId: message.callId,
+          result: { ok: true, data: { cancelled: false, answers: { "0": ["New sheet"] } } } });
+      } else normalHandler?.(message);
+    };
+    const result = await h.turn("Ask me where to put the result");
+    expect(result.finished.reason).toBe("completed");
+    expect(h.pane.received.some(m => m.type === "tool_request" && m.tool === "__request_user_input")).toBe(true);
+    const last = fake!.requests.filter(r => r.body.tools?.length).at(-1)!;
+    expect(JSON.stringify(last.body.messages)).toContain("New sheet");
+    expect(result.text).toContain("Received your choice.");
   }, 120_000);
 
   it("keeps conversation history across turns (resume) ", async () => {

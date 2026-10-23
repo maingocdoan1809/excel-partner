@@ -21,6 +21,7 @@ import { buildTurnPrompt, SYSTEM_PROMPT } from "./prompt.js";
 import { MCP_SERVER_NAME, type ProviderModelCatalog, type SendTurnInput, type StartSessionContext } from "./types.js";
 import { ensureWorkspaceDir } from "./workspace.js";
 import { effortConfig, type EffortConfigOption } from "./effort.js";
+import { CopilotNativeSessions } from "./copilot-native.js";
 
 interface CopilotSession {
   peer: JsonRpcPeer;
@@ -99,6 +100,7 @@ export class CopilotAdapter extends BaseCliAdapter {
   }
 
   private readonly sessions = new Map<string, CopilotSession>();
+  private readonly native = new CopilotNativeSessions();
 
   private get command(): string {
     return process.env.COPILOT_BIN ?? "copilot";
@@ -134,6 +136,7 @@ export class CopilotAdapter extends BaseCliAdapter {
   }
 
   override async startSession(ctx: StartSessionContext): Promise<string> {
+    if (ctx.requestUserInput) return this.native.start(ctx, this.command, this.env);
     if (ctx.resumeSessionId && !validNativeId(ctx.resumeSessionId)) throw new Error("Invalid Copilot resume session ID");
     const cwd = ensureWorkspaceDir();
     const providerSessionId = `copilot-${randomUUID()}`;
@@ -178,10 +181,10 @@ export class CopilotAdapter extends BaseCliAdapter {
         // Expose Excel MCP and, when selected, only the provider-native web tools.
         "--available-tools",
         ...exposedToolNames(ctx.mcp.env.EXCEL_ALLOW_OFFICE_JS === "1", { webSearch: ctx.mcp.env.EXCEL_WEB_SEARCH === "1", playwright: ctx.mcp.env.EXCEL_PLAYWRIGHT === "1" }).map((name) => `${MCP_SERVER_NAME}-${name}`),
-        ...(webSearch ? ["web_search", "web_fetch", "github-mcp-server-web_search"] : []),
+        ...(webSearch ? ["web_search", "web_fetch"] : []),
         "--allow-tool",
         MCP_SERVER_NAME,
-        ...(webSearch ? ["web_search", "web_fetch", "github-mcp-server(web_search)"] : []),
+        ...(webSearch ? ["web_search", "web_fetch"] : []),
       ],
       cwd,
       env: this.env,
@@ -234,6 +237,7 @@ export class CopilotAdapter extends BaseCliAdapter {
   }
 
   override async *sendTurn(input: SendTurnInput): AsyncIterable<ProviderEvent> {
+    if (this.native.has(input.providerSessionId)) { yield* this.native.send(input, this.env); return; }
     const session = this.sessions.get(input.providerSessionId);
     const { requestId } = input;
     if (!session || !session.peer.alive) {
@@ -338,11 +342,13 @@ export class CopilotAdapter extends BaseCliAdapter {
   }
 
   override async cancelTurn(providerSessionId: string): Promise<void> {
+    if (this.native.has(providerSessionId)) return this.native.cancel(providerSessionId);
     const session = this.sessions.get(providerSessionId);
     if (session?.active) session.peer.notify("session/cancel", { sessionId: session.acpSessionId });
   }
 
   override async closeSession(providerSessionId: string): Promise<void> {
+    if (this.native.has(providerSessionId)) return this.native.close(providerSessionId);
     const session = this.sessions.get(providerSessionId);
     this.sessions.delete(providerSessionId);
     session?.active?.queue.end();
@@ -351,6 +357,7 @@ export class CopilotAdapter extends BaseCliAdapter {
   }
 
   override async dispose(): Promise<void> {
+    await this.native.dispose();
     await Promise.all([...this.sessions.keys()].map((id) => this.closeSession(id)));
   }
 
@@ -418,7 +425,7 @@ export class CopilotAdapter extends BaseCliAdapter {
   }
 
   private onServerRequest(method: string, params: unknown, webSearch: boolean): unknown {
-    if (method === "session/request_permission") return acpPermissionOutcome(params, webSearch ? ["web_search", "web_fetch", "github-mcp-server-web_search", "github-mcp-server/web_search"] : []);
+    if (method === "session/request_permission") return acpPermissionOutcome(params, webSearch ? ["web_search", "web_fetch"] : []);
     throw new Error(`unsupported client method: ${method}`);
   }
 }

@@ -29,6 +29,8 @@ export interface McpEndpoint {
 export const MCP_SERVER_NAME = "excel";
 
 export interface StartSessionContext {
+  /** Present native provider questions in the pane and wait for the person's answers. */
+  requestUserInput?: (request: import("../../protocol/src/index.js").UserInputRequest, signal?: AbortSignal) => Promise<import("../../protocol/src/index.js").UserInputResponse>;
   /** Ask the connected pane; its current Ask/Auto setting decides approval. */
   authorizeTool?: (args: unknown) => Promise<boolean>;
   systemPrompt?: string;

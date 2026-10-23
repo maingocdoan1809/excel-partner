@@ -16,7 +16,7 @@ export interface JsonRpcOptions {
    * Handle a request sent by the child (approvals, permission prompts, ...).
    * Throw to answer with a JSON-RPC error.
    */
-  onRequest?: (method: string, params: unknown) => Promise<unknown> | unknown;
+  onRequest?: (method: string, params: unknown, id: number | string) => Promise<unknown> | unknown;
 }
 
 export class JsonRpcError extends Error {
@@ -181,7 +181,7 @@ export class JsonRpcPeer {
       if (!this.options.onRequest) {
         throw new JsonRpcError(-32601, `method not found: ${method}`);
       }
-      const result = await this.options.onRequest(method, params);
+      const result = await this.options.onRequest(method, params, id);
       this.write({ id, result: result ?? null });
     } catch (error) {
       const code = error instanceof JsonRpcError ? error.code : -32603;

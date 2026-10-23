@@ -18,6 +18,7 @@ import { setupTheme } from "./ui/theme.js";
 import { setupSavedReferences } from "./ui/saved-references.js";
 import { setupUserSkills } from "./ui/user-skills.js";
 import { createTextEditor } from "./ui/text-editor.js";
+import { showUserInput } from "./ui/user-input.js";
 import {
   SessionStore,
   buildContextPreface,
@@ -214,6 +215,22 @@ Office.onReady((info) => {
   if (info.host !== Office.HostType.Excel) return;
 
   client = new BridgeClient({
+    onUserInput: async (request, signal, requestId) => {
+      if (requestId !== currentRequestId || signal.aborted) return { cancelled: true, answers: {} };
+      clearThinking();
+      live = null;
+      append({ kind: "note", text: request.questions.map(q => q.question).join("\n\n") });
+      const owner = session;
+      const pending = showUserInput(els.messages, request, signal);
+      scrollToEnd();
+      const response = await pending;
+      if (session === owner && requestId === currentRequestId) {
+        append({ kind: "note", text: response.cancelled ? "Question skipped or cancelled." : request.questions.map(q =>
+          `${q.header || q.question}: ${q.isSecret ? "[Hidden answer]" : response.answers[q.id]!.join(", ")}`).join("\n") });
+        if (!signal.aborted) showThinking();
+      }
+      return response;
+    },
     onState: renderState,
     onHello: ({ addinBuildId }) => {
       client.setProvider(provider);

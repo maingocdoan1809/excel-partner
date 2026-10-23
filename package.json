@@ -40,6 +40,7 @@
     "test:live": "vitest run tests/providers.live.test.ts"
   },
   "dependencies": {
+    "@github/copilot-sdk": "1.0.18",
     "@modelcontextprotocol/sdk": "^1.12.0",
     "cross-spawn": "^7.0.6",
     "dompurify": "^3.4.17",

@@ -110,6 +110,7 @@ Selected attachments are copied into the working folder (10 MB combined); reques
 | Create/edit reusable instructions and run installed Python/Bash scripts | Skill tools and `run_skill_script` | Installed skill, local interpreter/dependencies; Ask/Auto for execution |
 | Analyze data, generate files, access local files or call HTTP APIs | `run_python` | Local Python, libraries, OS/network access and service credentials when needed; Ask/Auto for execution |
 | Search the web | Enable **Tools > Web search** beside the prompt | Uses Claude/Codex/Copilot native search; unavailable for OpenCode without an external search service |
+| Answer the assistant's questions | Native Codex `request_user_input`, Claude `AskUserQuestion`, Copilot `ask_user`, OpenCode `question` | Questions appear in chat with choices and optional text entry. Reply or Skip; Auto never chooses an answer for you. |
 | Automate a browser with Playwright | Enable **Tools > Playwright browser** beside the prompt | Local Node/npm and Chrome; first use may download Playwright MCP. Ask/Auto controls each browser action |
 
 Choose **Ask** or **Auto** in the task pane to control the add-in's approval flow. Auto does not install software, grant administrator rights, add service credentials, enable provider-native tools or remove execution time limits. Python and skill scripts run with the bridge user's OS permissions; they can access files and the network through that execution route.

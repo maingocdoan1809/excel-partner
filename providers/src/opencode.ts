@@ -19,6 +19,7 @@ import { MCP_SERVER_NAME, type ProviderModelCatalog, type SendTurnInput, type St
 import { ensureWorkspaceDir } from "./workspace.js";
 import { nativeTitle, validNativeId } from "./session-metadata.js";
 import { parseOpencodeExport } from "./opencode-usage.js";
+import { reserveOpencodePort, watchOpencodeQuestions } from "./opencode-questions.js";
 
 /** One entry of the CLI's `session/new` / `config_option_update` config list. */
 export interface OpencodeConfigOption {
@@ -31,6 +32,7 @@ export interface OpencodeConfigOption {
 }
 
 interface OpencodeSession {
+  questionApi?: { port: number; password: string; cwd: string; ask: StartSessionContext["requestUserInput"] };
   peer: JsonRpcPeer;
   /** ACP session id returned by `session/new`. */
   acpSessionId: string;
@@ -190,16 +192,19 @@ export class OpencodeAdapter extends BaseCliAdapter {
     const cwd = ensureWorkspaceDir();
     const providerSessionId = `opencode-${randomUUID()}`;
     const log = this.runtime.logger;
-    const { dir: configDir, path: configPath } = this.writePermissionConfig();
+    const questionApi = ctx.requestUserInput ? { port: await reserveOpencodePort(), password: randomUUID(), cwd, ask: ctx.requestUserInput } : undefined;
+    const { dir: configDir, path: configPath } = this.writePermissionConfig(Boolean(questionApi));
 
     let session: OpencodeSession | null = null;
     const peer = new JsonRpcPeer({
       command: this.command,
-      args: ["acp"],
+      args: ["acp", ...(questionApi ? ["--hostname", "127.0.0.1", "--port", String(questionApi.port)] : [])],
       cwd,
       // The permission config is merged on top of the user's own OpenCode
       // config, so their providers, agents and skills keep working.
-      env: { ...this.env, OPENCODE_CONFIG: configPath },
+      env: { ...this.env, OPENCODE_CONFIG: configPath, ...(questionApi ? {
+        OPENCODE_ENABLE_QUESTION_TOOL: "1", OPENCODE_SERVER_USERNAME: "excel-partner", OPENCODE_SERVER_PASSWORD: questionApi.password,
+      } : {}) },
       versionField: true,
       onStderr: (line) => log.debug(`opencode stderr: ${line}`),
       onNotification: (method, params) => session && this.onNotification(session, method, params),
@@ -232,6 +237,7 @@ export class OpencodeAdapter extends BaseCliAdapter {
       const created = { ...loaded, sessionId: ctx.resumeSessionId ?? loaded.sessionId };
       if (!created.sessionId) throw new Error("OpenCode returned no session ID");
       session = {
+        questionApi,
         peer,
         acpSessionId: created.sessionId,
         configOptions: created.configOptions ?? [],
@@ -273,6 +279,15 @@ export class OpencodeAdapter extends BaseCliAdapter {
     }
 
     const queue = new AsyncQueue<ProviderEvent>();
+    const questionController = new AbortController();
+    if (session.questionApi) {
+      void watchOpencodeQuestions({ ...session.questionApi, sessionId: session.acpSessionId,
+        signal: AbortSignal.any([input.signal, questionController.signal]) }).catch(error => {
+        if (input.signal.aborted || questionController.signal.aborted) return;
+        session.peer.notify("session/cancel", { sessionId: session.acpSessionId });
+        queue.fail(error instanceof Error ? error : new Error(String(error)));
+      });
+    }
     const active: ActiveTurn = { queue, requestId, text: "", tools: new Map(), finishedTools: new Set() };
     session.active = active;
     yield { type: "session_info", requestId, provider: this.id, providerSessionId: session.acpSessionId,
@@ -353,6 +368,7 @@ export class OpencodeAdapter extends BaseCliAdapter {
         if (event.type === "turn_finished") break;
       }
     } finally {
+      questionController.abort();
       input.signal.removeEventListener("abort", cancel);
       if (session.active === active) session.active = null;
     }
@@ -396,7 +412,7 @@ export class OpencodeAdapter extends BaseCliAdapter {
    * only the Excel MCP tools are pre-approved. Everything else reaches this
    * adapter as a permission request and is approved through the pane.
    */
-  private writePermissionConfig(): { dir: string; path: string } {
+  private writePermissionConfig(questions = false): { dir: string; path: string } {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "excel-ai-opencode-"));
     const configPath = path.join(dir, "opencode.json");
     fs.writeFileSync(
@@ -406,6 +422,7 @@ export class OpencodeAdapter extends BaseCliAdapter {
         permission: {
           "*": "ask",
           websearch: "deny",
+          ...(questions ? { question: "allow" } : {}),
           [`${MCP_SERVER_NAME}_*`]: "allow",
         },
       }),

@@ -49,7 +49,7 @@ describe("Claude native session confirmation", () => {
   it.each([false, true])("exposes native web tools only when Web search is enabled (%j)", async enabled => {
     await turn(await start(undefined, enabled));
     const args = cli.spawn.mock.calls[0]![1] as string[];
-    expect(args[args.indexOf("--tools") + 1]).toBe(enabled ? "WebSearch,WebFetch" : "");
+    expect(args[args.indexOf("--tools") + 1]).toBe(enabled ? "AskUserQuestion,WebSearch,WebFetch" : "AskUserQuestion");
     expect(args.includes("WebSearch")).toBe(enabled);
     expect(args.includes("WebFetch")).toBe(enabled);
   });

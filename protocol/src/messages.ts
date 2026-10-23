@@ -141,6 +141,7 @@ export const PingMessageSchema = z.object({
 });
 
 export const ServerMessageSchema = z.union([
+  z.object({ type: z.literal("user_input_closed"), callId: z.string() }),
   HelloOkMessageSchema,
   HelloErrorMessageSchema,
   ProviderStatusMessageSchema,

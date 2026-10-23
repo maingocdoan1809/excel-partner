@@ -16,8 +16,10 @@ import { buildTurnPrompt, SYSTEM_PROMPT } from "./prompt.js";
 import { MCP_SERVER_NAME, type McpEndpoint, type ProviderModelCatalog, type SendTurnInput, type StartSessionContext } from "./types.js";
 import { ensureWorkspaceDir } from "./workspace.js";
 import { claudeTitle, validNativeId } from "./session-metadata.js";
+import { answerClaudeQuestion, type RequestUserInput } from "./user-input.js";
 
 interface ClaudeSession {
+  requestUserInput?: RequestUserInput;
   mcp: McpEndpoint;
   /** Path of the 0600 MCP config file holding the session token. */
   mcpConfigPath: string;
@@ -169,6 +171,7 @@ export class ClaudeAdapter extends BaseCliAdapter {
       { mode: 0o600 },
     );
     this.sessions.set(providerSessionId, {
+      requestUserInput: ctx.requestUserInput,
       mcp: ctx.mcp,
       mcpConfigPath,
       conversationId: ctx.resumeSessionId ?? randomUUID(),
@@ -201,6 +204,8 @@ export class ClaudeAdapter extends BaseCliAdapter {
     const webTools = session.mcp.env.EXCEL_WEB_SEARCH === "1" ? ["WebSearch", "WebFetch"] : [];
     const args = [
       "-p",
+      "--input-format", "stream-json",
+      "--permission-prompt-tool", "stdio",
       "--output-format",
       "stream-json",
       "--verbose",
@@ -210,12 +215,12 @@ export class ClaudeAdapter extends BaseCliAdapter {
       session.mcpConfigPath,
       "--strict-mcp-config",
       "--tools",
-      webTools.join(","),
+      ["AskUserQuestion", ...webTools].join(","),
       "--allowedTools",
       `mcp__${MCP_SERVER_NAME}`,
       ...webTools,
       "--permission-mode",
-      "dontAsk",
+      "default",
       ...(systemPrompt.trim() ? ["--system-prompt", systemPrompt] : []),
       "--disable-slash-commands",
       // The scratch cwd is empty, so this skips the user's own hooks, CLAUDE.md
@@ -236,7 +241,9 @@ export class ClaudeAdapter extends BaseCliAdapter {
     session.child = child;
     child.stdin!.on("error", () => undefined);
     // The prompt (which may contain workbook data) goes over stdin, never argv.
-    child.stdin!.end(buildTurnPrompt(input.prompt, input.selection));
+    child.stdin!.write(JSON.stringify({ type: "user", session_id: session.conversationId,
+      message: { role: "user", content: buildTurnPrompt(input.prompt, input.selection) }, parent_tool_use_id: null }) + "\n");
+    const questions = new Map<string, AbortController>();
 
     const stderrTail: string[] = [];
     createInterface({ input: child.stderr! }).on("line", (line) => {
@@ -245,7 +252,10 @@ export class ClaudeAdapter extends BaseCliAdapter {
       this.runtime.logger.debug(`claude stderr: ${line}`);
     });
 
-    const onAbort = () => terminate(child);
+    const onAbort = () => {
+      for (const question of questions.values()) question.abort();
+      terminate(child);
+    };
     input.signal.addEventListener("abort", onAbort, { once: true });
 
     const exited = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolve) => {
@@ -265,6 +275,29 @@ export class ClaudeAdapter extends BaseCliAdapter {
         } catch {
           continue;
         }
+        if (message.type === "control_cancel_request") {
+          questions.get(message.request_id)?.abort();
+          continue;
+        }
+        if (message.type === "control_request") {
+          const controller = new AbortController();
+          questions.set(message.request_id, controller);
+          // Keep reading stdout while the pane waits for the user, so cancellation can arrive.
+          void (async () => {
+            let response: unknown = { behavior: "deny", message: "This tool is unavailable in the add-in." };
+            try {
+              if (message.request?.subtype === "can_use_tool" && message.request.tool_name === "AskUserQuestion") {
+                response = await answerClaudeQuestion(message.request.input, session.requestUserInput, controller.signal);
+              }
+            } catch { response = { behavior: "deny", message: "Could not collect the user's answer." }; }
+            if (!controller.signal.aborted && !input.signal.aborted && !child.stdin!.destroyed) {
+              child.stdin!.write(JSON.stringify({ type: "control_response", response: {
+                subtype: "success", request_id: message.request_id, response,
+              } }) + "\n");
+            }
+          })().finally(() => questions.delete(message.request_id));
+          continue;
+        }
         const confirmsSession = (message.type === "result" || (message.type === "system" && message.subtype === "init"))
           && typeof message.session_id === "string" && validNativeId(message.session_id);
         if (confirmsSession) {
@@ -275,6 +308,8 @@ export class ClaudeAdapter extends BaseCliAdapter {
           providerSessionId: session.conversationId, title: await this.sessionTitle(session.conversationId) };
         for (const event of translator.translate(message)) {
           if (event.type === "turn_finished") {
+            for (const question of questions.values()) question.abort();
+            child.stdin!.end();
             finished = true;
             yield input.signal.aborted ? { ...event, reason: "cancelled" } : event;
           } else {
@@ -300,6 +335,7 @@ export class ClaudeAdapter extends BaseCliAdapter {
         }
       }
     } finally {
+      for (const question of questions.values()) question.abort();
       input.signal.removeEventListener("abort", onAbort);
       if (child.exitCode === null && child.signalCode === null) terminate(child);
       if (session.child === child) session.child = null;

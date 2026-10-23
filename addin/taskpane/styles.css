@@ -58,6 +58,22 @@ body {
 button { font: inherit; cursor: pointer; }
 button:disabled { cursor: default; }
 
+.user-input-card { padding: 14px; margin: 8px 0; border: 1px solid var(--border); border-radius: 12px; background: var(--panel); }
+.user-input-card fieldset { border: 0; padding: 0; margin: 0 0 16px; min-width: 0; }
+.user-input-card legend { font-weight: 600; color: var(--accent); }
+.user-input-card p { white-space: pre-wrap; overflow-wrap: anywhere; margin: 6px 0 10px; }
+.user-input-option { display: flex; gap: 8px; align-items: flex-start; padding: 8px; border: 1px solid var(--border); border-radius: 8px; margin: 6px 0; cursor: pointer; }
+.user-input-option input { margin-top: 4px; accent-color: var(--accent); }
+.user-input-option span { min-width: 0; overflow-wrap: anywhere; }
+.user-input-option strong, .user-input-option small { display: block; }
+.user-input-option small { color: var(--muted); }
+.user-input-freeform { display: grid; gap: 5px; margin-top: 8px; }
+.user-input-freeform input { width: 100%; padding: 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--text); font: inherit; }
+.user-input-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.user-input-actions button { padding: 6px 14px; border: 1px solid var(--border); border-radius: 8px; background: var(--subtle-bg); color: var(--text); }
+.user-input-actions button[type="submit"] { background: var(--btn); color: var(--on-mint); }
+.user-input-error { color: var(--error); }
+
 /* ---- header ------------------------------------------------------------- */
 .app-header {
   position: relative;

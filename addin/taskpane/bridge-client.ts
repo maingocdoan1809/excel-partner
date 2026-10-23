@@ -12,6 +12,10 @@ import {
   type ToolRequestMessage,
   type ToolResult,
   type RunSkillScriptInput,
+  UserInputRequestSchema,
+  CANCELLED_USER_INPUT,
+  type UserInputRequest,
+  type UserInputResponse,
 } from "../../protocol/src/index.js";
 import { executeTool } from "./executor/index.js";
 import { authorizeSkillScript, executeWithPermission, type PermissionMode } from "./permissions.js";
@@ -30,6 +34,7 @@ export interface SavedReference { id: string; name: string; path: string; descri
 export interface ModelCatalog { models: Array<{ id: string; name: string }>; defaultModelId: string | null }
 
 export interface BridgeClientHandlers {
+  onUserInput?(request: UserInputRequest, signal: AbortSignal, requestId: string): Promise<UserInputResponse>;
   onState(state: BridgeState, detail?: string): void;
   onHello(info: { sessionToken: string; serverTime: string; addinBuildId?: string }): void;
   onProviderStatus(message: ProviderStatusMessage): void;
@@ -53,6 +58,7 @@ export class BridgeClient {
   private workbookConnectionId = randomId();
   private sessionToken: string | null = null;
   private permissionMode: PermissionMode = "ask";
+  private readonly questions = new Map<string, { requestId: string; controller: AbortController }>();
 
   constructor(
     private readonly handlers: BridgeClientHandlers,
@@ -97,12 +103,14 @@ export class BridgeClient {
       /* handled by onclose */
     };
     this.ws.onclose = () => {
+      this.closeQuestions();
       this.setState("closed");
       if (!this.closedByUser) this.scheduleReconnect();
     };
   }
 
   disconnect(): void {
+    this.closeQuestions();
     this.closedByUser = true;
     if (this.reconnectTimer !== null) window.clearTimeout(this.reconnectTimer);
     this.ws?.close(1000, "task_pane_closed");
@@ -247,6 +255,7 @@ export class BridgeClient {
   }
 
   cancel(requestId: string): void {
+    this.closeQuestions(requestId);
     this.send({ type: "cancel", requestId });
   }
 
@@ -286,16 +295,37 @@ export class BridgeClient {
       case "tool_request":
         await this.handleToolRequest(message);
         return;
+      case "user_input_closed":
+        this.questions.get(message.callId)?.controller.abort();
+        return;
       case "ping":
         this.send({ type: "pong", nonce: message.nonce });
         return;
       default:
+        if (message.type === "turn_finished") this.closeQuestions(message.requestId);
         this.handlers.onProviderEvent(message);
         return;
     }
   }
 
   private async handleToolRequest(message: ToolRequestMessage): Promise<void> {
+    if (message.tool === "__request_user_input") {
+      const socket = this.ws;
+      const controller = new AbortController();
+      this.questions.set(message.callId, { requestId: message.requestId, controller });
+      const timer = window.setTimeout(() => controller.abort(), message.timeoutMs);
+      let response = CANCELLED_USER_INPUT;
+      try {
+        response = await this.handlers.onUserInput?.(UserInputRequestSchema.parse(message.args), controller.signal, message.requestId) ?? response;
+      } catch { /* Invalid, disconnected or dismissed questions are cancelled, never auto-answered. */ }
+      finally {
+        window.clearTimeout(timer);
+        this.questions.delete(message.callId);
+      }
+      if (socket === this.ws) this.send({ type: "tool_result", callId: message.callId,
+        result: { ok: true, data: controller.signal.aborted ? CANCELLED_USER_INPUT : response } });
+      return;
+    }
     const result = message.tool === "__authorize_provider_tool"
       ? { ok: true as const, data: { approved: this.permissionMode === "auto" || await this.askPermission(
         "Allow OpenCode tool?", "OpenCode requests permission to run this tool on your computer.", "Allow tool", message.timeoutMs,
@@ -329,6 +359,12 @@ export class BridgeClient {
       );
     this.send({ type: "tool_result", callId: message.callId, result });
     if (!message.tool.startsWith("__authorize_")) this.handlers.onToolExecuted?.(message.tool, message.args, result);
+  }
+
+  private closeQuestions(requestId?: string): void {
+    for (const question of this.questions.values()) {
+      if (!requestId || question.requestId === requestId) question.controller.abort();
+    }
   }
 
   private askReferencePermission(args: { path: string; resolvedPath?: string }, timeoutMs: number): Promise<ToolResult> {
