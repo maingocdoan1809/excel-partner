@@ -113,6 +113,25 @@ describe("optional ACP add-in instructions", () => {
   });
 });
 
+describe("Copilot automatic session naming", () => {
+  it("places the original user request before injected context and custom instructions", async () => {
+    vi.spyOn(base, "execCli").mockResolvedValue({ code: 0, stdout: "{}", stderr: "" });
+    rpc.reply = async method => method === "session/new" ? { sessionId: nativeId }
+      : method === "session/prompt" ? { stopReason: "end_turn" } : {};
+    const adapter = new CopilotAdapter(runtime);
+    try {
+      const internalId = await adapter.startSession({ ...context(), resumeSessionId: undefined });
+      for await (const _event of adapter.sendTurn({ providerSessionId: internalId, requestId: "request",
+        userPrompt: "Tạo báo cáo PHP", prompt: "<saved_reference_files>files</saved_reference_files>\nTạo báo cáo PHP",
+        selection: null, signal: new AbortController().signal, systemPrompt: "Custom instructions" })) {}
+      const text = rpc.calls.filter(call => call.method === "session/prompt").at(-1)!.params.prompt[0].text;
+      expect(text).toMatch(/^Tạo báo cáo PHP\n\n<addin_context>/);
+      expect(text).toContain("Custom instructions");
+      expect(text).toContain("<saved_reference_files>files</saved_reference_files>");
+    } finally { await adapter.dispose(); }
+  });
+});
+
 describe("each provider resumes its native session independently", () => {
   it("Copilot loads the old ACP session and subtracts the original pre-resume accounting", async () => {
     const file = path.join(dir, "session-state", nativeId, "events.jsonl");

@@ -1,3 +1,5 @@
+import { cleanSessionTitle } from "../../../protocol/src/session-title.js";
+
 /**
  * Chat history kept in the task pane's own storage (localStorage on the add-in origin): nothing leaves the machine
  * and nothing is stored on the bridge. A "session" is one conversation, from "New chat" to the next "New chat".
@@ -84,7 +86,8 @@ export function trimSession(session: StoredSession): StoredSession {
   const clip = (text: string) => (text.length > LIMITS.textChars ? `${text.slice(0, LIMITS.textChars)}…` : text);
   return {
     ...session,
-    title: session.providerTitle || titleFrom(session.messages),
+    providerTitle: cleanSessionTitle(session.provider, session.providerTitle),
+    title: cleanSessionTitle(session.provider, session.providerTitle) || titleFrom(session.messages),
     messages: session.messages.slice(-LIMITS.messagesPerSession).map((m) => ({ ...m, text: clip(m.text) })),
     changes: session.changes.slice(-LIMITS.changesPerSession),
   };
@@ -97,6 +100,7 @@ export function bindProviderSession(session: StoredSession,
   info: { provider: string; providerSessionId: string; title?: string },
   requestMessageIndex: number, requestChangeIndex: number, startedAt: number,
 ): { current: StoredSession; previous: StoredSession | null } {
+  info = { ...info, title: cleanSessionTitle(info.provider, info.title) };
   const id = `${info.provider}:${info.providerSessionId}`;
   if (session.id === id) {
     session.identityVersion = 1;
@@ -125,7 +129,11 @@ export class SessionStore {
       return Array.isArray(parsed)
         ? (parsed as StoredSession[])
           .filter((s) => s && typeof s.id === "string" && Array.isArray(s.messages))
-          .map((s) => ({ ...s, messages: s.messages.filter((m) => !(m.kind === "note" && m.text === "Updating Excel Partner…")) }))
+          .map((s) => {
+            const providerTitle = cleanSessionTitle(s.provider, s.providerTitle);
+            return { ...s, providerTitle, title: providerTitle || (s.providerTitle ? titleFrom(s.messages) : s.title),
+              messages: s.messages.filter((m) => !(m.kind === "note" && m.text === "Updating Excel Partner…")) };
+          })
         : [];
     } catch {
       return []; // corrupt storage must never break the pane

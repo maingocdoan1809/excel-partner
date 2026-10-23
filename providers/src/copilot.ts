@@ -255,7 +255,9 @@ export class CopilotAdapter extends BaseCliAdapter {
     // ACP has no system-prompt field, so the instructions travel with the first prompt.
     const userText = buildTurnPrompt(input.prompt, input.selection);
     const systemPrompt = input.systemPrompt ?? SYSTEM_PROMPT;
-    const text = session.primed || !systemPrompt.trim() ? userText : `${systemPrompt}\n\n---\n\n${userText}`;
+    const context = session.primed || !systemPrompt.trim() ? userText : `${systemPrompt}\n\n---\n\n${userText}`;
+    // Copilot seeds its automatic session name from the first text block.
+    const text = input.userPrompt?.trim() ? `${input.userPrompt}\n\n<addin_context>\n${context}\n</addin_context>` : context;
     session.primed = true;
 
     session.peer

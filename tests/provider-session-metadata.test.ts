@@ -21,6 +21,20 @@ describe("provider-specific native metadata", () => {
     expect(await copilotTitle("../another-session", { COPILOT_HOME: root })).toBeUndefined();
   });
 
+  it("ignores context accidentally stored as a Copilot title and rejects a different session", async () => {
+    const root = directory();
+    const file = path.join(root, "session-state", "native", "workspace.yaml");
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    for (const name of ["<selection_snapshot> workbook context", "<saved_reference_files> local paths"]) {
+      fs.writeFileSync(file, `id: native\nname: ${JSON.stringify(name)}\n`);
+      expect(await copilotTitle("native", { COPILOT_HOME: root })).toBeUndefined();
+    }
+    fs.writeFileSync(file, 'id: native\nname: "Tạo báo cáo\\n\\n<addin_context> metadata"\n');
+    expect(await copilotTitle("native", { COPILOT_HOME: root })).toBe("Tạo báo cáo");
+    fs.writeFileSync(file, 'id: other\nname: Wrong session\n');
+    expect(await copilotTitle("native", { COPILOT_HOME: root })).toBeUndefined();
+  });
+
   it("reads Claude native title entries for the exact conversation, preserving the latest title", async () => {
     const root = directory(); const cwd = path.join(root, "workspace"); const id = "claude-session";
     const file = path.join(root, "projects", cwd.replace(/[^a-zA-Z0-9]/g, "-"), `${id}.jsonl`);

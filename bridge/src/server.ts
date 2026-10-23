@@ -1,3 +1,4 @@
+import { cleanSessionTitle } from "../../protocol/src/session-title.js";
 import { supportsNativeWebSearch, type ToolCapabilities } from "../../protocol/src/index.js";
 import { SavedReferences } from "./saved-references.js";
 import http from "node:http";
@@ -230,7 +231,7 @@ export class Bridge {
         const nativeId = item.providerSessionIds?.at(-1);
         if (!provider.success || !nativeId || item.sessionId !== providerSessionKey(provider.data, nativeId)) return;
         try {
-          item.title = await this.providers.get(provider.data)?.sessionTitle?.(nativeId) ?? item.title;
+          item.title = await this.providers.get(provider.data)?.sessionTitle?.(nativeId) ?? cleanSessionTitle(provider.data, item.title);
         } catch { /* Preserve the last recorded title when the CLI is unavailable. */ }
       }));
       return this.sendJson(res, 200, { sessions: summaries });
@@ -875,6 +876,7 @@ export class Bridge {
     resumeSessionId?: string,
     capabilities: ToolCapabilities = { webSearch: false, playwright: false },
   ): Promise<void> {
+    const userPrompt = prompt;
     if (!session.provider) {
       return void session.send({
         type: "error",
@@ -984,6 +986,7 @@ export class Bridge {
         model: selectedModel,
         effort,
         prompt,
+        userPrompt,
         selection,
         signal: controller.signal,
       })) {

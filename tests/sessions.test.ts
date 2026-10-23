@@ -59,6 +59,18 @@ describe("SessionStore", () => {
     expect(store.list()[0]?.title).toBe("Updated Native Title");
   });
 
+  it("repairs stored Copilot context titles using the actual user message", () => {
+    const storage = new MemoryStorage();
+    const broken = { ...chat("copilot:native", 10, [user("Tạo báo cáo PHP")]), provider: "copilot",
+      providerTitle: '<selection_snapshot> {"sheet":"Sheet1"}', title: "wrong" };
+    storage.setItem("excelPartner.sessions.v1", JSON.stringify([broken]));
+    const store = new SessionStore(storage);
+    expect(store.list()[0]?.title).toBe("Tạo báo cáo PHP");
+    expect(store.get(broken.id)?.providerTitle).toBeUndefined();
+    store.save(broken);
+    expect(store.get(broken.id)?.title).toBe("Tạo báo cáo PHP");
+  });
+
   it("splits only the new request when the provider explicitly returns a different native session", () => {
     const original = { ...chat("copilot:old", 10, [user("old task"), bot("done"), user("new task")]),
       provider: "copilot", providerSessionId: "old", providerTitle: "Old Native Title" };

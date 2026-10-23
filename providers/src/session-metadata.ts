@@ -4,6 +4,7 @@ import { createInterface } from "node:readline";
 import path from "node:path";
 import os from "node:os";
 import { parse } from "yaml";
+import { cleanSessionTitle } from "../../protocol/src/session-title.js";
 import type { TokenUsage } from "../../protocol/src/index.js";
 
 export function nativeTitle(value: unknown): string | undefined {
@@ -18,7 +19,9 @@ export async function copilotTitle(id: string, env: NodeJS.ProcessEnv): Promise<
   const file = path.join(env.COPILOT_HOME ?? path.join(os.homedir(), ".copilot"), "session-state", id, "workspace.yaml");
   try {
     if ((await fs.stat(file)).size > 64 * 1024) return undefined;
-    return nativeTitle(parse(await fs.readFile(file, "utf8"), { maxAliasCount: 0 })?.name);
+    const metadata = parse(await fs.readFile(file, "utf8"), { maxAliasCount: 0 });
+    if (metadata?.id && metadata.id !== id) return undefined;
+    return cleanSessionTitle("copilot", nativeTitle(metadata?.name));
   } catch { return undefined; }
 }
 

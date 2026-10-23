@@ -49,6 +49,8 @@ export interface SendTurnInput {
   model?: string | null;
   effort?: "low" | "medium" | "high";
   prompt: string;
+  /** Original user text before bridge context and skill expansion. */
+  userPrompt?: string;
   selection: SelectionSnapshot | null;
   /** Aborted when the user hits stop or the pane disconnects. */
   signal: AbortSignal;
