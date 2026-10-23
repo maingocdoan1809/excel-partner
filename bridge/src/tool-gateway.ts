@@ -24,6 +24,7 @@ import fs from "node:fs";
 import pathModule from "node:path";
 import type { SessionManager } from "./session-manager.js";
 import type { Logger } from "./logger.js";
+import { ExternalTools } from "./external-tools.js";
 import { enrichWindowsSelection, type SelectionEnricher } from "./windows-selection.js";
 
 export interface GatewayLimits {
@@ -52,6 +53,7 @@ export interface InternalToolRequest {
  * ones to the workbook session that owns the task pane.
  */
 export class ToolGateway {
+  readonly externalTools = new ExternalTools();
   constructor(
     private readonly sessions: SessionManager,
     private readonly limits: GatewayLimits,
@@ -82,10 +84,12 @@ export class ToolGateway {
       return error("unknown_tool", `unknown tool '${request.tool}'`);
     }
 
-    if (!exposedToolNames(this.allowOptInTools).includes(request.tool)) {
+    if (!exposedToolNames(this.allowOptInTools, session.capabilities).includes(request.tool)) {
       return error(
         "unsupported",
-        `tool '${request.tool}' is disabled; start the bridge with BRIDGE_ALLOW_OFFICE_JS=1 to enable it`,
+        request.tool === "execute_office_js"
+          ? `tool '${request.tool}' is disabled; start the bridge with BRIDGE_ALLOW_OFFICE_JS=1 to enable it`
+          : `tool '${request.tool}' is disabled. Enable it in Tools beside the prompt input.`,
       );
     }
 
@@ -97,6 +101,24 @@ export class ToolGateway {
         return error("invalid_arguments", `invalid arguments for ${request.tool}`, err.issues);
       }
       return error("invalid_arguments", String(err));
+    }
+
+    if (request.tool === "playwright_browser") {
+      const signal = session.turnController?.signal;
+      const requestId = session.activeRequestId;
+      try {
+        signal?.throwIfAborted();
+        const args = parsed as { tool: string; arguments: Record<string, unknown> };
+        const approval = await session.requestTool("__authorize_browser", args, 45_000);
+        if (!approval.ok) return approval;
+        if ((approval.data as { approved?: boolean })?.approved !== true) return error("cancelled", "The user declined this browser action.");
+        if (!session.isConnected) return error("disconnected", "Task pane disconnected before browser execution.");
+        if (signal?.aborted || session.activeRequestId !== requestId) return error("cancelled", "The request ended before browser execution.");
+        const data = await this.externalTools.browser(session.id, args.tool, args.arguments, signal);
+        return { ok: true, data: data && typeof data === "object" && "content" in data ? { mcpResult: data } : data };
+      } catch (err) {
+        return error(signal?.aborted ? "cancelled" : "internal_error", `${request.tool}: ${err instanceof Error ? err.message : String(err)}`);
+      }
     }
 
     if (request.tool === "list_skills" || request.tool === "read_skill" || request.tool === "save_skill") {
@@ -120,6 +142,7 @@ export class ToolGateway {
       } catch (err) { if (err instanceof SkillError) return error("invalid_arguments", err.message); throw err; }
     }
     if (request.tool === "run_skill_script") {
+      if (this.skills && !this.skills.isEnabled((parsed as RunSkillScriptInput).name)) return error("unsupported", "This skill is disabled. Enable it in Manage skills.");
       return this.answerScriptTool(session, parsed as RunSkillScriptInput);
     }
     if (request.tool === "run_python") return this.answerPythonTool(session, parsed as RunPythonInput);
@@ -264,6 +287,8 @@ export class ToolGateway {
         const file = id ? session.attachments.get(id) : null;
         if (file) return { ok: true, data: inspectAttachment(file, { entry, offset, maxBytes }) };
         if (!this.references) return error("unsupported", "reference files are not configured");
+        const denied = await this.authorizePath(session, path, "file");
+        if (denied) return denied;
         const selected = this.references.selectedPath(path, session.referenceGrants);
         const stat = fs.statSync(selected);
         if (stat.size > 30 * 1024 * 1024) return error("invalid_arguments", "file exceeds the 30 MB read limit");
@@ -282,7 +307,10 @@ export class ToolGateway {
         const file = id ? session.attachments.get(id) : null;
         if (file?.kind === "image") return { ok: true, data: { name: file.name, image: { mimeType: file.mimeType, data: file.bytes.toString("base64") } } };
         if (!this.references) return error("unsupported", "reference files are not configured");
+        const denied = await this.authorizePath(session, input, "file");
+        if (denied) return denied;
         const selected = this.references.selectedPath(input, session.referenceGrants);
+        if (fs.statSync(selected).size > MAX_ATTACHMENT_BYTES) return error("invalid_arguments", "file exceeds the 30 MB read limit");
         const image = createAttachment(pathModule.basename(selected), fs.readFileSync(selected));
         if (image.kind !== "image") return error("invalid_arguments", "selected file is not a supported image");
         return { ok: true, data: { name: image.name, image: { mimeType: image.mimeType, data: image.bytes.toString("base64") } } };
@@ -344,7 +372,7 @@ export class ToolGateway {
     return this.references.readWorkbook(input, session.referenceGrants);
   }
 
-  private async authorizePath(session: import("./session.js").WorkbookSession, input: string): Promise<ToolResult | null> {
+  private async authorizePath(session: import("./session.js").WorkbookSession, input: string, kind: "workbook" | "file" = "workbook"): Promise<ToolResult | null> {
     if (!this.references) return error("unsupported", "reference files are not configured");
     try {
       this.references.resolve(input, session.referenceGrants);
@@ -352,7 +380,10 @@ export class ToolGateway {
     } catch (err) {
       if (!(err instanceof ReferenceError_) || err.reason !== "outside") throw err;
     }
-    const target = this.references.permissionTarget(input);
+    const target = kind === "workbook" ? this.references.permissionTarget(input) : this.references.permissionTargetAny(input);
+    if (fs.statSync(target).size > MAX_ATTACHMENT_BYTES) return error("invalid_arguments", "file exceeds the 30 MB read limit");
+    const requestId = session.activeRequestId;
+    const signal = session.turnController?.signal;
     // The pane asks the person using this workbook. Approval applies to this exact file and session only.
     const response = await session.requestTool("__authorize_reference_path", { path: input, resolvedPath: target }, 120_000);
     if (!response.ok) return response;
@@ -360,6 +391,7 @@ export class ToolGateway {
       return error("cancelled", `The user declined read access to '${target}'`);
     }
     if (!session.isConnected) return error("disconnected", "task pane disconnected while requesting file access");
+    if (signal?.aborted || session.activeRequestId !== requestId) return error("cancelled", "The request ended before file access was granted.");
     session.referenceGrants.add(target);
     return null;
   }
@@ -380,6 +412,7 @@ export class ToolGateway {
         return { ok: true, data: { skills: this.skills.list().map(({ name, description }) => ({ name, description })) } };
       }
       const { name, file, forEditing } = args as { name: string; file?: string; forEditing?: boolean };
+      this.skills.requireEnabled(name);
       if (forEditing) {
         const skill = this.skills.get(name);
         if (!skill || !this.userSkills?.owns(skill.name, skill.dir)) return error("invalid_arguments", "Only user-installed skills can be edited.");

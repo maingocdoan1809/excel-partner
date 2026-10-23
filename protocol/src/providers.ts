@@ -35,3 +35,8 @@ export const ProviderDetectionSchema = z.object({
   capabilities: ProviderCapabilitiesSchema,
 });
 export type ProviderDetection = z.infer<typeof ProviderDetectionSchema>;
+
+/** Providers with search hosted by the AI provider, without an add-in search service. */
+export function supportsNativeWebSearch(provider: ProviderId): boolean {
+  return provider === "claude" || provider === "codex" || provider === "copilot";
+}

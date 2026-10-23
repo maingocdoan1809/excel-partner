@@ -76,6 +76,37 @@ async function setup() {
 }
 
 describe("editable settings and pending user prompts", () => {
+  it("persists skill toggles and keeps disabled skills manageable while hiding them from AI", async () => {
+    const { url, headers } = await setup();
+    const patch = (body: unknown) => fetch(url + "/session/skills", { method: "PATCH", headers, body: JSON.stringify(body) });
+    expect((await fetch(url + "/session/skills", { method: "PATCH", body: JSON.stringify({ name: "readonly", enabled: false }) })).status).toBe(401);
+    expect((await patch({ name: "readonly", enabled: "false" })).status).toBe(400);
+    expect((await patch({ name: "readonly", enabled: false })).status).toBe(200);
+    expect(await (await fetch(url + "/skills")).json()).toEqual({ skills: [] });
+    expect(await (await fetch(url + "/session/skills", { headers })).json()).toMatchObject({ skills: [{ name: "readonly", enabled: false, removable: false }] });
+    const restored = new SkillStore([path.join(folder, "external")], path.join(folder, "templates"));
+    expect(restored.isEnabled("readonly")).toBe(false);
+    expect((await patch({ name: "readonly", enabled: true })).status).toBe(200);
+    expect(restored.isEnabled("readonly")).toBe(true);
+    expect(await (await fetch(url + "/skills")).json()).toMatchObject({ skills: [{ name: "readonly" }] });
+  });
+
+  it("updates provider tool exposure on the next message and resumes the native conversation", async () => {
+    const { pane, adapter } = await setup();
+    adapter.useTool = false;
+    adapter.release();
+    pane.send({ type: "prompt", requestId: "tools-off", prompt: "Hello", selection: null });
+    await pane.waitFor(message => message.type === "turn_finished" && message.requestId === "tools-off");
+    expect(adapter.contexts[0]!.mcp.env.EXCEL_WEB_SEARCH).toBeUndefined();
+    pane.send({ type: "prompt", requestId: "tools-on", prompt: "Search", selection: null, resumeSessionId: "native-session", capabilities: { webSearch: true, playwright: true } });
+    await pane.waitFor(message => message.type === "turn_finished" && message.requestId === "tools-on");
+    expect(adapter.contexts[1]).toMatchObject({ resumeSessionId: "native-session", mcp: { env: { EXCEL_WEB_SEARCH: "1", EXCEL_PLAYWRIGHT: "1" } } });
+    pane.send({ type: "prompt", requestId: "tools-off-again", prompt: "Continue", selection: null, resumeSessionId: "native-session" });
+    await pane.waitFor(message => message.type === "turn_finished" && message.requestId === "tools-off-again");
+    expect(adapter.contexts).toHaveLength(3);
+    expect(adapter.contexts[2]!.mcp.env.EXCEL_PLAYWRIGHT).toBeUndefined();
+  });
+
   it("authenticates skill editing, rejects stale and non-owned files, and refreshes skill metadata", async () => {
     const { url, headers } = await setup();
     expect((await fetch(url + "/session/skills?name=report")).status).toBe(401);
@@ -147,6 +178,7 @@ describe("editable settings and pending user prompts", () => {
     await pane.waitFor(message => message.type === "turn_started");
     expect((await fetch(url + "/session/system-prompt")).status).toBe(401);
     const initial = await (await fetch(url + "/session/system-prompt", { headers })).json() as { revision: string; content: string };
+    expect(initial.content).toBe("");
     const content = "Use the Excel tools and answer in Vietnamese.";
     const response = await fetch(url + "/session/system-prompt", { method: "PUT", headers, body: JSON.stringify({ revision: initial.revision, content }) });
     expect(response.status).toBe(200);

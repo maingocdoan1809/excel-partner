@@ -104,6 +104,7 @@ export const ToolInputSchemas = {
   read_attached_image: ReadAttachedImageInputSchema,
   read_attached_file: ReadAttachedFileInputSchema,
   insert_sheets_from_file: InsertSheetsFromFileInputSchema,
+  playwright_browser: z.object({ tool: z.string().regex(/^(list_tools|browser_[a-z_]+)$/), arguments: z.record(z.unknown()).default({}) }),
   // opt-in escape hatch
   execute_office_js: ExecuteOfficeJsInputSchema,
 } as const satisfies Record<string, z.ZodTypeAny>;
@@ -112,14 +113,15 @@ export type ExcelToolName = keyof typeof ToolInputSchemas;
 export const EXCEL_TOOL_NAMES = Object.keys(ToolInputSchemas) as ExcelToolName[];
 
 /** Tools the bridge answers itself instead of forwarding to the task pane. */
-export const SERVER_TOOLS: readonly ExcelToolName[] = ["list_skills", "read_skill", "save_skill", "update_skill", "run_skill_script", "run_python", "list_reference_files", "read_workbook_file", "read_attached_image", "read_attached_file"];
+export const SERVER_TOOLS: readonly ExcelToolName[] = ["playwright_browser", "list_skills", "read_skill", "save_skill", "update_skill", "run_skill_script", "run_python", "list_reference_files", "read_workbook_file", "read_attached_image", "read_attached_file"];
 
 /** Tools controlled by allowOfficeJs (enabled by default; BRIDGE_ALLOW_OFFICE_JS=0 disables them). */
 export const OPT_IN_TOOLS: readonly ExcelToolName[] = ["execute_office_js"];
 
 /** Tool names a session exposes, given whether the opt-in tools are enabled. */
-export function exposedToolNames(allowOptIn: boolean): ExcelToolName[] {
-  return EXCEL_TOOL_NAMES.filter((name) => allowOptIn || !OPT_IN_TOOLS.includes(name));
+export function exposedToolNames(allowOptIn: boolean, capabilities: { webSearch?: boolean; playwright?: boolean } = {}): ExcelToolName[] {
+  return EXCEL_TOOL_NAMES.filter((name) => (allowOptIn || !OPT_IN_TOOLS.includes(name))
+    && (name !== "playwright_browser" || capabilities.playwright));
 }
 
 export function isExcelToolName(name: string): name is ExcelToolName {

@@ -1,5 +1,5 @@
 /**
- * Tiny, safe markdown for chat bubbles: **bold**, *italic*, `code`, fenced
+ * Tiny, safe markdown for chat bubbles: links, **bold**, *italic*, `code`, fenced
  * code blocks, `-`/`1.` lists and line breaks. Everything is HTML-escaped
  * first, so the result is safe to assign to `innerHTML`.
  */
@@ -53,8 +53,23 @@ export function renderMarkdown(source: string): string {
 }
 
 function inline(text: string): string {
+  const tokens = /`([^`]+)`|\[([^\]\n]+)\]\((https?:\/\/(?:[^\s()]|\([^\s()]*\))+)\)/g;
+  let result = "";
+  let offset = 0;
+  for (const match of text.matchAll(tokens)) {
+    result += emphasis(text.slice(offset, match.index));
+    if (match[1] !== undefined) result += `<code>${match[1]}</code>`;
+    else {
+      const href = match[3]!.replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+      result += `<a href="${href}" target="_blank" rel="noopener noreferrer">${emphasis(match[2]!)}</a>`;
+    }
+    offset = match.index! + match[0].length;
+  }
+  return result + emphasis(text.slice(offset));
+}
+
+function emphasis(text: string): string {
   return text
-    .replace(/`([^`]+)`/g, "<code>$1</code>")
     .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
     .replace(/(^|[^*])\*([^*\s][^*]*)\*/g, "$1<em>$2</em>");
 }

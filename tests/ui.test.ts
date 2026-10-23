@@ -57,6 +57,26 @@ describe("renderMarkdown", () => {
     );
   });
 
+  it("renders the reported AP News Markdown link as a clickable external link", () => {
+    expect(renderMarkdown("Nhấp vào [liên kết AP News](https://apnews.com/article/38d37c4c18bf8355b02d85b5a73ed642)."))
+      .toBe('<p>Nhấp vào <a href="https://apnews.com/article/38d37c4c18bf8355b02d85b5a73ed642" target="_blank" rel="noopener noreferrer">liên kết AP News</a>.</p>');
+  });
+
+  it("keeps links inside code literal, handles URL parentheses and escapes attributes", () => {
+    const html = renderMarkdown('`[code](https://example.com)` [**source**](https://example.com/a_(b)?x=1&y=2)');
+    expect(html).toContain('<code>[code](https://example.com)</code>');
+    expect(html).toContain('href="https://example.com/a_(b)?x=1&amp;y=2"');
+    expect(html).toContain('<strong>source</strong></a>');
+    expect(renderMarkdown('[quote](https://example.com/"quoted")')).toContain('href="https://example.com/&quot;quoted&quot;"');
+    expect(renderMarkdown('```\n[x](https://example.com)\n```')).not.toContain('<a ');
+  });
+
+  it("leaves unsafe schemes and incomplete streamed links as text", () => {
+    for (const text of ['[x](javascript:alert(1))', '[x](data:text/html,test)', '[x](//example.com)', '[x](https://example.com']) {
+      expect(renderMarkdown(text)).not.toContain('<a ');
+    }
+  });
+
   it("copes with an unterminated code fence while streaming", () => {
     expect(renderMarkdown("```\nfoo")).toBe("<pre><code>foo</code></pre>");
   });

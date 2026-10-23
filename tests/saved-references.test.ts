@@ -125,6 +125,13 @@ describe("saved reference files", () => {
     const replacement = path.join(path.dirname(file), "new-common.md");
     fs.writeFileSync(replacement, "Replacement rules");
     expect((await request("/session/references", "POST", { id, path: replacement, name: "Renamed", description: "Relinked" })).status).toBe(200);
+    let accessRequests = 0;
+    first.pane.onMessage = message => {
+      if (message.type === "tool_request" && message.tool === "__authorize_reference_path") {
+        accessRequests++;
+        first.pane.send({ type: "tool_result", callId: message.callId, result: { ok: true, data: { approved: false } } });
+      }
+    };
     const oldAccess = await (await request("/internal/tool", "POST", { tool: "read_attached_file", args: { path: file } })).json() as ToolResult;
     expect(oldAccess.ok).toBe(false);
     const newAccess = await (await request("/internal/tool", "POST", { tool: "read_attached_file", args: { path: replacement } })).json() as ToolResult;
@@ -133,6 +140,7 @@ describe("saved reference files", () => {
     expect((await request("/session/references", "DELETE", { id })).status).toBe(200);
     const denied = await (await request("/internal/tool", "POST", { tool: "read_attached_file", args: { path: file } })).json() as ToolResult;
     expect(denied.ok).toBe(false);
+    expect(accessRequests).toBe(2);
     expect(fs.readFileSync(file, "utf8")).toBe("Latest knowledge");
   });
 });

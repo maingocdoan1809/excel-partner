@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { SkillError, SkillStore, expandSkillPrompt, parseFrontmatter, projectTemplateReminder, skillTemplateUri } from "../bridge/src/skills.js";
 import { ToolGateway } from "../bridge/src/tool-gateway.js";
 import { SessionManager } from "../bridge/src/session-manager.js";
+import { skillFile } from "../bridge/src/skill-runner.js";
 import { PROJECT_ROOT } from "../bridge/src/config.js";
 
 let root: string;
@@ -38,6 +39,29 @@ describe("parseFrontmatter", () => {
 });
 
 describe("SkillStore", () => {
+  it("persists disabled skills, hides discovery and blocks instructions, templates and scripts until re-enabled", () => {
+    const templates = path.join(root, "templates");
+    const store = new SkillStore([root], templates);
+    write("alpha/tools/test.py", "print('hello')");
+    store.addTemplate("alpha", "sample.txt", Buffer.from("Example"));
+    const manifest = fs.readFileSync(path.join(root, "alpha", "SKILL.md"), "utf8");
+    store.setEnabled("alpha", false);
+    const restored = new SkillStore([root], templates);
+    expect(restored.list().map(skill => skill.name)).not.toContain("alpha");
+    expect(restored.list(true).map(skill => skill.name)).toContain("alpha");
+    expect(restored.get("alpha")).not.toBeNull();
+    expect(() => restored.read("alpha")).toThrow(/disabled/);
+    expect(() => restored.readTemplate("skill-template://alpha/sample.txt")).toThrow(/disabled/);
+    expect(() => skillFile(restored, "alpha", "tools/test.py")).toThrow(/disabled/);
+    expect(expandSkillPrompt("/alpha build", restored)).toMatchObject({ skill: null, prompt: expect.stringContaining("disabled") });
+    expect(projectTemplateReminder(restored)).not.toContain("sample.txt");
+    expect(fs.readFileSync(path.join(root, "alpha", "SKILL.md"), "utf8")).toBe(manifest);
+    restored.setEnabled("alpha", true);
+    expect(store.list().map(skill => skill.name)).toContain("alpha");
+    expect(store.read("alpha").content).toContain("Do the thing");
+    expect(() => restored.setEnabled("missing", false)).toThrow(/unknown skill/);
+  });
+
   it("lists skills with descriptions and falls back to the folder name", () => {
     const store = new SkillStore([root]);
     expect(store.list().map((s) => [s.name, s.description])).toEqual([

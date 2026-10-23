@@ -12,6 +12,7 @@ import { setupInputResizer } from "./ui/input-resizer.js";
 import { renderMarkdown } from "./ui/markdown.js";
 import { createSelfUpdater } from "./ui/self-update.js";
 import { setupProviderLogin } from "./ui/provider-login.js";
+import { setupToolSettings } from "./ui/tool-settings.js";
 import { setupComposerMenu } from "./ui/composer-menu.js";
 import { setupTheme } from "./ui/theme.js";
 import { setupSavedReferences } from "./ui/saved-references.js";
@@ -207,6 +208,7 @@ const slash = createSlashMenu({
 const savedReferences = setupSavedReferences(() => client);
 const userSkills = setupUserSkills(() => client, () => slash.reload());
 const promptEditor = createTextEditor();
+const toolSettings = setupToolSettings(() => provider);
 
 Office.onReady((info) => {
   if (info.host !== Office.HostType.Excel) return;
@@ -306,7 +308,7 @@ Office.onReady((info) => {
   byId("menu-skills").addEventListener("click", () => showPanel("skills"));
   byId("menu-system-prompt").addEventListener("click", () => {
     closeMenu();
-    void promptEditor.open({ title: "System prompt", detail: "Shared by all AI providers on this computer. Saved changes apply to the next request; an active response keeps its current instructions.", files: ["System prompt"],
+    void promptEditor.open({ title: "System prompt", detail: "Optional instructions shared by all AI providers on this computer. Leave empty for no add-in prompt. This does not enable additional tools or permissions. Saved changes apply to the next request; start a new chat to avoid instructions retained in history.", files: ["System prompt"],
       load: () => client.systemPrompt(), save: document => client.saveSystemPrompt(document.content, document.revision),
       reset: revision => client.saveSystemPrompt(null, revision),
     });
@@ -643,7 +645,7 @@ async function submit(queued?: PendingPrompt): Promise<void> {
     const referencePaths = turnAttachments.flatMap((item) => item.reference.id ? [] : [item.reference.path]);
     if (cancelRequested) return finishLocalCancel(requestId);
     client.sendPrompt(requestId, prompt, selection, context, attachmentIds, model, referencePaths, effort, session.id,
-      session.provider === provider ? session.providerSessionId : undefined);
+      session.provider === provider ? session.providerSessionId : undefined, toolSettings.value());
     promptDispatched = true;
     activeModel = model;
     activeEffort = effort;
@@ -1370,6 +1372,7 @@ function closeMenu(): void {
 }
 
 function renderProviderMenu(): void {
+  toolSettings.refreshProvider();
   els.menu.querySelectorAll<HTMLButtonElement>("[data-provider]").forEach((button) => {
     button.setAttribute("aria-checked", String(button.dataset.provider === provider));
   });

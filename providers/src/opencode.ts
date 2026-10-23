@@ -284,7 +284,8 @@ export class OpencodeAdapter extends BaseCliAdapter {
 
     // ACP has no system-prompt field, so the instructions travel with the first prompt.
     const userText = buildTurnPrompt(input.prompt, input.selection);
-    const text = session.primed ? userText : `${input.systemPrompt ?? SYSTEM_PROMPT}\n\n---\n\n${userText}`;
+    const systemPrompt = input.systemPrompt ?? SYSTEM_PROMPT;
+    const text = session.primed || !systemPrompt.trim() ? userText : `${systemPrompt}\n\n---\n\n${userText}`;
     session.primed = true;
 
     const run = async () => {
@@ -404,6 +405,7 @@ export class OpencodeAdapter extends BaseCliAdapter {
         $schema: "https://opencode.ai/config.json",
         permission: {
           "*": "ask",
+          websearch: "deny",
           [`${MCP_SERVER_NAME}_*`]: "allow",
         },
       }),

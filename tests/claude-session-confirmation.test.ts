@@ -31,21 +31,39 @@ beforeEach(() => {
 });
 afterEach(async () => { await adapter.dispose(); vi.restoreAllMocks(); });
 
-async function start(resumeSessionId?: string) {
+async function start(resumeSessionId?: string, webSearch = false) {
   return adapter.startSession({ workbookConnectionId: "workbook", sessionId: "bridge", resumeSessionId,
     signal: new AbortController().signal,
-    mcp: { command: process.execPath, args: [], env: {}, bridgeUrl: "", sessionId: "", token: "" },
+    mcp: { command: process.execPath, args: [], env: webSearch ? { EXCEL_WEB_SEARCH: "1" } : {}, bridgeUrl: "", sessionId: "", token: "" },
   });
 }
-async function turn(providerSessionId: string, signal = new AbortController().signal) {
+async function turn(providerSessionId: string, signal = new AbortController().signal, systemPrompt?: string) {
   const events: ProviderEvent[] = [];
-  for await (const event of adapter.sendTurn({ providerSessionId, requestId: "request", prompt: "hello", selection: null, signal })) {
+  for await (const event of adapter.sendTurn({ providerSessionId, requestId: "request", prompt: "hello", selection: null, signal, systemPrompt })) {
     events.push(event);
   }
   return events;
 }
 
 describe("Claude native session confirmation", () => {
+  it.each([false, true])("exposes native web tools only when Web search is enabled (%j)", async enabled => {
+    await turn(await start(undefined, enabled));
+    const args = cli.spawn.mock.calls[0]![1] as string[];
+    expect(args[args.indexOf("--tools") + 1]).toBe(enabled ? "WebSearch,WebFetch" : "");
+    expect(args.includes("WebSearch")).toBe(enabled);
+    expect(args.includes("WebFetch")).toBe(enabled);
+  });
+
+  it.each([undefined, "", " ", "Custom instructions"])("only overrides native instructions for a non-empty add-in prompt (%j)", async systemPrompt => {
+    await turn(await start(), new AbortController().signal, systemPrompt);
+    const args = cli.spawn.mock.calls[0]![1] as string[];
+    if (systemPrompt?.trim()) {
+      expect(args[args.indexOf("--system-prompt") + 1]).toBe(systemPrompt);
+    } else {
+      expect(args).not.toContain("--system-prompt");
+    }
+  });
+
   it("does not publish a locally generated ID when cancelled before launch", async () => {
     const id = await start();
     const controller = new AbortController();

@@ -133,14 +133,88 @@ describe("xlsx reader", () => {
 });
 
 describe("gateway file tools", () => {
-  function setup() {
+  function setup(roots = [root]) {
     const sessions = new SessionManager({ ttlMs: 60_000 });
     const session = sessions.create("0123456789abcdef", null);
     const limits = { maxReadCells: 1, maxWriteCells: 1, maxSheets: 1, maxSelectionCells: 1 };
-    const gateway = new ToolGateway(sessions, limits, 1000, undefined, false, null, new ReferenceFiles([root]));
+    const gateway = new ToolGateway(sessions, limits, 1000, undefined, false, null, new ReferenceFiles(roots));
     return { session, gateway };
   }
   const file = () => path.join(root, "templates", "t.xlsx");
+
+  const fileTools = ["read_attached_file", "read_attached_image"] as const;
+  function externalFile(tool: typeof fileTools[number]): string {
+    const target = path.join(root, tool === "read_attached_image" ? "outside.png" : "outside.txt");
+    fs.writeFileSync(target, tool === "read_attached_image" ? Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]) : "Outside content");
+    return target;
+  }
+
+  it.each(fileTools)("%s requests exact-file access, reuses approval and leaves sibling files protected", async tool => {
+    const { session, gateway } = setup([]);
+    const target = externalFile(tool);
+    Object.defineProperty(session, "isConnected", { get: () => true });
+    const request = vi.spyOn(session, "requestTool").mockResolvedValue({ ok: true, data: { approved: true } });
+    const read = () => gateway.invoke({ sessionId: session.id, tool, args: { path: target } });
+    const result = await read();
+    expect(result).toMatchObject(tool === "read_attached_image"
+      ? { ok: true, data: { image: { mimeType: "image/png" } } }
+      : { ok: true, data: { content: "Outside content" } });
+    expect(request).toHaveBeenCalledWith("__authorize_reference_path", { path: target, resolvedPath: target }, 120_000);
+    expect((await read()).ok).toBe(true);
+    expect(request).toHaveBeenCalledTimes(1);
+    expect([...session.referenceGrants]).toEqual([target]);
+    expect(await gateway.invoke({ sessionId: session.id, tool: "list_reference_files", args: { path: root } })).toMatchObject({ ok: false });
+    request.mockResolvedValue({ ok: true, data: { approved: false } });
+    expect(await gateway.invoke({ sessionId: session.id, tool: "read_attached_file", args: { path: path.join(root, "templates", "notes.txt") } }))
+      .toMatchObject({ ok: false, error: { code: "cancelled" } });
+    expect(request).toHaveBeenCalledTimes(2);
+  });
+
+  it.each(fileTools)("%s respects denial and asks again on the next attempt", async tool => {
+    const { session, gateway } = setup([]);
+    const target = externalFile(tool);
+    const request = vi.spyOn(session, "requestTool").mockResolvedValue({ ok: true, data: { approved: false } });
+    for (let attempt = 0; attempt < 2; attempt++) {
+      expect(await gateway.invoke({ sessionId: session.id, tool, args: { path: target } }))
+        .toMatchObject({ ok: false, error: { code: "cancelled" } });
+    }
+    expect(request).toHaveBeenCalledTimes(2);
+    expect(session.referenceGrants.size).toBe(0);
+  });
+
+  it.each(fileTools)("%s reads authorized folders without asking, and rejects invalid paths before asking", async tool => {
+    const { session, gateway } = setup();
+    const target = externalFile(tool);
+    const request = vi.spyOn(session, "requestTool");
+    expect((await gateway.invoke({ sessionId: session.id, tool, args: { path: target } })).ok).toBe(true);
+    const outside = setup([]);
+    const outsideRequest = vi.spyOn(outside.session, "requestTool");
+    for (const invalid of [root, path.join(root, "missing.txt")]) {
+      expect(await outside.gateway.invoke({ sessionId: outside.session.id, tool, args: { path: invalid } }))
+        .toMatchObject({ ok: false, error: { code: "invalid_arguments" } });
+    }
+    fs.truncateSync(target, 30 * 1024 * 1024 + 1);
+    expect(await outside.gateway.invoke({ sessionId: outside.session.id, tool, args: { path: target } }))
+      .toMatchObject({ ok: false, error: { code: "invalid_arguments", message: expect.stringContaining("30 MB") } });
+    expect(request).not.toHaveBeenCalled();
+    expect(outsideRequest).not.toHaveBeenCalled();
+  });
+
+  it.each(fileTools)("%s does not grant access after Stop or disconnect", async tool => {
+    const target = externalFile(tool);
+    for (const disconnected of [false, true]) {
+      const { session, gateway } = setup([]);
+      Object.defineProperty(session, "isConnected", { get: () => !disconnected });
+      session.turnController = new AbortController();
+      vi.spyOn(session, "requestTool").mockImplementation(async () => {
+        if (!disconnected) session.turnController!.abort();
+        return { ok: true, data: { approved: true } };
+      });
+      expect(await gateway.invoke({ sessionId: session.id, tool, args: { path: target } }))
+        .toMatchObject({ ok: false, error: { code: disconnected ? "disconnected" : "cancelled" } });
+      expect(session.referenceGrants.size).toBe(0);
+    }
+  });
 
   it("lists the allowed folders, reads an overview and a sheet", async () => {
     const { session, gateway } = setup();

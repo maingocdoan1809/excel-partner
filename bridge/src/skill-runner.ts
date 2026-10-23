@@ -17,6 +17,7 @@ export function windowsBash(): string {
 }
 
 export function skillFile(store: SkillStore, name: string, relative: string): { root: string; file: string } {
+  store.requireEnabled(name);
   const skill = store.get(name);
   if (!skill) throw new SkillError(`unknown skill '${name}'`);
   if (!relative || relative.includes("\\") || relative.split("/").some(part => !part || part === "." || part === ".." || part.includes(":"))) {

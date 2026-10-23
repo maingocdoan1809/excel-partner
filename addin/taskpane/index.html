@@ -197,6 +197,16 @@
             <button id="permission-button" type="button" class="picker-button" aria-haspopup="listbox" aria-expanded="false" aria-controls="permission-menu" aria-label="Permissions"><span class="picker-label">Ask</span><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m5 6.5 3 3 3-3"/></svg></button>
             <div id="permission-menu" class="picker-menu" role="listbox" aria-label="Permissions" hidden></div>
           </div>
+          <div class="composer-picker tools-picker">
+            <button id="tools-button" type="button" class="picker-button" aria-label="Tools" aria-haspopup="dialog" aria-expanded="false" aria-controls="tools-menu"><span class="picker-label">Tools</span><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 5h14M3 10h14M3 15h14"/><circle cx="7" cy="5" r="2"/><circle cx="13" cy="10" r="2"/><circle cx="7" cy="15" r="2"/></svg></button>
+            <div id="tools-menu" class="picker-menu tools-menu" role="dialog" aria-label="AI tools" hidden>
+              <label><input id="tool-web-search" type="checkbox" /> Web search</label>
+              <p id="tool-web-search-description">Use the selected AI provider’s built-in web search. No separate search service is added.</p>
+              <label><input id="tool-playwright" type="checkbox" /> Playwright browser</label>
+              <p>Use a separate local browser. First use may download Playwright MCP; Chrome must be installed. Ask/Auto controls browser actions.</p>
+              <p>Changes apply to the next message.</p>
+            </div>
+          </div>
           <div class="composer-picker usage-picker">
             <button id="usage-button" type="button" class="picker-button usage-button" aria-label="Session usage" title="Session usage" aria-haspopup="dialog" aria-expanded="false" aria-controls="usage-popover">
               <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="7"/><path d="M10 9v5M10 6.2v.2"/></svg>

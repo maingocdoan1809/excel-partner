@@ -18,6 +18,7 @@ interface ImagePayload {
 }
 
 function ok(data: unknown): CallToolResult {
+  if (data && typeof data === "object" && "mcpResult" in data) return (data as { mcpResult: CallToolResult }).mcpResult;
   const image = (data as { image?: ImagePayload } | null)?.image;
   if (image?.data && image.mimeType) {
     const { image: _omit, ...rest } = data as Record<string, unknown>;
@@ -34,6 +35,7 @@ function ok(data: unknown): CallToolResult {
 export interface ExcelMcpOptions {
   /** Expose opt-in tools such as execute_office_js. */
   allowOptInTools?: boolean;
+  capabilities?: { webSearch?: boolean; playwright?: boolean };
 }
 
 function fail(error: ToolError): CallToolResult {
@@ -49,7 +51,7 @@ function fail(error: ToolError): CallToolResult {
  * pane holding the live workbook.
  */
 export function createExcelMcpServer(forwarder: ToolForwarder, options: ExcelMcpOptions = {}): Server {
-  const exposed = new Set<string>(exposedToolNames(options.allowOptInTools ?? false));
+  const exposed = new Set<string>(exposedToolNames(options.allowOptInTools ?? false, options.capabilities));
   const server = new Server(SERVER_INFO, { capabilities: { tools: {} } });
 
   server.setRequestHandler(ListToolsRequestSchema, async () => ({

@@ -21,7 +21,7 @@ export class SystemPromptStore {
 
   update(content: string | null, revision: string): ReturnType<SystemPromptStore["read"]> {
     if (this.read().revision !== revision) throw new PromptSettingsConflict("The system prompt changed elsewhere. Reopen the editor before saving.");
-    if (content !== null && (!content.trim() || Buffer.byteLength(content, "utf8") > 64 * 1024 || content.includes("\0"))) throw new PromptSettingsError("The system prompt must contain text, up to 64 KB, without null characters.");
+    if (content !== null && (Buffer.byteLength(content, "utf8") > 64 * 1024 || content.includes("\0"))) throw new PromptSettingsError("The system prompt must be at most 64 KB and contain no null characters. Leave it empty for no add-in instructions.");
     if (this.file) {
       if (content === null) {
         try { fs.unlinkSync(this.file); }

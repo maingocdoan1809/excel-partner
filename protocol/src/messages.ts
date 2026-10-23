@@ -31,6 +31,12 @@ export const SetProviderMessageSchema = z.object({
   provider: ProviderIdSchema,
 });
 
+export const ToolCapabilitiesSchema = z.object({
+  webSearch: z.boolean().default(false),
+  playwright: z.boolean().default(false),
+});
+export type ToolCapabilities = z.infer<typeof ToolCapabilitiesSchema>;
+
 export const PromptMessageSchema = z.object({
   type: z.literal("prompt"),
   requestId: z.string().min(1),
@@ -41,6 +47,7 @@ export const PromptMessageSchema = z.object({
   /** Explicit CLI model ID; omitted for the provider's configured default. */
   model: z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9._/-]{0,79}$/).nullable().optional(),
   effort: z.enum(["low", "medium", "high"]).optional(),
+  capabilities: ToolCapabilitiesSchema.optional(),
   /** Snapshot of the live selection captured when the user hit send. */
   selection: SelectionSnapshotSchema.nullable(),
   /** Earlier conversation replayed as context when a past chat is continued (the provider has no memory of it). */

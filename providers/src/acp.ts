@@ -45,6 +45,7 @@ export function contentText(update: Record<string, any>): string {
  */
 export function acpPermissionOutcome(
   params: unknown,
+  allowedNativeTools: readonly string[] = [],
 ): { outcome: { outcome: "selected"; optionId: string } } | { outcome: { outcome: "cancelled" } } {
   const request = (params ?? {}) as {
     toolCall?: Record<string, any>;
@@ -52,9 +53,12 @@ export function acpPermissionOutcome(
   };
   const options = request.options ?? [];
   const isExcel = toolNameOf(request.toolCall ?? {}, true).isExcel;
-  const wanted = isExcel ? ["allow_once", "allow_always"] : ["reject_once", "reject_always"];
+  const call = request.toolCall ?? {};
+  const native = [call._meta?.toolName, call.rawInput?.toolName, call.title].some(name => typeof name === "string" && allowedNativeTools.includes(name));
+  const allowed = isExcel || native;
+  const wanted = allowed ? ["allow_once", "allow_always"] : ["reject_once", "reject_always"];
   const choice = options.find((option) => wanted.includes(option.kind ?? ""))
-    ?? options.find((option) => (isExcel ? /allow/i : /reject/i).test(`${option.kind ?? ""} ${option.optionId ?? ""}`));
+    ?? options.find((option) => (allowed ? /allow/i : /reject/i).test(`${option.kind ?? ""} ${option.optionId ?? ""}`));
   if (choice) return { outcome: { outcome: "selected", optionId: choice.optionId } };
   return { outcome: { outcome: "cancelled" } };
 }

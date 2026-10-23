@@ -84,6 +84,34 @@ export function defaultSkillDirs(projectRoot: string, extra: string[] = []): str
 export class SkillStore {
   constructor(private readonly dirs: string[], private readonly templateRoot = path.join(os.homedir(), ".excel-partner", "templates")) {}
 
+  private disabled(): Set<string> {
+    try {
+      const names: unknown = JSON.parse(fs.readFileSync(path.join(this.templateRoot, "disabled-skills.json"), "utf8"));
+      if (!Array.isArray(names) || names.some(name => typeof name !== "string")) throw new SkillError("Invalid skill settings.");
+      return new Set(names);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return new Set();
+      throw error;
+    }
+  }
+
+  isEnabled(name: string): boolean { return !this.disabled().has(name); }
+
+  setEnabled(name: string, enabled: boolean): void {
+    if (!this.get(name)) throw new SkillError(`unknown skill '${name}'`);
+    const disabled = this.disabled();
+    if (enabled) disabled.delete(name); else disabled.add(name);
+    fs.mkdirSync(this.templateRoot, { recursive: true });
+    const file = path.join(this.templateRoot, "disabled-skills.json");
+    const temporary = `${file}.${process.pid}.tmp`;
+    fs.writeFileSync(temporary, JSON.stringify([...disabled].sort()), { mode: 0o600 });
+    fs.renameSync(temporary, file);
+  }
+
+  requireEnabled(name: string): void {
+    if (!this.isEnabled(name)) throw new SkillError(`Skill '${name}' is disabled. Enable it in Manage skills to use it.`);
+  }
+
   private templateDirs(skill: string): string[] {
     const packaged = this.get(skill);
     return [path.join(this.templateRoot, skill), ...(packaged ? [path.join(packaged.dir, "templates")] : [])];
@@ -152,13 +180,15 @@ export class SkillStore {
   readTemplate(uri: string): { template: SkillTemplate; bytes: Buffer } {
     const parsed = parseSkillTemplateUri(uri);
     if (!parsed) throw new SkillError("invalid skill template path");
+    this.requireEnabled(parsed.skill);
     const file = this.existingTemplateFile(parsed.skill, parsed.name);
     const template = this.listTemplates(parsed.skill).find((item) => item.name === parsed.name);
     if (!template || !file) throw new SkillError("template not found");
     return { template, bytes: fs.readFileSync(file) };
   }
 
-  list(): SkillInfo[] {
+  list(includeDisabled = false): SkillInfo[] {
+    const disabled = includeDisabled ? new Set<string>() : this.disabled();
     const found = new Map<string, SkillInfo>();
     for (const root of this.dirs) {
       let entries: fs.Dirent[];
@@ -183,14 +213,15 @@ export class SkillStore {
         found.set(name, { name, description: (meta.description ?? "").trim(), dir, source: root });
       }
     }
-    return [...found.values()].sort((a, b) => a.name.localeCompare(b.name));
+    return [...found.values()].filter(skill => !disabled.has(skill.name)).sort((a, b) => a.name.localeCompare(b.name));
   }
 
   get(name: string): SkillInfo | null {
-    return this.list().find((s) => s.name === name) ?? null;
+    return this.list(true).find((s) => s.name === name) ?? null;
   }
 
   read(name: string, file?: string): SkillContent {
+    this.requireEnabled(name);
     const skill = this.get(name);
     if (!skill) {
       throw new SkillError(`unknown skill '${name}'. Available: ${this.list().map((s) => s.name).join(", ") || "(none)"}`);
@@ -260,6 +291,7 @@ export function expandSkillPrompt(prompt: string, store: SkillStore): { prompt: 
   if (!match) return { prompt, skill: null };
   const name = match[1]!;
   if (!store.get(name)) return { prompt, skill: null };
+  if (!store.isEnabled(name)) return { prompt: `The user requested /${name}, but this skill is disabled. Ask them to enable it in Manage skills before using it.\n\n${match[2] ?? ""}`, skill: null };
 
   const skill = store.read(name);
   const request = (match[2] ?? "").trim();

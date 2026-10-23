@@ -5,6 +5,7 @@ import {
   encodeMessage,
   type ProviderEvent,
   type ProviderId,
+  type ToolCapabilities,
   type ProviderStatusMessage,
   type SelectionSnapshot,
   type ServerMessage,
@@ -23,7 +24,7 @@ export interface WorkspaceListing { path: string; entries: WorkspaceEntry[]; tru
 export interface UploadedAttachment { id?: string; name: string; kind: "workbook" | "image" | "file"; path: string }
 export interface SkillTemplate { name: string; kind: "workbook" | "image" | "text"; size: number; path: string }
 export interface AvailableSkill { name: string; description: string }
-export interface InstalledSkill extends AvailableSkill { removable: boolean }
+export interface InstalledSkill extends AvailableSkill { removable: boolean; enabled: boolean }
 export interface SkillTextFile { file: string; content: string; revision: string }
 export interface SavedReference { id: string; name: string; path: string; description: string; available: boolean }
 export interface ModelCatalog { models: Array<{ id: string; name: string }>; defaultModelId: string | null }
@@ -113,8 +114,8 @@ export class BridgeClient {
     this.send({ type: "set_provider", provider });
   }
 
-  sendPrompt(requestId: string, prompt: string, selection: SelectionSnapshot | null, context?: string, attachmentIds?: string[], model?: string | null, referencePaths?: string[], effort: "low" | "medium" | "high" = "medium", chatSessionId?: string, resumeSessionId?: string): void {
-    this.send({ type: "prompt", requestId, prompt, selection, chatSessionId, resumeSessionId, model: model ?? null, effort, ...(context ? { context } : {}), ...(attachmentIds?.length ? { attachmentIds } : {}), ...(referencePaths?.length ? { referencePaths } : {}) });
+  sendPrompt(requestId: string, prompt: string, selection: SelectionSnapshot | null, context?: string, attachmentIds?: string[], model?: string | null, referencePaths?: string[], effort: "low" | "medium" | "high" = "medium", chatSessionId?: string, resumeSessionId?: string, capabilities?: ToolCapabilities): void {
+    this.send({ type: "prompt", requestId, prompt, selection, chatSessionId, resumeSessionId, capabilities, model: model ?? null, effort, ...(context ? { context } : {}), ...(attachmentIds?.length ? { attachmentIds } : {}), ...(referencePaths?.length ? { referencePaths } : {}) });
   }
 
   async usageSummaries(sessionId?: string): Promise<import("../../protocol/src/index.js").UsageSummary[]> {
@@ -187,6 +188,10 @@ export class BridgeClient {
 
   async removeSkill(name: string): Promise<void> {
     await this.sessionFetch("/session/skills", { method: "DELETE", body: JSON.stringify({ name }) });
+  }
+
+  async setSkillEnabled(name: string, enabled: boolean): Promise<void> {
+    await this.sessionFetch("/session/skills", { method: "PATCH", body: JSON.stringify({ name, enabled }) });
   }
 
   async skillTextFiles(name: string): Promise<string[]> {
@@ -295,6 +300,10 @@ export class BridgeClient {
       ? { ok: true as const, data: { approved: this.permissionMode === "auto" || await this.askPermission("Update installed skill?",
         `Save changes to /${(message.args as { name: string }).name}/${(message.args as { file: string }).file}?`, "Save skill", message.timeoutMs,
         (message.args as { content: string }).content.slice(0, 8000)) } }
+      : message.tool === "__authorize_browser"
+      ? { ok: true as const, data: { approved: this.permissionMode === "auto" || await this.askPermission("Allow browser action?",
+        "Playwright will perform this action in a separate browser on this computer.", "Allow browser action", message.timeoutMs,
+        JSON.stringify(message.args, null, 2).slice(0, 8000)) } }
       : message.tool === "__authorize_python"
       ? this.permissionMode === "auto" ? { ok: true as const, data: { approved: true } }
         : { ok: true as const, data: { approved: await this.askPermission("Run Python on this computer?",
@@ -306,7 +315,7 @@ export class BridgeClient {
       : message.tool === "__authorize_reference_path"
       ? this.permissionMode === "auto"
         ? { ok: true as const, data: { approved: true } }
-        : await this.askReferencePermission(message.args as { path: string }, message.timeoutMs)
+        : await this.askReferencePermission(message.args as { path: string; resolvedPath?: string }, message.timeoutMs)
       : await executeWithPermission(
         message.tool,
         message.args,
@@ -318,13 +327,13 @@ export class BridgeClient {
     if (!message.tool.startsWith("__authorize_")) this.handlers.onToolExecuted?.(message.tool, message.args, result);
   }
 
-  private askReferencePermission(args: { path: string }, timeoutMs: number): Promise<ToolResult> {
+  private askReferencePermission(args: { path: string; resolvedPath?: string }, timeoutMs: number): Promise<ToolResult> {
     return this.askPermission(
       "Allow read access?",
-      "The assistant wants to read this Excel file for this chat. It cannot change the file. Edits only affect the workbook open in Excel.",
+      "Allow the assistant to read this file for this chat. This grants read access to this file only.",
       "Allow read",
       timeoutMs,
-      args.path,
+      args.resolvedPath ?? args.path,
     ).then((approved) => ({ ok: true, data: { approved } }));
   }
 

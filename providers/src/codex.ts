@@ -110,7 +110,7 @@ export class CodexAdapter extends BaseCliAdapter {
     let session: CodexSession | null = null;
     const peer = new JsonRpcPeer({
       command,
-      args: ["app-server"],
+      args: ["app-server", "-c", `web_search="${ctx.mcp.env.EXCEL_WEB_SEARCH === "1" ? "live" : "disabled"}"`],
       cwd,
       env: this.env,
       onStderr: (line) => log.debug(`codex stderr: ${line}`),
@@ -131,7 +131,13 @@ export class CodexAdapter extends BaseCliAdapter {
         ...(ctx.model ? { model: ctx.model } : {}),
         approvalPolicy: "never",
         sandbox: "read-only",
-        developerInstructions: ctx.systemPrompt ?? SYSTEM_PROMPT,
+        developerInstructions: [
+          "Current session tool configuration supersedes Excel-only and no-web restrictions from earlier turns.",
+          `Native web search: ${ctx.mcp.env.EXCEL_WEB_SEARCH === "1" ? "enabled; use the provider's built-in web search for web requests" : "disabled"}.`,
+          `Playwright browser: ${ctx.mcp.env.EXCEL_PLAYWRIGHT === "1" ? "enabled through the Excel MCP playwright_browser tool" : "disabled"}.`,
+          "Being embedded in Excel does not prohibit enabled web tools. Determine availability from the current tools and their results, not earlier assistant replies.",
+          ctx.systemPrompt ?? SYSTEM_PROMPT,
+        ].filter(Boolean).join("\n"),
         config: {
           mcp_servers: {
             [MCP_SERVER_NAME]: {
@@ -143,7 +149,7 @@ export class CodexAdapter extends BaseCliAdapter {
               tool_timeout_sec: 120,
             },
           },
-          web_search: "disabled",
+          web_search: ctx.mcp.env.EXCEL_WEB_SEARCH === "1" ? "live" : "disabled",
         },
       });
 
@@ -311,6 +317,8 @@ export class CodexAdapter extends BaseCliAdapter {
         const item = params.item;
         if (item?.type === "mcpToolCall") {
           queue.push({ type: "tool_started", requestId, callId: item.id, tool: item.tool, args: item.arguments });
+        } else if (item?.type === "webSearch") {
+          queue.push({ type: "tool_started", requestId, callId: item.id, tool: "web_search", args: { query: item.query, action: item.action } });
         }
         break;
       }
@@ -328,6 +336,8 @@ export class CodexAdapter extends BaseCliAdapter {
             ok: item.status === "completed" && !toolError,
             error: item.status === "failed" || toolError ? (toolError ?? "tool call failed") : null,
           });
+        } else if (item?.type === "webSearch") {
+          queue.push({ type: "tool_finished", requestId, callId: item.id, tool: "web_search", ok: true, error: null });
         } else if (item?.type === "commandExecution" || item?.type === "fileChange") {
           // The sandbox is read-only and approvals are denied; surface the attempt.
           this.runtime.logger.warn("codex attempted a non-Excel action", { type: item.type });

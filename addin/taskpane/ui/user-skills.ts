@@ -21,13 +21,42 @@ export function setupUserSkills(client: () => BridgeClient, changed: () => void)
       for (const skill of skills) {
         const row = document.createElement("div");
         row.className = "user-skill";
+        row.dataset.enabled = String(skill.enabled);
         const copy = document.createElement("div");
+        copy.className = "user-skill-copy";
         const title = document.createElement("strong");
         title.textContent = `/${skill.name}`;
         const detail = document.createElement("p");
         detail.textContent = skill.description || "Custom skill";
-        copy.append(title, detail);
+        copy.append(title);
+        if (!skill.enabled) {
+          const badge = document.createElement("span");
+          badge.className = "skill-disabled-label";
+          badge.textContent = "Disabled";
+          copy.append(badge);
+        }
+        copy.append(detail);
         row.append(copy);
+        const toggle = document.createElement("button");
+        toggle.type = "button";
+        toggle.className = "secondary";
+        toggle.textContent = skill.enabled ? "Disable" : "Enable";
+        toggle.setAttribute("role", "switch");
+        toggle.setAttribute("aria-checked", String(skill.enabled));
+        toggle.setAttribute("aria-label", `Enable /${skill.name}`);
+        toggle.addEventListener("click", async () => {
+          if (busy) return;
+          busy = true;
+          toggle.disabled = true;
+          try {
+            await client().setSkillEnabled(skill.name, !skill.enabled);
+            message.textContent = `/${skill.name} ${skill.enabled ? "disabled" : "enabled"}. Previously loaded instructions remain in chat history.`;
+            changed();
+            await refresh();
+          } catch (error) { message.textContent = error instanceof Error ? error.message : "Could not update skill."; }
+          finally { busy = false; toggle.disabled = false; }
+        });
+        row.append(toggle);
         if (skill.removable) {
           const actions = document.createElement("div");
           actions.className = "user-skill-actions";

@@ -197,6 +197,8 @@ export class ClaudeAdapter extends BaseCliAdapter {
     }
 
     const model = input.model ?? process.env.CLAUDE_MODEL;
+    const systemPrompt = input.systemPrompt ?? SYSTEM_PROMPT;
+    const webTools = session.mcp.env.EXCEL_WEB_SEARCH === "1" ? ["WebSearch", "WebFetch"] : [];
     const args = [
       "-p",
       "--output-format",
@@ -208,13 +210,13 @@ export class ClaudeAdapter extends BaseCliAdapter {
       session.mcpConfigPath,
       "--strict-mcp-config",
       "--tools",
-      "",
+      webTools.join(","),
       "--allowedTools",
       `mcp__${MCP_SERVER_NAME}`,
+      ...webTools,
       "--permission-mode",
       "dontAsk",
-      "--system-prompt",
-      input.systemPrompt ?? SYSTEM_PROMPT,
+      ...(systemPrompt.trim() ? ["--system-prompt", systemPrompt] : []),
       "--disable-slash-commands",
       // The scratch cwd is empty, so this skips the user's own hooks, CLAUDE.md
       // and plugins (auth is unaffected) and keeps the Excel session predictable.

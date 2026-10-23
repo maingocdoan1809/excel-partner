@@ -16,7 +16,6 @@ describe("system prompt settings", () => {
       const saved = store.update("User's complete system prompt", initial.revision);
       expect(new SystemPromptStore(file).read()).toEqual(saved);
       expect(() => store.update("Stale edit", initial.revision)).toThrow(/changed/);
-      expect(() => store.update(" ", saved.revision)).toThrow(/contain text/);
       expect(() => store.update("a".repeat(65537), saved.revision)).toThrow(/64 KB/);
       expect(store.update(null, saved.revision)).toEqual(initial);
       expect(fs.existsSync(file)).toBe(false);
@@ -26,4 +25,19 @@ describe("system prompt settings", () => {
       expect(again.customized).toBe(true);
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   });
+
+  it("defaults to no add-in prompt and persists an explicitly cleared override", () => {
+    const store = new SystemPromptStore(null);
+    const initial = store.read();
+    expect(initial).toMatchObject({ content: "", customized: false });
+    const custom = store.update("Custom instructions", initial.revision);
+    const cleared = store.update("", custom.revision);
+    expect(cleared).toMatchObject({ content: "", customized: true });
+    expect(store.read()).toEqual(cleared);
+    expect(store.update(null, cleared.revision)).toEqual(initial);
+    const blank = store.update(" ", initial.revision);
+    expect(blank.content).toBe(" ");
+    expect(() => store.update("\0", blank.revision)).toThrow(/null characters/);
+  });
+
 });

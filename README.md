@@ -81,7 +81,7 @@ GitHub Copilot also supports device-code sign-in through **Settings > Sign in to
 - Edit installed skill text files through **Manage skills > Edit**, including instructions, references and scripts. Binary templates and images are preserved. Saving rejects a stale revision instead of overwriting newer edits.
 - Let the assistant update an installed skill with `read_skill` (`forEditing: true`) and `update_skill`. Ask/Auto applies to each save; updating a script does not run it.
 - Send another message while the assistant works. It appears as **Pending** and reaches the assistant with the next tool result, or starts the next turn if no tool follows. Stop and disconnect preserve unsent messages for manual resend.
-- Customize the complete shared system prompt through **Settings > System prompt**, or restore the default. Changes apply on the next request and preserve the native conversation where resume is supported.
+- Add optional shared instructions through **Settings > System prompt**. The shipped default is empty: no add-in system prompt is injected. Clear the editor and save, or choose **Restore default**, to remove custom instructions. Changes apply on the next request; start a new chat to avoid old instructions retained in conversation history. Provider-native instructions and tool permissions still apply.
 - Review workbook changes and return to conversations through chat history.
 
 Press **Enter** to send a message and **Ctrl+Enter** to insert a new line.
@@ -95,6 +95,40 @@ For example, after reading `bd-generator`, call `run_skill_script` with `{"name"
 For Python written by the assistant, use **`run_python`**. It writes `main.py` in a temporary working folder and runs Python directly on the user's machine with their permissions and installed libraries, including file and network access. Python must be installed locally (`python` on Windows, `python3` on Linux/WSL); `BRIDGE_PYTHON_BIN` can select its executable. Docker is not required. Ask/Auto controls execution approval.
 
 Selected attachments are copied into the working folder (10 MB combined); requested output files return as `attachment://` references (10 MB combined). Execution is limited to 60 seconds and 512 KB of console output. Cancellation stops the process tree and the temporary working folder is removed after execution. These limits do not isolate Python from the rest of the computer. Example: `run_python {"code":"from pathlib import Path; Path('result.txt').write_text('Hello', encoding='utf-8')","outputFiles":["result.txt"]}`. Both Python runners use UTF-8, including subprocess output.
+
+## AI capabilities and permissions
+
+| Capability | Available route | Requirements / permission |
+| --- | --- | --- |
+| Read selections, cells, formulas, styles and objects | Excel MCP read tools | Connected workbook; some features require a recent Excel version |
+| Write values/formulas; format, merge, resize, sort and filter | Excel MCP write tools | Ask/Auto controls supported changes and overwrite approvals |
+| Manage worksheets, named ranges, validation and print layout | Excel MCP management tools | Ask/Auto; worksheet deletion requires approval in Ask mode |
+| Create/edit tables, charts and pivot tables | Excel MCP object tools | Excel API support |
+| Draw/edit shapes, connectors and flowcharts | Excel MCP shape tools | Excel API support; visual review for routed connectors |
+| Run additional workbook operations | `execute_office_js` | Enabled by default; controlled by `BRIDGE_ALLOW_OFFICE_JS` / `allowOfficeJs`, plus Ask/Auto |
+| Inspect attachments, closed Excel files and reference templates; import sheets | File/reference tools and `insert_sheets_from_file` | Selected files, configured references or access approval |
+| Create/edit reusable instructions and run installed Python/Bash scripts | Skill tools and `run_skill_script` | Installed skill, local interpreter/dependencies; Ask/Auto for execution |
+| Analyze data, generate files, access local files or call HTTP APIs | `run_python` | Local Python, libraries, OS/network access and service credentials when needed; Ask/Auto for execution |
+| Search the web | Enable **Tools > Web search** beside the prompt | Uses Claude/Codex/Copilot native search; unavailable for OpenCode without an external search service |
+| Automate a browser with Playwright | Enable **Tools > Playwright browser** beside the prompt | Local Node/npm and Chrome; first use may download Playwright MCP. Ask/Auto controls each browser action |
+
+Choose **Ask** or **Auto** in the task pane to control the add-in's approval flow. Auto does not install software, grant administrator rights, add service credentials, enable provider-native tools or remove execution time limits. Python and skill scripts run with the bridge user's OS permissions; they can access files and the network through that execution route.
+
+Removing the add-in prompt does not unlock provider-native tools. Claude and Copilot expose Excel MCP tools and optionally their native web tools; OpenCode allows Excel MCP tools and rejects other tool permission requests; Codex runs with a read-only sandbox and no approval escalation. Native web search is controlled separately by the Tools switch. Enabling native shell/browser tools or additional MCP servers requires changes to the relevant provider adapter and tool registration. Ask/Auto covers add-in tool calls, not arbitrary provider-native tool calls.
+
+### Optional tools beside the prompt
+
+Open **Tools** next to Ask/Auto and enable **Web search** and/or **Playwright browser**. Both default to off; choices are saved in this task pane and apply to the next message. Changing the selection reloads provider tool registration while preserving the native conversation where supported. Disabled tools are hidden from the model and direct calls are rejected by the bridge.
+
+Web search uses only the selected AI provider's native tool: Claude Code's `WebSearch`/`WebFetch`, Codex's hosted search (`web_search = "live"`), or Copilot CLI's `web_search`/`web_fetch`. The add-in does not add a separate search endpoint or API key. Provider account/model availability and policies still apply. OpenCode's web search requires an external search backend, so this switch is disabled for OpenCode; no fallback service is configured.
+
+Browser automation uses [Microsoft's Playwright MCP](https://playwright.dev/mcp/configuration/options), launched lazily as `npx --yes @playwright/mcp@latest --headless --isolated` on the bridge machine. Node/npm, network access for the first download, and Chrome must be available there. It uses a separate browser context for each connected workbook, without reusing your normal Chrome login. The assistant first lists available browser tools, then can navigate, inspect pages, click, fill forms and capture screenshots. **Ask** requests approval for each action; **Auto** approves it. Stop, tool/provider/chat changes, disconnect and bridge shutdown close the browser connection. Provider-native shell and other MCP servers retain their existing permissions.
+
+If Chrome is installed in a nonstandard location, or you want to use an existing Chromium executable, set `BRIDGE_PLAYWRIGHT_EXECUTABLE` to its full path before starting the bridge. A missing browser is reported by the tool; enabling the switch alone does not install Chrome.
+
+### Enable or disable skills
+
+In **Settings > Manage skills**, use the **Enabled / Disabled** switch on any installed or packaged skill. The choice is saved on the bridge machine and applies across chats. Disabled skills stay installed and editable, but disappear from `/`, AI skill discovery and automatic template inventories. The bridge rejects loading their instructions, reading their templates or running their scripts until re-enabled. Instructions already present in chat history cannot be removed by this switch; start a new chat to avoid that old context.
 
 ## Commands
 
@@ -254,6 +288,8 @@ After installation or login, restart the bridge and select the provider again in
 Open **Settings → Reference files → Add reference file**. In the popup, paste the full path of a local file (in Explorer: Shift + right-click → **Copy as path**), then enter a display name and description. References are shared across all skills and chats on this machine.
 
 Only the name, path and description are stored in `~/.excel-partner/references.json`; the original file is never copied or uploaded. The assistant receives the catalog and reads relevant files on demand, using their latest contents. Registering a file grants read access to that exact file. Existing file-reading format and size limits still apply.
+
+You can also give the assistant a local file path directly. `read_attached_file`, `read_attached_image`, and `read_workbook_file` request access when the file is outside configured workspace folders or saved references: **Ask** shows the file path for approval; **Auto** approves automatically. Approval applies to that exact file in the current connected session, without granting its folder or sibling files. Repeated reads reuse the grant. Denied requests do not grant access. Text/general file reads retain the 30 MB limit; supported images retain the 10 MB image limit.
 
 Use **Edit** to change the description or choose a new location. Missing files are marked in the list. **Remove link** removes the saved metadata and its read access; it leaves the original file on disk.
 

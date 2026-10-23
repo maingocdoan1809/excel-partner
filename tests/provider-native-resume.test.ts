@@ -7,13 +7,14 @@ import type { StartSessionContext } from "../providers/src/types.js";
 
 const rpc = vi.hoisted(() => ({
   calls: [] as Array<{ method: string; params: any }>,
+  launches: [] as any[],
   reply: (async (_method: string, _params: any, _options: any): Promise<any> => ({})),
 }));
 vi.mock("../providers/src/jsonrpc.js", () => ({
   JsonRpcPeer: class {
     alive = true;
     stderrTail: string[] = [];
-    constructor(private options: any) {}
+    constructor(private options: any) { rpc.launches.push(options); }
     async request(method: string, params: any) { rpc.calls.push({ method, params }); return rpc.reply(method, params, this.options); }
     notify() {}
     onExit() {}
@@ -37,6 +38,7 @@ beforeEach(() => {
   vi.stubEnv("EXCEL_AI_HOME", dir);
   vi.stubEnv("COPILOT_HOME", dir);
   rpc.calls = [];
+  rpc.launches = [];
   rpc.reply = async () => ({});
 });
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllEnvs(); fs.rmSync(dir, { recursive: true, force: true }); });
@@ -46,6 +48,70 @@ async function turn(adapter: CopilotAdapter | OpencodeAdapter | CodexAdapter, in
     selection: null, signal: new AbortController().signal })) events.push(event);
   return events;
 }
+
+describe("provider-native web search", () => {
+  it.each([false, true])("configures Codex hosted search without adding a search MCP (%j)", async enabled => {
+    rpc.reply = async method => method === "thread/resume" ? { thread: { id: nativeId } } : {};
+    const adapter = new CodexAdapter(runtime);
+    const ctx = context();
+    if (enabled) ctx.mcp.env.EXCEL_WEB_SEARCH = "1";
+    try {
+      await adapter.startSession(ctx);
+      const config = rpc.calls.find(call => call.method === "thread/resume")!.params.config;
+      expect(config.web_search).toBe(enabled ? "live" : "disabled");
+      const instructions = rpc.calls.find(call => call.method === "thread/resume")!.params.developerInstructions;
+      expect(instructions).toContain("supersedes Excel-only and no-web restrictions");
+      expect(instructions).toContain(enabled ? "Native web search: enabled" : "Native web search: disabled");
+      expect(rpc.launches.at(-1).args).toContain(`web_search="${enabled ? "live" : "disabled"}"`);
+      expect(Object.keys(config.mcp_servers)).toEqual(["excel"]);
+    } finally { await adapter.dispose(); }
+  });
+
+  it.each([false, true])("exposes only Copilot native web tools and rejects unrelated permission requests (%j)", async enabled => {
+    const adapter = new CopilotAdapter(runtime);
+    const ctx = context();
+    if (enabled) ctx.mcp.env.EXCEL_WEB_SEARCH = "1";
+    try {
+      await adapter.startSession(ctx);
+      const launch = rpc.launches.at(-1)!;
+      expect(launch.args.includes("web_search")).toBe(enabled);
+      expect(launch.args.includes("web_fetch")).toBe(enabled);
+      expect(launch.args.includes("--disable-builtin-mcps")).toBe(!enabled);
+      const options = [{ optionId: "yes", kind: "allow_once" }, { optionId: "no", kind: "reject_once" }];
+      expect(launch.onRequest("session/request_permission", { toolCall: { title: "web_search" }, options }))
+        .toEqual({ outcome: { outcome: "selected", optionId: enabled ? "yes" : "no" } });
+      expect(launch.onRequest("session/request_permission", { toolCall: { title: "shell" }, options }))
+        .toEqual({ outcome: { outcome: "selected", optionId: "no" } });
+    } finally { await adapter.dispose(); }
+  });
+
+  it("keeps OpenCode external search disabled", async () => {
+    const adapter = new OpencodeAdapter(runtime);
+    try {
+      await adapter.startSession(context());
+      const file = rpc.launches.at(-1)!.env.OPENCODE_CONFIG;
+      expect(JSON.parse(fs.readFileSync(file, "utf8")).permission.websearch).toBe("deny");
+    } finally { await adapter.dispose(); }
+  });
+});
+
+describe("optional ACP add-in instructions", () => {
+  it.each([CopilotAdapter, OpencodeAdapter])("sends a clean first prompt without instructions and still supports a custom prompt (%j)", async Adapter => {
+    vi.spyOn(base, "execCli").mockResolvedValue({ code: 0, stdout: "{}", stderr: "" });
+    rpc.reply = async method => method === "session/new" ? { sessionId: nativeId }
+      : method === "session/prompt" ? { stopReason: "end_turn" } : {};
+    for (const systemPrompt of [undefined, "", " ", "Custom instructions"]) {
+      const adapter = new Adapter(runtime);
+      try {
+        const internalId = await adapter.startSession({ ...context(), resumeSessionId: undefined });
+        for await (const _event of adapter.sendTurn({ providerSessionId: internalId, requestId: "request",
+          prompt: "Hello", selection: null, signal: new AbortController().signal, systemPrompt })) {}
+        const prompt = rpc.calls.filter(call => call.method === "session/prompt").at(-1)!.params.prompt;
+        expect(prompt).toEqual([{ type: "text", text: systemPrompt?.trim() ? `${systemPrompt}\n\n---\n\nHello` : "Hello" }]);
+      } finally { await adapter.dispose(); }
+    }
+  });
+});
 
 describe("each provider resumes its native session independently", () => {
   it("Copilot loads the old ACP session and subtracts the original pre-resume accounting", async () => {
@@ -114,6 +180,8 @@ describe("each provider resumes its native session independently", () => {
       if (method === "thread/read") return { thread: { name: "Native Codex Title" } };
       if (method === "turn/start") {
         queueMicrotask(() => {
+          options.onNotification("item/started", { threadId: nativeId, item: { type: "webSearch", id: "search", query: "Google", action: null } });
+          options.onNotification("item/completed", { threadId: nativeId, item: { type: "webSearch", id: "search", query: "Google", action: null } });
           options.onNotification("thread/tokenUsage/updated", { threadId: nativeId, turnId: "turn", tokenUsage: {
             total: { inputTokens: 160, outputTokens: 30, totalTokens: 190, cachedInputTokens: 40 },
           } });
@@ -130,6 +198,8 @@ describe("each provider resumes its native session independently", () => {
       expect(rpc.calls.some(c => c.method === "thread/start")).toBe(false);
       expect(rpc.calls.find(c => c.method === "thread/resume")?.params.threadId).toBe(nativeId);
       expect(events.find(e => e.type === "session_info")).toMatchObject({ providerSessionId: nativeId, title: "Native Codex Title" });
+      expect(events.find(e => e.type === "tool_started")).toMatchObject({ tool: "web_search", callId: "search" });
+      expect(events.find(e => e.type === "tool_finished")).toMatchObject({ tool: "web_search", ok: true });
       expect(events.find(e => e.type === "usage_update")).toMatchObject({ usage: { totalTokens: 70, cachedInputTokens: 10, source: "codex_thread" } });
     } finally { await adapter.dispose(); }
   });

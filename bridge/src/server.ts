@@ -1,3 +1,4 @@
+import { supportsNativeWebSearch, type ToolCapabilities } from "../../protocol/src/index.js";
 import { SavedReferences } from "./saved-references.js";
 import http from "node:http";
 import https from "node:https";
@@ -351,6 +352,12 @@ export class Bridge {
     if (!this.workspaceSession(req)) return this.sendJson(res, 401, { error: "unauthorized" });
     res.setHeader("cache-control", "no-store");
     try {
+      if (req.method === "PATCH") {
+        const body = JSON.parse(await readBody(req)) as { name?: unknown; enabled?: unknown };
+        if (typeof body.name !== "string" || typeof body.enabled !== "boolean") throw new SkillError("Specify a skill name and enabled state.");
+        this.skills.setEnabled(body.name, body.enabled);
+        return this.sendJson(res, 200, { name: body.name, enabled: body.enabled });
+      }
       if ((req.method === "GET" && url.searchParams.has("name")) || req.method === "PUT") {
         const body = req.method === "PUT" ? JSON.parse(await readBody(req, MAX_SKILL_UPLOAD_BYTES * 6 + 4096)) as Record<string, unknown> : null;
         const name = body?.name ?? url.searchParams.get("name");
@@ -365,7 +372,7 @@ export class Bridge {
         return this.sendJson(res, 200, { document: this.userSkills.updateTextFile(name, file, body.content, body.revision) });
       }
       if (req.method === "GET") return this.sendJson(res, 200, {
-        skills: this.skills.list().map(({ name, description, dir }) => ({ name, description, removable: this.userSkills.owns(name, dir) })),
+        skills: this.skills.list(true).map(({ name, description, dir }) => ({ name, description, enabled: this.skills.isEnabled(name), removable: this.userSkills.owns(name, dir) })),
       });
       if (req.method === "POST") {
         let filename: string;
@@ -695,6 +702,7 @@ export class Bridge {
       this.sockets.delete(ws);
       if (state.session) {
         this.logins.forget(state.session.id);
+        void this.gateway.externalTools.closeSession(state.session.id);
         state.session.detachSocket(ws);
         state.session.abortTurn();
         this.closeProviderProcess(state.session, "socket_closed").catch(() => undefined);
@@ -746,7 +754,7 @@ export class Bridge {
       case "set_provider":
         return this.onSetProvider(session, message.provider);
       case "prompt":
-        return this.onPrompt(session, message.requestId, message.prompt, message.selection, message.context, message.attachmentIds, message.model, message.referencePaths, message.effort, message.chatSessionId, message.resumeSessionId);
+        return this.onPrompt(session, message.requestId, message.prompt, message.selection, message.context, message.attachmentIds, message.model, message.referencePaths, message.effort, message.chatSessionId, message.resumeSessionId, message.capabilities);
       case "followup": {
         const respond = (state: "pending" | "next_turn" | "rejected", detail?: string) => session.send({ type: "followup_status", requestId: message.requestId, id: message.id, state, message: detail });
         if (session.activeRequestId !== message.requestId || session.turnController?.signal.aborted) { respond("next_turn"); return; }
@@ -848,8 +856,9 @@ export class Bridge {
     effort: "low" | "medium" | "high" = "medium",
     chatSessionId?: string,
     resumeSessionId?: string,
+    capabilities: ToolCapabilities = { webSearch: false, playwright: false },
   ): Promise<void> {
-    return this.runPrompt(session, requestId, prompt, selection, context, attachmentIds, model, referencePaths, effort, chatSessionId, resumeSessionId);
+    return this.runPrompt(session, requestId, prompt, selection, context, attachmentIds, model, referencePaths, effort, chatSessionId, resumeSessionId, capabilities);
   }
 
   private async runPrompt(
@@ -864,6 +873,7 @@ export class Bridge {
     effort: "low" | "medium" | "high" = "medium",
     chatSessionId?: string,
     resumeSessionId?: string,
+    capabilities: ToolCapabilities = { webSearch: false, playwright: false },
   ): Promise<void> {
     if (!session.provider) {
       return void session.send({
@@ -911,6 +921,12 @@ export class Bridge {
       ).join("\n") + "\n</user_attached_files>";
     }
 
+    capabilities = { ...capabilities, webSearch: capabilities.webSearch && supportsNativeWebSearch(session.provider) };
+    if (session.providerSessionId && (session.capabilities.webSearch !== capabilities.webSearch || session.capabilities.playwright !== capabilities.playwright)) {
+      await this.closeProviderProcess(session, "tool_settings_change");
+    }
+    if (!capabilities.playwright && session.capabilities.playwright) await this.gateway.externalTools.closeSession(session.id, "browser");
+    session.capabilities = capabilities;
     const selectedModel = model ?? null;
     const promptSettings = this.systemPrompt.read();
     if (session.providerSessionId && session.systemPromptRevision !== promptSettings.revision) {
@@ -1033,6 +1049,7 @@ export class Bridge {
   private async onCancel(session: WorkbookSession, requestId: string): Promise<void> {
     if (session.activeRequestId !== requestId) return;
     session.abortTurn();
+    void this.gateway.externalTools.closeSession(session.id, "browser");
     if (session.provider && session.providerSessionId) {
       try {
         await this.providers.get(session.provider)?.cancelTurn(session.providerSessionId);
@@ -1054,6 +1071,7 @@ export class Bridge {
   }
 
   private async closeProviderProcess(session: WorkbookSession, reason: string): Promise<void> {
+    await this.gateway.externalTools.closeSession(session.id);
     if (session.activeRequestId) session.takeFollowups(session.activeRequestId, "next_turn");
     session.abortTurn();
     const provider = session.provider;
@@ -1083,6 +1101,8 @@ export class Bridge {
         EXCEL_BRIDGE_URL: this.config.publicBaseUrl,
         EXCEL_SESSION_ID: session.id,
         EXCEL_SESSION_TOKEN: session.sessionToken,
+        ...(session.capabilities.webSearch ? { EXCEL_WEB_SEARCH: "1" } : {}),
+        ...(session.capabilities.playwright ? { EXCEL_PLAYWRIGHT: "1" } : {}),
         ...(this.config.allowOfficeJs ? { EXCEL_ALLOW_OFFICE_JS: "1" } : {}),
         ...(this.config.tls ? { NODE_EXTRA_CA_CERTS: this.config.tls.certPath } : {}),
       },
@@ -1117,6 +1137,7 @@ export class Bridge {
     if (this.heartbeat) clearInterval(this.heartbeat);
     if (this.reaper) clearInterval(this.reaper);
     for (const [ws] of this.sockets) ws.close(1001, "server_shutdown");
+    await this.gateway.externalTools.close();
     await this.providers.disposeAll();
     await new Promise<void>((resolve) => {
       if (!this.wss) return resolve();

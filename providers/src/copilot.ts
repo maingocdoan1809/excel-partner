@@ -161,6 +161,7 @@ export class CopilotAdapter extends BaseCliAdapter {
       { mode: 0o600 },
     );
 
+    const webSearch = ctx.mcp.env.EXCEL_WEB_SEARCH === "1";
     let session: CopilotSession | null = null;
     const peer = new JsonRpcPeer({
       command: this.command,
@@ -173,12 +174,14 @@ export class CopilotAdapter extends BaseCliAdapter {
         "--no-ask-user",
         "--no-custom-instructions",
         "--no-remote",
-        "--disable-builtin-mcps",
-        // Only the Excel MCP tools are visible to the model: no shell, file or web tools.
+        ...(webSearch ? [] : ["--disable-builtin-mcps"]),
+        // Expose Excel MCP and, when selected, only the provider-native web tools.
         "--available-tools",
-        ...exposedToolNames(ctx.mcp.env.EXCEL_ALLOW_OFFICE_JS === "1").map((name) => `${MCP_SERVER_NAME}-${name}`),
+        ...exposedToolNames(ctx.mcp.env.EXCEL_ALLOW_OFFICE_JS === "1", { webSearch: ctx.mcp.env.EXCEL_WEB_SEARCH === "1", playwright: ctx.mcp.env.EXCEL_PLAYWRIGHT === "1" }).map((name) => `${MCP_SERVER_NAME}-${name}`),
+        ...(webSearch ? ["web_search", "web_fetch", "github-mcp-server-web_search"] : []),
         "--allow-tool",
         MCP_SERVER_NAME,
+        ...(webSearch ? ["web_search", "web_fetch", "github-mcp-server(web_search)"] : []),
       ],
       cwd,
       env: this.env,
@@ -187,7 +190,7 @@ export class CopilotAdapter extends BaseCliAdapter {
       onNotification: (method, params) => {
         if (session) this.onNotification(session, method, params);
       },
-      onRequest: (method, params) => this.onServerRequest(method, params),
+      onRequest: (method, params) => this.onServerRequest(method, params, webSearch),
     });
 
     try {
@@ -251,7 +254,8 @@ export class CopilotAdapter extends BaseCliAdapter {
 
     // ACP has no system-prompt field, so the instructions travel with the first prompt.
     const userText = buildTurnPrompt(input.prompt, input.selection);
-    const text = session.primed ? userText : `${input.systemPrompt ?? SYSTEM_PROMPT}\n\n---\n\n${userText}`;
+    const systemPrompt = input.systemPrompt ?? SYSTEM_PROMPT;
+    const text = session.primed || !systemPrompt.trim() ? userText : `${systemPrompt}\n\n---\n\n${userText}`;
     session.primed = true;
 
     session.peer
@@ -411,8 +415,8 @@ export class CopilotAdapter extends BaseCliAdapter {
     });
   }
 
-  private onServerRequest(method: string, params: unknown): unknown {
-    if (method === "session/request_permission") return acpPermissionOutcome(params);
+  private onServerRequest(method: string, params: unknown, webSearch: boolean): unknown {
+    if (method === "session/request_permission") return acpPermissionOutcome(params, webSearch ? ["web_search", "web_fetch", "github-mcp-server-web_search", "github-mcp-server/web_search"] : []);
     throw new Error(`unsupported client method: ${method}`);
   }
 }

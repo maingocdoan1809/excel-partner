@@ -48,6 +48,7 @@ export class WorkbookSession {
   providerChatSessionId: string | null = null;
   providerModel: string | null = null;
   systemPromptRevision: string | null = null;
+  capabilities = { webSearch: false, playwright: false };
   providerEffort: "low" | "medium" | "high" = "medium";
   activeRequestId: string | null = null;
   turnController: AbortController | null = null;
@@ -248,6 +249,7 @@ export class WorkbookSession {
       id: this.id,
       workbookConnectionId: this.workbookConnectionId,
       provider: this.provider,
+      capabilities: { ...this.capabilities },
       connected: this.isConnected,
       activeRequestId: this.activeRequestId,
       pendingTools: this.pendingToolCount,
