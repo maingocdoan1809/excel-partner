@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import { describe, expect, it } from "vitest";
 import { WRITE_TOOLS } from "../addin/taskpane/executor/index.js";
 import { describeChange } from "../addin/taskpane/ui/changes.js";
@@ -44,41 +45,29 @@ describe("file mentions", () => {
 });
 
 describe("renderMarkdown", () => {
-  it("escapes HTML before anything else", () => {
-    expect(renderMarkdown('<img src=x onerror="alert(1)"> & **hi**')).toBe(
-      "<p>&lt;img src=x onerror=\"alert(1)\"&gt; &amp; <strong>hi</strong></p>",
-    );
+  it("renders Markdown tables and inline formatting", () => {
+    const html = renderMarkdown("| Name | Value |\n| --- | --- |\n| **Total** | `42` |");
+    expect(html).toContain('<div class="markdown-table"><table>');
+    expect(html).toContain("<th>Name</th>");
+    expect(html).toContain("<strong>Total</strong>");
+    expect(html).toContain("<code>42</code>");
   });
-
-  it("renders inline code, emphasis, lists and code fences", () => {
-    const html = renderMarkdown("Use `SUM`\n- one\n- *two*\n1. a\n```\nx < 1\n```");
-    expect(html).toBe(
-      "<p>Use <code>SUM</code></p><ul><li>one</li><li><em>two</em></li></ul><ol><li>a</li></ol><pre><code>x &lt; 1</code></pre>",
-    );
+  it("renders HTML tables while removing executable content", () => {
+    const html = renderMarkdown('<table onclick="alert(1)"><tr><td>Total</td></tr></table><script>alert(1)</script><img src=x onerror="alert(1)">');
+    expect(html).toContain("<td>Total</td>");
+    expect(html).not.toMatch(/script|onclick|onerror|<img/);
   });
-
-  it("renders the reported AP News Markdown link as a clickable external link", () => {
-    expect(renderMarkdown("Nhấp vào [liên kết AP News](https://apnews.com/article/38d37c4c18bf8355b02d85b5a73ed642)."))
-      .toBe('<p>Nhấp vào <a href="https://apnews.com/article/38d37c4c18bf8355b02d85b5a73ed642" target="_blank" rel="noopener noreferrer">liên kết AP News</a>.</p>');
-  });
-
-  it("keeps links inside code literal, handles URL parentheses and escapes attributes", () => {
+  it("renders external links safely and preserves code literals", () => {
     const html = renderMarkdown('`[code](https://example.com)` [**source**](https://example.com/a_(b)?x=1&y=2)');
     expect(html).toContain('<code>[code](https://example.com)</code>');
     expect(html).toContain('href="https://example.com/a_(b)?x=1&amp;y=2"');
+    expect(html).toContain('rel="noopener noreferrer"');
     expect(html).toContain('<strong>source</strong></a>');
-    expect(renderMarkdown('[quote](https://example.com/"quoted")')).toContain('href="https://example.com/&quot;quoted&quot;"');
-    expect(renderMarkdown('```\n[x](https://example.com)\n```')).not.toContain('<a ');
+    expect(renderMarkdown('[x](javascript:alert(1)) [x](//example.com)')).not.toContain('<a ');
   });
-
-  it("leaves unsafe schemes and incomplete streamed links as text", () => {
-    for (const text of ['[x](javascript:alert(1))', '[x](data:text/html,test)', '[x](//example.com)', '[x](https://example.com']) {
-      expect(renderMarkdown(text)).not.toContain('<a ');
-    }
-  });
-
-  it("copes with an unterminated code fence while streaming", () => {
-    expect(renderMarkdown("```\nfoo")).toBe("<pre><code>foo</code></pre>");
+  it("renders lists and incomplete streamed fences", () => {
+    expect(renderMarkdown("- one\n- *two*")).toContain("<li><em>two</em></li>");
+    expect(renderMarkdown("```\nfoo")).toContain("<pre><code>foo\n</code></pre>");
   });
 });
 

@@ -29,6 +29,8 @@ export interface McpEndpoint {
 export const MCP_SERVER_NAME = "excel";
 
 export interface StartSessionContext {
+  /** Ask the connected pane; its current Ask/Auto setting decides approval. */
+  authorizeTool?: (args: unknown) => Promise<boolean>;
   systemPrompt?: string;
   workbookConnectionId: string;
   sessionId: string;

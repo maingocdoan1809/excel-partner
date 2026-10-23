@@ -559,7 +559,8 @@ body.login-active .auth-notice { display: none; }
 .text-editor .reference-actions { flex-wrap: wrap; }
 .message-delivery { display: flex; align-items: center; gap: 8px; margin-top: 5px; font-size: 10px; opacity: .85; }
 .message-delivery button { padding: 2px 8px; border: 1px solid currentColor; background: transparent; color: inherit; font-size: 10px; }
-.composer-actions #stop-button { flex: 0 0 29px; width: 29px; height: 29px; padding: 0; justify-content: center; background: #d70015; color: #fff; }
+.composer-actions #stop-button { flex: 0 0 29px; width: 29px; height: 29px; margin-left: auto; padding: 0; justify-content: center; background: #d70015; color: #fff; }
+.composer-actions #stop-button:not([hidden]) + #send-button { margin-left: 0; }
 @media (max-width: 290px) { .picker-button { font-size: 10px; gap: 2px; } .model-picker { max-width: calc(100% - 145px); } .auth-notice { padding: 9px 10px; gap: 7px; } .auth-notice span { font-size: 9px; } }
 
 .reference-row { padding: 12px; border: 1px solid var(--border); border-radius: 8px; overflow-wrap: anywhere; }
@@ -664,3 +665,8 @@ button.ghost { background: none; color: var(--muted); border: 0; }
 .tools-menu input[type="checkbox"] { width: auto; margin: 0; accent-color: var(--accent-strong); }
 .tools-menu p { margin: 6px 0 12px; font-size: 11px; color: var(--muted); line-height: 1.5; }
 .tools-menu p:last-child { margin-bottom: 0; }
+
+.bubble .markdown-table { max-width: 100%; overflow-x: auto; margin: 8px 0; }
+.bubble table { border-collapse: collapse; font-size: inherit; min-width: 100%; }
+.bubble th, .bubble td { border: 1px solid var(--border); padding: 6px 9px; text-align: left; vertical-align: top; }
+.bubble th { background: var(--blue-50); font-weight: 600; }

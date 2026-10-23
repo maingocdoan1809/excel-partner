@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { acpPermissionOutcome, contentText, toolNameOf } from "../providers/src/acp.js";
 import { effortConfig } from "../providers/src/effort.js";
-import { parseOpencodeModels } from "../providers/src/opencode.js";
+import { OpencodeAdapter, parseOpencodeModels } from "../providers/src/opencode.js";
 
 const PERMISSION_OPTIONS = [
   { optionId: "once", kind: "allow_once", name: "Allow once" },
@@ -73,5 +73,26 @@ describe("ACP tool names and permissions", () => {
   it("flattens the content of a finished tool call", () => {
     expect(contentText({ content: [{ content: { type: "text", text: "A1:B2" } }] })).toBe("A1:B2");
     expect(contentText({ rawOutput: "done" })).toBe("done");
+  });
+});
+
+
+describe("OpenCode pane permission routing", () => {
+  const adapter = new OpencodeAdapter({ bridgeUrl: "", mcp: { command: "", args: [] }, logger: { debug() {}, warn() {} } });
+  const request = { toolCall: { title: "bash", rawInput: { command: "echo hello" } }, options: PERMISSION_OPTIONS };
+  const ask = (params: unknown, authorize?: (args: unknown) => Promise<boolean>) =>
+    (adapter as any).onServerRequest("session/request_permission", params, authorize);
+  it("uses the pane approval for native tools", async () => {
+    let received: unknown;
+    expect(await ask(request, async args => { received = args; return true; }))
+      .toEqual({ outcome: { outcome: "selected", optionId: "once" } });
+    expect(received).toEqual(request.toolCall);
+    expect(await ask(request, async () => false)).toEqual({ outcome: { outcome: "selected", optionId: "reject" } });
+  });
+  it("rejects missing or failed approval and leaves Excel approval in its own gateway", async () => {
+    expect(await ask(request)).toEqual({ outcome: { outcome: "selected", optionId: "reject" } });
+    expect(await ask(request, async () => { throw new Error("disconnected"); })).toEqual({ outcome: { outcome: "selected", optionId: "reject" } });
+    expect(await ask({ ...request, toolCall: { title: "excel_write_range" } }, async () => { throw new Error("should not ask"); }))
+      .toEqual({ outcome: { outcome: "selected", optionId: "once" } });
   });
 });

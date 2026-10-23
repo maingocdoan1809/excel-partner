@@ -296,7 +296,11 @@ export class BridgeClient {
   }
 
   private async handleToolRequest(message: ToolRequestMessage): Promise<void> {
-    const result = message.tool === "__authorize_skill_edit"
+    const result = message.tool === "__authorize_provider_tool"
+      ? { ok: true as const, data: { approved: this.permissionMode === "auto" || await this.askPermission(
+        "Allow OpenCode tool?", "OpenCode requests permission to run this tool on your computer.", "Allow tool", message.timeoutMs,
+        JSON.stringify(message.args, null, 2).slice(0, 8000)) } }
+      : message.tool === "__authorize_skill_edit"
       ? { ok: true as const, data: { approved: this.permissionMode === "auto" || await this.askPermission("Update installed skill?",
         `Save changes to /${(message.args as { name: string }).name}/${(message.args as { file: string }).file}?`, "Save skill", message.timeoutMs,
         (message.args as { content: string }).content.slice(0, 8000)) } }

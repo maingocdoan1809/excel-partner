@@ -958,6 +958,10 @@ export class Bridge {
       if (!detection.installed) throw new Error(detection.hint ?? "Provider CLI is not installed.");
       if (!session.providerSessionId) {
         session.providerSessionId = await adapter.startSession({
+          authorizeTool: async (args) => {
+            const result = await session.requestTool("__authorize_provider_tool", args, 120_000);
+            return result.ok && (result.data as { approved?: boolean })?.approved === true;
+          },
           workbookConnectionId: session.workbookConnectionId,
           sessionId: session.id,
           model: selectedModel,

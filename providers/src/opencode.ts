@@ -85,7 +85,7 @@ export function parseOpencodeModels(options: OpencodeConfigOption[] | undefined)
  * OpenCode runs its own tools (shell, file edits) without asking first, so
  * the CLI is started with a permission config that turns every tool into a
  * question: only the Excel MCP tools are pre-approved, and this adapter
- * rejects everything else when the CLI asks for permission.
+ * forwards other permission requests to the pane’s Ask/Auto approval flow.
  */
 export class OpencodeAdapter extends BaseCliAdapter {
   private titleCache?: { at: number; value: Promise<Map<string, string>> };
@@ -203,7 +203,7 @@ export class OpencodeAdapter extends BaseCliAdapter {
       versionField: true,
       onStderr: (line) => log.debug(`opencode stderr: ${line}`),
       onNotification: (method, params) => session && this.onNotification(session, method, params),
-      onRequest: (method, params) => this.onServerRequest(method, params),
+      onRequest: (method, params) => this.onServerRequest(method, params, ctx.authorizeTool),
     });
 
     try {
@@ -394,7 +394,7 @@ export class OpencodeAdapter extends BaseCliAdapter {
   /**
    * Permission config handed to the CLI: every tool has to be approved, and
    * only the Excel MCP tools are pre-approved. Everything else reaches this
-   * adapter as a permission request and is rejected.
+   * adapter as a permission request and is approved through the pane.
    */
   private writePermissionConfig(): { dir: string; path: string } {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "excel-ai-opencode-"));
@@ -491,9 +491,16 @@ export class OpencodeAdapter extends BaseCliAdapter {
     });
   }
 
-  private onServerRequest(method: string, params: unknown): unknown {
-    if (method === "session/request_permission") return acpPermissionOutcome(params);
-    throw new Error(`unsupported client method: ${method}`);
+  private async onServerRequest(method: string, params: unknown, authorize?: StartSessionContext["authorizeTool"]): Promise<unknown> {
+    if (method !== "session/request_permission") throw new Error(`unsupported client method: ${method}`);
+    const request = (params ?? {}) as { toolCall?: Record<string, any>; options?: Array<{ optionId: string; kind?: string }> };
+    if (toolNameOf(request.toolCall ?? {}, true).isExcel) return acpPermissionOutcome(params);
+    // Fail closed when disconnected or when the pane cannot answer.
+    let approved = false;
+    try { approved = await authorize?.(request.toolCall ?? {}) ?? false; } catch { /* reject below */ }
+    const kind = approved ? "allow_once" : "reject_once";
+    const choice = request.options?.find(option => option.kind === kind);
+    return choice ? { outcome: { outcome: "selected", optionId: choice.optionId } } : { outcome: { outcome: "cancelled" } };
   }
 }
 
