@@ -17,6 +17,8 @@ import { MCP_SERVER_NAME, type McpEndpoint, type ProviderModelCatalog, type Send
 import { ensureWorkspaceDir } from "./workspace.js";
 import { claudeTitle, validNativeId } from "./session-metadata.js";
 import { answerClaudeQuestion, type RequestUserInput } from "./user-input.js";
+import { cachedCommands, normalizeCommands } from "./commands.js";
+import { discoverClaudeCommands } from "./command-discovery.js";
 
 interface ClaudeSession {
   requestUserInput?: RequestUserInput;
@@ -66,6 +68,13 @@ const MCP_PREFIX = `mcp__${MCP_SERVER_NAME}__`;
  * running turn process; the conversation stays resumable.
  */
 export class ClaudeAdapter extends BaseCliAdapter {
+  private readonly commandCatalog = cachedCommands(() => discoverClaudeCommands(this.command, this.env, ensureWorkspaceDir()));
+  async listCommands() {
+    const commands = await this.commandCatalog();
+    return commands.some(command => command.name === "skills") ? commands : [...commands, ...normalizeCommands([
+      { name: "skills", description: "Browse Claude commands and skills", inputHint: "list | <name> <request>" },
+    ])];
+  }
   async sessionTitle(id: string): Promise<string | undefined> { return claudeTitle(id, ensureWorkspaceDir(), this.env); }
   /**
    * Ask the CLI itself: the `initialize` control request of the stream-json
@@ -199,6 +208,21 @@ export class ClaudeAdapter extends BaseCliAdapter {
       return;
     }
 
+    if (input.command?.name === "skills") {
+      const commands = await this.listCommands();
+      const args = input.command.args;
+      if (!args || args === "list") {
+        yield { type: "message_completed", requestId, text: "Available Claude commands and skills:\n\n" + commands.filter(command => command.name !== "skills")
+          .map(command => `- **/${command.name}** — ${command.description}`).join("\n") + "\n\nRun a skill with `/<name> <request>`." };
+        yield { type: "turn_finished", requestId, reason: "completed" };
+        return;
+      }
+      const [, name, task] = /^(\S+)(?:\s+([\s\S]*))?$/.exec(args)!;
+      const target = commands.find(command => command.name === name && command.name !== "skills" && command.execution === "native");
+      if (!target) throw new Error(`Unknown Claude skill or command: ${name}`);
+      input = { ...input, command: { name: target.name, args: task ?? "" } };
+    }
+
     const model = input.model ?? process.env.CLAUDE_MODEL;
     const systemPrompt = input.systemPrompt ?? SYSTEM_PROMPT;
     const webTools = session.mcp.env.EXCEL_WEB_SEARCH === "1" ? ["WebSearch", "WebFetch"] : [];
@@ -222,7 +246,6 @@ export class ClaudeAdapter extends BaseCliAdapter {
       "--permission-mode",
       "default",
       ...(systemPrompt.trim() ? ["--system-prompt", systemPrompt] : []),
-      "--disable-slash-commands",
       // The scratch cwd is empty, so this skips the user's own hooks, CLAUDE.md
       // and plugins (auth is unaffected) and keeps the Excel session predictable.
       "--setting-sources",
@@ -242,7 +265,7 @@ export class ClaudeAdapter extends BaseCliAdapter {
     child.stdin!.on("error", () => undefined);
     // The prompt (which may contain workbook data) goes over stdin, never argv.
     child.stdin!.write(JSON.stringify({ type: "user", session_id: session.conversationId,
-      message: { role: "user", content: buildTurnPrompt(input.prompt, input.selection) }, parent_tool_use_id: null }) + "\n");
+      message: { role: "user", content: input.command ? `/${input.command.name}${input.command.args ? ` ${input.command.args}` : ""}` : buildTurnPrompt(input.prompt, input.selection) }, parent_tool_use_id: null }) + "\n");
     const questions = new Map<string, AbortController>();
 
     const stderrTail: string[] = [];

@@ -141,13 +141,14 @@ export async function execCli(
   args: string[],
   env: NodeJS.ProcessEnv,
   timeoutMs = 10_000,
+  cwd?: string,
 ): Promise<ExecResult> {
   return new Promise((resolve) => {
     let child: ReturnType<typeof spawn>;
     try {
       // npm creates .cmd shims on Windows. cross-spawn resolves and quotes them
       // while preserving stdin/stdout for the ACP and app-server transports.
-      child = spawn(command, args, { env, windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
+      child = spawn(command, args, { env, cwd, windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
     } catch (error) {
       const err = error as NodeJS.ErrnoException;
       resolve({ code: null, stdout: "", stderr: err.message, errorCode: err.code });

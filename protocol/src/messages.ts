@@ -41,6 +41,8 @@ export const PromptMessageSchema = z.object({
   type: z.literal("prompt"),
   requestId: z.string().min(1),
   prompt: z.string().min(1).max(32_000),
+  /** Execute a discovered provider command without prompt/context expansion. */
+  command: z.boolean().optional(),
   chatSessionId: z.string().min(1).max(160).optional(),
   /** Native provider session to resume; never silently replaced with a new session. */
   resumeSessionId: z.string().regex(/^[a-zA-Z0-9_-]{1,128}$/).optional(),

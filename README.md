@@ -76,6 +76,9 @@ GitHub Copilot also supports device-code sign-in through **Settings > Sign in to
 - Work with tables, charts, pivot tables, and shapes where supported by Excel.
 - Inspect grouped flowcharts and connector attachments; use `validate_flowchart` to flag straight connector crossings, overlaps, and disconnected shapes. Routed connectors require visual review.
 - Choose a provider, model, and reasoning effort from the task pane.
+- Type `/` to browse the selected CLI's commands, native skills, and bridge skills. Commands show their argument hints and run through their native transport; add-in controls such as `/model`, `/resume`, `/permissions`, `/theme`, `/copy`, and `/export` use the pane's own UI. Commands requiring an unsupported CLI interface are labelled **CLI only** and never sent to the model as ordinary text.
+- Browse native skills with `/skills`. Copilot supports `/skills list` and `/skills info`; Codex supports `/skills <name> <request>` with native skill injection. Claude exposes its invocable commands and skills; OpenCode v2 lists its registered skills. If a bridge skill collides with a CLI command, invoke it as `/skill:<name>`.
+- Codex also maps `/compact`, `/review`, `/rename`, `/plan`, `/goal`, `/fork`, `/hooks`, `/mcp`, `/apps`, `/status`, `/usage`, `/ps`, `/stop`, and `/pwd` to app-server operations. `/plan` toggles planning for subsequent messages; `/plan <task>` starts a planning turn. Native commands run separately from workbook attachments and queued messages.
 - Attach local files or browse workspace files with `@`.
 - Add reusable instructions through **Settings > Manage skills**, then invoke them with `/skill-name`.
 - Edit installed skill text files through **Manage skills > Edit**, including instructions, references and scripts. Binary templates and images are preserved. Saving rejects a stale revision instead of overwriting newer edits.
@@ -324,6 +327,10 @@ npm test
 ```
 
 The default test suite includes real Claude CLI tests against a fake API when Claude is installed. Real-provider model tests are opt-in through `LIVE_PROVIDERS`.
+
+Refresh the Codex slash-command catalog from the official source matching an installed CLI with `npm run update:codex-commands` (or pass a version: `npm run update:codex-commands -- 0.164.0`). New names remain marked CLI only until an add-in handler is supplied. Claude, Copilot and OpenCode discover their catalogs from the installed runtime; discovery is cached for 30 seconds and does not call a model.
+
+After building, run `node scripts/smoke-commands.mjs` to verify command discovery and informational command execution through all four real CLIs without submitting model tasks. These checks run in a normal Node host rather than a Vitest worker.
 
 To build a distributable tarball:
 

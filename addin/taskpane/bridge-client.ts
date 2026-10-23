@@ -122,8 +122,13 @@ export class BridgeClient {
     this.send({ type: "set_provider", provider });
   }
 
-  sendPrompt(requestId: string, prompt: string, selection: SelectionSnapshot | null, context?: string, attachmentIds?: string[], model?: string | null, referencePaths?: string[], effort: "low" | "medium" | "high" = "medium", chatSessionId?: string, resumeSessionId?: string, capabilities?: ToolCapabilities): void {
-    this.send({ type: "prompt", requestId, prompt, selection, chatSessionId, resumeSessionId, capabilities, model: model ?? null, effort, ...(context ? { context } : {}), ...(attachmentIds?.length ? { attachmentIds } : {}), ...(referencePaths?.length ? { referencePaths } : {}) });
+  sendPrompt(requestId: string, prompt: string, selection: SelectionSnapshot | null, context?: string, attachmentIds?: string[], model?: string | null, referencePaths?: string[], effort: "low" | "medium" | "high" = "medium", chatSessionId?: string, resumeSessionId?: string, capabilities?: ToolCapabilities, command?: boolean): void {
+    this.send({ type: "prompt", requestId, prompt, selection, chatSessionId, resumeSessionId, capabilities, command, model: model ?? null, effort, ...(context ? { context } : {}), ...(attachmentIds?.length ? { attachmentIds } : {}), ...(referencePaths?.length ? { referencePaths } : {}) });
+  }
+
+  async listCommands(provider: ProviderId): Promise<import("../../protocol/src/commands.js").ProviderCommand[]> {
+    const result = await this.sessionFetch<{ commands: import("../../protocol/src/commands.js").ProviderCommand[] }>(`/session/commands?provider=${encodeURIComponent(provider)}`);
+    return result.commands;
   }
 
   async usageSummaries(sessionId?: string): Promise<import("../../protocol/src/index.js").UsageSummary[]> {

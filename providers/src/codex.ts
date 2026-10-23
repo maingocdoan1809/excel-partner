@@ -13,8 +13,11 @@ import { MCP_SERVER_NAME, type ProviderModelCatalog, type SendTurnInput, type St
 import { ensureWorkspaceDir } from "./workspace.js";
 import { codexTokenBaseline, nativeTitle, validNativeId } from "./session-metadata.js";
 import { answerCodexQuestions, type RequestUserInput } from "./user-input.js";
+import { CODEX_COMMANDS } from "./codex-commands.js";
 
 interface CodexSession {
+  model?: string;
+  mode?: "plan" | "default";
   questions: Map<number | string, AbortController>;
   peer: JsonRpcPeer;
   threadId: string;
@@ -40,6 +43,7 @@ interface TurnLike {
  *                  turn/completed; cancel = turn/interrupt.
  */
 export class CodexAdapter extends BaseCliAdapter {
+  async listCommands() { return CODEX_COMMANDS; }
   async sessionTitle(id: string): Promise<string | undefined> {
     const session = [...this.sessions.values()].find(s => s.threadId === id);
     if (!session) return undefined;
@@ -127,7 +131,7 @@ export class CodexAdapter extends BaseCliAdapter {
       });
       peer.notify("initialized");
 
-      const started = await peer.request<{ thread: { id: string; name?: string | null; path?: string | null } }>(ctx.resumeSessionId ? "thread/resume" : "thread/start", {
+      const started = await peer.request<{ model?: string; thread: { id: string; name?: string | null; path?: string | null } }>(ctx.resumeSessionId ? "thread/resume" : "thread/start", {
         ...(ctx.resumeSessionId ? { threadId: ctx.resumeSessionId } : { ephemeral: false }),
         cwd,
         ...(ctx.model ? { model: ctx.model } : {}),
@@ -157,7 +161,7 @@ export class CodexAdapter extends BaseCliAdapter {
 
       if (ctx.resumeSessionId && started.thread.id !== ctx.resumeSessionId) throw new Error("Codex returned a different thread while resuming");
       const baseline = ctx.resumeSessionId ? await codexTokenBaseline(started.thread.path) : undefined;
-      session = { peer, threadId: started.thread.id, title: nativeTitle(started.thread.name), active: null, questions: new Map(),
+      session = { peer, threadId: started.thread.id, title: nativeTitle(started.thread.name), model: ctx.model ?? started.model, active: null, questions: new Map(),
         tokenTotals: baseline, baselinePending: Boolean(ctx.resumeSessionId && !baseline) };
       this.sessions.set(providerSessionId, session);
       peer.onExit(() => {
@@ -194,26 +198,107 @@ export class CodexAdapter extends BaseCliAdapter {
     const onAbort = () => void this.interrupt(session);
     input.signal.addEventListener("abort", onAbort, { once: true });
 
-    session.peer
-      .request<{ turn: TurnLike }>("turn/start", {
+    const run = async (): Promise<{ turn: TurnLike } | null> => {
+      if (input.command) {
+        const { name, args } = input.command;
+        const text = (value: string) => {
+          queue.push({ type: "message_completed", requestId, text: value });
+          queue.push({ type: "turn_finished", requestId, reason: input.signal.aborted ? "cancelled" : "completed" });
+          queue.end();
+          return null;
+        };
+        input.signal.throwIfAborted();
+        if (name === "compact") {
+          await session.peer.request("thread/compact/start", { threadId: session.threadId });
+          return null; // Completion and usage arrive through the normal turn notifications.
+        }
+        if (name === "plan") {
+          session.mode = args === "off" ? "default" : args === "on" || args ? "plan" : session.mode === "plan" ? "default" : "plan";
+          if (!args || args === "on" || args === "off") return text(`Codex ${session.mode === "plan" ? "Plan" : "Default"} mode enabled for the next message.`);
+          if (!session.model) throw new Error("Choose a model before starting a planning task.");
+          return session.peer.request("turn/start", { threadId: session.threadId,
+            input: [{ type: "text", text: args, text_elements: [] }],
+            collaborationMode: { mode: session.mode, settings: { model: session.model, reasoning_effort: input.effort ?? "medium", developer_instructions: null } } });
+        }
+        if (name === "goal") {
+          const method = !args ? "thread/goal/get" : args === "clear" ? "thread/goal/clear" : "thread/goal/set";
+          const result = await session.peer.request(method, { threadId: session.threadId, ...(args && args !== "clear" ? { objective: args, status: "active" } : {}) });
+          return text(`Goal:\n\n\`\`\`json\n${JSON.stringify(result, null, 2)}\n\`\`\``);
+        }
+        if (name === "fork") {
+          const result = await session.peer.request<{ thread: { id: string; path?: string | null; name?: string | null } }>("thread/fork", { threadId: session.threadId, excludeTurns: true });
+          session.threadId = result.thread.id;
+          session.title = nativeTitle(result.thread.name);
+          session.tokenTotals = await codexTokenBaseline(result.thread.path);
+          session.baselinePending = !session.tokenTotals;
+          if (args) { await session.peer.request("thread/name/set", { threadId: session.threadId, name: args }); session.title = args; }
+          queue.push({ type: "session_info", requestId, provider: this.id, providerSessionId: session.threadId, title: session.title });
+          return text("Forked this conversation. Your next message continues in the new session.");
+        }
+        if (name === "review") {
+          const target = !args || args === "uncommitted" ? { type: "uncommittedChanges" }
+            : args.startsWith("branch ") ? { type: "baseBranch", branch: args.slice(7).trim() }
+            : args.startsWith("commit ") ? { type: "commit", sha: args.slice(7).trim() }
+            : { type: "custom", instructions: args };
+          return session.peer.request("review/start", { threadId: session.threadId, target, delivery: "inline" });
+        }
+        if (name === "rename") {
+          if (!args) throw new Error("Usage: /rename <title>");
+          await session.peer.request("thread/name/set", { threadId: session.threadId, name: args });
+          session.title = args;
+          queue.push({ type: "session_info", requestId, provider: this.id, providerSessionId: session.threadId, title: args });
+          return text(`Renamed this session to ${args}.`);
+        }
+        if (name === "skills") {
+          const result = await session.peer.request<{ data: Array<{ skills: Array<{ name: string; description: string; path: string; enabled: boolean }>; errors?: unknown[] }> }>(
+            "skills/list", { cwds: [ensureWorkspaceDir()], forceReload: true });
+          const skills = result.data.flatMap(entry => entry.skills).filter(skill => skill.enabled);
+          if (!args || args === "list") return text(skills.length ? "Available Codex skills:\n\n" + skills.map(skill => `- **${skill.name}** — ${skill.description}`).join("\n")
+            + "\n\nUse `/skills <name> <request>` to apply a skill." : "No enabled Codex skills were found.");
+          const [, skillName, task] = /^(\S+)(?:\s+([\s\S]*))?$/.exec(args)!;
+          const skill = skills.find(item => item.name === skillName);
+          if (!skill) throw new Error(`Unknown Codex skill: ${skillName}. Use /skills to see available skills.`);
+          if (!task) return text(`**${skill.name}** — ${skill.description}\n\nUse \`/skills ${skill.name} <request>\` to apply this skill.`);
+          return session.peer.request("turn/start", { threadId: session.threadId, effort: input.effort ?? "medium",
+            input: [{ type: "text", text: `$${skill.name} ${task}`, text_elements: [] }, { type: "skill", name: skill.name, path: skill.path }] });
+        }
+        const methods: Record<string, [string, unknown]> = {
+          mcp: ["mcpServerStatus/list", {}], apps: ["app/list", { threadId: session.threadId }],
+          ps: ["thread/backgroundTerminals/list", { threadId: session.threadId }],
+          stop: ["thread/backgroundTerminals/clean", { threadId: session.threadId }],
+          status: ["thread/read", { threadId: session.threadId, includeTurns: false }],
+          usage: ["account/usage/read", {}],
+          hooks: ["hooks/list", { cwds: [ensureWorkspaceDir()] }],
+        };
+        if (name === "pwd") return text(ensureWorkspaceDir());
+        const method = methods[name];
+        if (!method) throw new Error(`/${name} is not available in the add-in.`);
+        const result = await session.peer.request(method[0], method[1]);
+        return text(`/${name}\n\n\`\`\`json\n${JSON.stringify(result, null, 2)}\n\`\`\``);
+      }
+      return session.peer.request<{ turn: TurnLike }>("turn/start", {
         threadId: session.threadId,
         input: [{ type: "text", text: buildTurnPrompt(input.prompt, input.selection), text_elements: [] }],
         effort: input.effort ?? "medium",
-      })
+        ...(session.mode && session.model ? { collaborationMode: { mode: session.mode,
+          settings: { model: session.model, reasoning_effort: input.effort ?? "medium", developer_instructions: null } } } : {}),
+      });
+    };
+    run()
       .then((response) => {
-        if (session.active?.queue === queue) {
+        if (response?.turn && session.active?.queue === queue) {
           session.active.turnId = response.turn.id;
           if (input.signal.aborted) void this.interrupt(session);
         }
       })
       .catch((error) => {
-        queue.push({
+        if (!input.signal.aborted) queue.push({
           type: "error",
           requestId,
           code: "provider_error",
           message: error instanceof Error ? error.message : String(error),
         });
-        queue.push({ type: "turn_finished", requestId, reason: "error" });
+        queue.push({ type: "turn_finished", requestId, reason: input.signal.aborted ? "cancelled" : "error" });
         queue.end();
       });
 

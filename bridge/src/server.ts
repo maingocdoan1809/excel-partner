@@ -1,4 +1,6 @@
 import { cleanSessionTitle } from "../../protocol/src/session-title.js";
+import { parseNativeCommand, type NativeCommand, type ProviderCommand } from "../../protocol/src/commands.js";
+import { normalizeCommands } from "../../providers/src/commands.js";
 import { supportsNativeWebSearch, type ToolCapabilities } from "../../protocol/src/index.js";
 import { SavedReferences } from "./saved-references.js";
 import http from "node:http";
@@ -240,6 +242,27 @@ export class Bridge {
       return this.handleAttachment(req, res);
     }
     if (req.method === "GET" && url.pathname === "/session/models") return this.listProviderModels(req, res, url);
+    if (req.method === "GET" && url.pathname === "/session/commands") {
+      const session = this.workspaceSession(req);
+      if (!session) return this.sendJson(res, 401, { error: "unauthorized" });
+      const provider = ProviderIdSchema.safeParse(url.searchParams.get("provider"));
+      if (!provider.success) return this.sendJson(res, 400, { error: "Invalid provider" });
+      try {
+        const adapter = this.providers.require(provider.data);
+        const commands = await adapter.listCommands?.(session.provider === provider.data ? session.providerSessionId ?? undefined : undefined) ?? [];
+        const local = normalizeCommands([
+          { name: "new", description: "Start a new chat" }, { name: "clear", description: "Start a new chat" },
+          { name: "resume", description: "Browse saved conversations" }, { name: "model", description: "Choose a model" },
+          { name: "permissions", description: "Choose Ask or Auto tool approval" }, { name: "theme", description: "Change the add-in theme" },
+          { name: "copy", description: "Copy the last assistant response" }, { name: "export", description: "Export this chat as Markdown" },
+          { name: "help", description: "Show available commands" }, { name: "login", description: "Open provider sign-in" },
+          { name: "status", description: "Show the current provider and session", execution: "client", action: "status" },
+          { name: "usage", description: "Show session usage", execution: "client", action: "usage" },
+        ]);
+        const names = new Set(commands.map(command => command.name));
+        return this.sendJson(res, 200, { provider: provider.data, commands: [...commands, ...local.filter(command => !names.has(command.name))] });
+      } catch (error) { return this.sendJson(res, 502, { error: error instanceof Error ? error.message : String(error) }); }
+    }
     if (url.pathname === "/session/references") return this.handleSavedReferences(req, res, url);
     if (url.pathname === "/session/skills") return this.handleUserSkills(req, res, url);
     if (url.pathname === "/session/system-prompt") return this.handleSystemPrompt(req, res);
@@ -755,7 +778,7 @@ export class Bridge {
       case "set_provider":
         return this.onSetProvider(session, message.provider);
       case "prompt":
-        return this.onPrompt(session, message.requestId, message.prompt, message.selection, message.context, message.attachmentIds, message.model, message.referencePaths, message.effort, message.chatSessionId, message.resumeSessionId, message.capabilities);
+        return this.onPrompt(session, message.requestId, message.prompt, message.selection, message.context, message.attachmentIds, message.model, message.referencePaths, message.effort, message.chatSessionId, message.resumeSessionId, message.capabilities, message.command);
       case "followup": {
         const respond = (state: "pending" | "next_turn" | "rejected", detail?: string) => session.send({ type: "followup_status", requestId: message.requestId, id: message.id, state, message: detail });
         if (session.activeRequestId !== message.requestId || session.turnController?.signal.aborted) { respond("next_turn"); return; }
@@ -858,8 +881,9 @@ export class Bridge {
     chatSessionId?: string,
     resumeSessionId?: string,
     capabilities: ToolCapabilities = { webSearch: false, playwright: false },
+    isCommand = false,
   ): Promise<void> {
-    return this.runPrompt(session, requestId, prompt, selection, context, attachmentIds, model, referencePaths, effort, chatSessionId, resumeSessionId, capabilities);
+    return this.runPrompt(session, requestId, prompt, selection, context, attachmentIds, model, referencePaths, effort, chatSessionId, resumeSessionId, capabilities, isCommand);
   }
 
   private async runPrompt(
@@ -875,6 +899,7 @@ export class Bridge {
     chatSessionId?: string,
     resumeSessionId?: string,
     capabilities: ToolCapabilities = { webSearch: false, playwright: false },
+    isCommand = false,
   ): Promise<void> {
     const userPrompt = prompt;
     if (!session.provider) {
@@ -949,15 +974,25 @@ export class Bridge {
       model: selectedModel, startedAt: Date.now(), durationMs: 0, reason: "completed", usage: null,
     });
     // `/skill-name request` loads the skill's instructions into this turn.
-    const expanded = expandSkillPrompt(prompt, this.skills);
+    const expanded = isCommand ? { prompt, skill: undefined } : expandSkillPrompt(prompt, this.skills);
     if (expanded.skill) this.logger.info("skill invoked", { skill: expanded.skill });
-    prompt = [resumeSessionId ? undefined : context, projectTemplateReminder(this.skills), this.savedReferences.prompt(), expanded.prompt].filter(Boolean).join("\n\n");
+    prompt = isCommand ? userPrompt : [resumeSessionId ? undefined : context, projectTemplateReminder(this.skills), this.savedReferences.prompt(), expanded.prompt].filter(Boolean).join("\n\n");
 
     try {
-      if (selection) selection = await this.enrichSelection(selection, controller.signal);
+      if (!isCommand && selection) selection = await this.enrichSelection(selection, controller.signal);
       controller.signal.throwIfAborted();
       const detection = await adapter.detect();
       if (!detection.installed) throw new Error(detection.hint ?? "Provider CLI is not installed.");
+      let command: NativeCommand | undefined;
+      if (isCommand) {
+        const parsed = parseNativeCommand(userPrompt);
+        const catalog = await adapter.listCommands?.(session.providerSessionId ?? undefined) ?? [];
+        const entry = catalog.find(item => item.name === parsed?.name);
+        if (!parsed || entry?.execution !== "native") throw new Error(entry?.reason ?? "This command is not available through the provider. Refresh the / menu.");
+        if (attachmentIds?.length || referencePaths?.length) throw new Error("Send attached files in a regular message, separately from a command.");
+        command = parsed;
+      }
+      controller.signal.throwIfAborted();
       if (!session.providerSessionId) {
         session.providerSessionId = await adapter.startSession({
           requestUserInput: (request, signal) => session.requestUserInput(request, signal),
@@ -987,6 +1022,7 @@ export class Bridge {
         model: selectedModel,
         effort,
         prompt,
+        command,
         userPrompt,
         selection,
         signal: controller.signal,

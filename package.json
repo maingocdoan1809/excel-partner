@@ -1,6 +1,6 @@
 {
   "name": "excel-partner",
-  "version": "0.1.14",
+  "version": "0.1.15",
   "description": "Excel Partner: local Excel desktop AI add-in with Claude Code, GitHub Copilot CLI, Codex CLI and OpenCode CLI providers.",
   "type": "module",
   "bin": {
@@ -25,6 +25,7 @@
     "node": ">=20"
   },
   "scripts": {
+    "update:codex-commands": "node scripts/update-codex-commands.mjs",
     "build": "npm run build:server && npm run build:addin",
     "build:server": "tsc -p tsconfig.json",
     "build:addin": "esbuild addin/taskpane/main.ts --bundle --format=iife --target=es2020 --outfile=addin/dist/taskpane.js",

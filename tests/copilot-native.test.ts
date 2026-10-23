@@ -95,4 +95,35 @@ describe("Copilot native question transport", () => {
     await expect(sdk.config.onUserInputRequest({ question: "Stale?" })).rejects.toThrow("cancelled");
     expect(resolveCopilotPath(path.basename(process.execPath), { PATH: path.dirname(process.execPath) })).toBe(fs.realpathSync(process.execPath));
   });
+  it("invokes an informational native command without sending it to the model", async () => {
+    const invoke = vi.fn(async () => ({ kind: "text", text: "Available skills" }));
+    sdk.session.rpc = { commands: { invoke, list: async () => ({ commands: [{ name: "skills", description: "Skills" }] }) } };
+    sdk.run = vi.fn();
+    const id = await manager.start(ctx, process.execPath, process.env);
+    expect(await manager.listCommands(process.execPath, process.env, id)).toEqual([expect.objectContaining({ name: "skills", execution: "native" })]);
+    const events: ProviderEvent[] = [];
+    for await (const event of manager.send({ providerSessionId: id, requestId: "cmd", prompt: "INJECTED CONTEXT", selection: null,
+      command: { name: "skills", args: "list" }, signal: new AbortController().signal }, process.env)) events.push(event);
+    expect(invoke).toHaveBeenCalledWith({ name: "skills", input: "list" });
+    expect(sdk.run).not.toHaveBeenCalled();
+    expect(events).toContainEqual({ type: "message_completed", requestId: "cmd", text: "Available skills" });
+    expect(events.at(-1)).toMatchObject({ type: "turn_finished", reason: "completed" });
+  });
+  it("submits the provider's resolved agent prompt for action commands", async () => {
+    sdk.session.rpc = { commands: { invoke: vi.fn(async () => ({ kind: "agent-prompt", prompt: "Review the changes", mode: "interactive" })) } };
+    sdk.run = vi.fn(async () => {});
+    const id = await manager.start(ctx, process.execPath, process.env);
+    for await (const _ of manager.send({ providerSessionId: id, requestId: "cmd", prompt: "/review", selection: null,
+      command: { name: "review", args: "" }, signal: new AbortController().signal }, process.env)) { /* drain */ }
+    expect(sdk.run).toHaveBeenCalledWith({ prompt: "Review the changes", agentMode: "interactive" }, expect.any(Number));
+  });
+  it.skipIf(process.platform !== "win32")("resolves Windows PATH commands with or without an extension", () => {
+    const executable = path.join(dir, "copilot.EXE");
+    fs.writeFileSync(executable, "");
+    fs.writeFileSync(path.join(dir, "copilot"), "#!/bin/sh\n");
+    fs.writeFileSync(`${executable}.EXE`, "");
+    const env = { PATH: dir, PATHEXT: ".EXE;.CMD;.BAT" };
+    expect(resolveCopilotPath("copilot.EXE", env)).toBe(fs.realpathSync(executable));
+    expect(resolveCopilotPath("copilot", env)).toBe(fs.realpathSync(executable));
+  });
 });

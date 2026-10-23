@@ -32,6 +32,7 @@ import {
 } from "./ui/sessions.js";
 import { createSlashMenu } from "./ui/slash-menu.js";
 import { leadingCommand, slashBadgeRange } from "./ui/slash.js";
+import { parseNativeCommand, type ProviderCommand } from "../../protocol/src/commands.js";
 import { activeFileMention, atomicBadgeDeletion, fileMentionRanges } from "./ui/file-mentions.js";
 
 const els = {
@@ -205,6 +206,9 @@ const slash = createSlashMenu({
   menu: els.slashMenu,
   onBuiltin: (name) => name === "clear" && startNewChat(),
   onSelect: (name) => { selectedSlashToken = `/${name}`; },
+  getProvider: () => provider,
+  loadCommands: () => client.listCommands(provider),
+  onUnavailable: reason => append({ kind: "note", text: reason }),
 });
 const savedReferences = setupSavedReferences(() => client);
 const userSkills = setupUserSkills(() => client, () => slash.reload());
@@ -233,6 +237,7 @@ Office.onReady((info) => {
     },
     onState: renderState,
     onHello: ({ addinBuildId }) => {
+      slash.reload();
       client.setProvider(provider);
       void refreshUsage();
       void refreshModelCatalog(provider);
@@ -586,10 +591,78 @@ function sendNextPending(): void {
   if (next) void submit(next);
 }
 
+let resolvingCommand = false;
+
+async function runClientCommand(command: ProviderCommand, args: string): Promise<void> {
+  switch (command.action) {
+    case "new": startNewChat(); break;
+    case "history": showPanel("history"); break;
+    case "model":
+      if (args) {
+        await refreshModelCatalog(provider);
+        if (!Array.from(els.modelSelect.options).some(option => option.value === args)) throw new Error(`Unknown model: ${args}`);
+        els.modelSelect.value = args; saveModelChoice(); renderModelPicker();
+      } else byId<HTMLButtonElement>("model-button").click();
+      break;
+    case "effort": byId<HTMLButtonElement>("effort-button").click(); break;
+    case "permissions":
+      if (args === "ask" || args === "auto") selectPermissionMode(args);
+      else if (args) throw new Error("Use /permissions ask or /permissions auto.");
+      else byId<HTMLButtonElement>("permission-button").click();
+      break;
+    case "usage": byId<HTMLButtonElement>("usage-button").click(); break;
+    case "login": showPanel("login"); break;
+    case "theme": {
+      const select = byId<HTMLSelectElement>("theme-select");
+      if (args) {
+        if (!["light", "dark", "auto"].includes(args)) throw new Error("Use /theme light, dark, or auto.");
+        select.value = args; select.dispatchEvent(new Event("change"));
+      } else { openMenu(); select.focus(); }
+      break;
+    }
+    case "copy": {
+      const answer = [...session.messages].reverse().find(message => message.kind === "assistant");
+      if (!answer) throw new Error("There is no assistant response to copy yet.");
+      await navigator.clipboard.writeText(answer.text);
+      append({ kind: "note", text: "Copied the last response." });
+      break;
+    }
+    case "export": {
+      const markdown = session.messages.filter(message => message.kind !== "tool_group").map(message => `## ${message.kind}\n\n${message.text}`).join("\n\n");
+      const url = URL.createObjectURL(new Blob([markdown], { type: "text/markdown;charset=utf-8" }));
+      const link = document.createElement("a"); link.href = url; link.download = "excel-partner-chat.md";
+      document.body.append(link); link.click(); link.remove(); window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+      break;
+    }
+    case "help": append({ kind: "note", text: slash.commands.map(item => `/${item.name} — ${item.description}${item.command?.execution === "unsupported" ? " (CLI only)" : ""}`).join("\n") }); break;
+    case "status": append({ kind: "note", text: `Provider: ${PROVIDER_NAMES[provider]}\nModel: ${els.modelSelect.value || "Default"}\nSession: ${session.providerSessionId || "New chat"}\nPermissions: ${permissionMode}` }); break;
+  }
+}
+
 async function submit(queued?: PendingPrompt): Promise<void> {
   const prompt = queued?.prompt ?? (els.input.value.trim() || (pendingAttachments.length ? "Please inspect the attached files." : ""));
   if (!prompt || !client.connected) return;
   if (prompt.length > 32_000) { append({ kind: "error", text: "Messages must be 32,000 characters or fewer." }); return; }
+  let nativeCommand = false;
+  if (parseNativeCommand(prompt)) {
+    if (resolvingCommand) return;
+    const owner = session, selectedProvider = provider;
+    resolvingCommand = true;
+    try {
+      const item = await slash.resolve(prompt);
+      if (session !== owner || provider !== selectedProvider || (!queued && els.input.value.trim() !== prompt)) return;
+      if (!item) throw new Error("Unknown command. Open the / menu to see available commands and skills.");
+      if (item.command?.execution === "unsupported") throw new Error(item.command.reason ?? "This command requires the CLI terminal.");
+      if (item.command?.execution === "client" || item.kind === "builtin") {
+        await runClientCommand(item.command ?? { name: item.name, description: item.description, source: "builtin", execution: "client", action: "new" }, parseNativeCommand(prompt)!.args);
+        els.input.value = ""; slash.close(); renderComposerPreview(); return;
+      }
+      nativeCommand = item.kind === "provider";
+      if (nativeCommand && currentRequestId) throw new Error("Wait for the current response to finish before running a provider command.");
+      if (nativeCommand && pendingAttachments.length) throw new Error("Send attached files separately from a provider command.");
+    } catch (error) { append({ kind: "error", text: error instanceof Error ? error.message : String(error) }); return; }
+    finally { resolvingCommand = false; }
+  }
   const turnAttachments = queued?.attachments ?? pendingAttachments.slice();
   if (!turnAttachments.length && /(?:^|\s)@[^\n]*\.(?:xlsx|xlsm|xltx|xltm|png|jpe?g|gif|webp|md|txt|json|csv|ya?ml|zip)(?=\s|$)/i.test(prompt)) {
     append({ kind: "error", text: "The @ file is only text. Choose it from a workspace or the local file picker so I can read it." });
@@ -636,9 +709,9 @@ async function submit(queued?: PendingPrompt): Promise<void> {
   if (!queued) els.input.value = "";
   renderComposerPreview();
   showPanel(null);
-  const context = needsContext || (activeModel !== undefined && activeModel !== model) || (activeEffort !== undefined && activeEffort !== effort)
+  const context = !nativeCommand && (needsContext || (activeModel !== undefined && activeModel !== model) || (activeEffort !== undefined && activeEffort !== effort))
     ? buildContextPreface(session) : undefined;
-  needsContext = false;
+  if (!nativeCommand) needsContext = false;
   requestMessageIndex = queued ? Math.max(0, session.messages.indexOf(queued.message)) : session.messages.length;
   requestChangeIndex = session.changes.length;
   requestStartedAt = Date.now();
@@ -653,16 +726,16 @@ async function submit(queued?: PendingPrompt): Promise<void> {
   showThinking();
   persistNow();
 
-  const result = await executeTool("get_selection", {});
+  const result = nativeCommand ? null : await executeTool("get_selection", {});
   if (currentRequestId !== requestId || requestSession !== session) return;
-  const selection = result.ok ? (result.data as never) : null;
+  const selection = result?.ok ? (result.data as never) : null;
   if (cancelRequested) return finishLocalCancel(requestId);
   try {
     const attachmentIds = turnAttachments.flatMap((item) => item.reference.id ? [item.reference.id] : []);
     const referencePaths = turnAttachments.flatMap((item) => item.reference.id ? [] : [item.reference.path]);
     if (cancelRequested) return finishLocalCancel(requestId);
     client.sendPrompt(requestId, prompt, selection, context, attachmentIds, model, referencePaths, effort, session.id,
-      session.provider === provider ? session.providerSessionId : undefined, toolSettings.value());
+      session.provider === provider ? session.providerSessionId : undefined, toolSettings.value(), nativeCommand || undefined);
     promptDispatched = true;
     activeModel = model;
     activeEffort = effort;
@@ -1315,6 +1388,7 @@ function persistNow(): void {
 }
 
 function startNewChat(): void {
+  slash.reload();
   abandonRequest();
   clearAttachment();
   persistNow();
@@ -1334,6 +1408,7 @@ function startNewChat(): void {
 
 /** Make a stored chat the current one (its messages are shown in the chat area). */
 function loadSession(stored: StoredSession): void {
+  slash.reload();
   abandonRequest();
   clearAttachment();
   if (["claude", "copilot", "codex", "opencode"].includes(stored.provider) && stored.provider !== provider) {

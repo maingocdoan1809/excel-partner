@@ -45,6 +45,7 @@ export interface StartSessionContext {
 }
 
 export interface SendTurnInput {
+  command?: import("../../protocol/src/commands.js").NativeCommand;
   systemPrompt?: string;
   providerSessionId: string;
   requestId: string;
@@ -73,6 +74,7 @@ export interface ProviderModelCatalog {
  * normalised `ProviderEvent`s, never CLI-specific output.
  */
 export interface ProviderAdapter {
+  listCommands?(providerSessionId?: string): Promise<import("../../protocol/src/commands.js").ProviderCommand[]>;
   readonly id: ProviderId;
   /** Whether the CLI is installed and what it supports. */
   detect(force?: boolean): Promise<ProviderDetection>;

@@ -287,7 +287,7 @@ export class SkillStore {
  * start with a known skill name are returned unchanged.
  */
 export function expandSkillPrompt(prompt: string, store: SkillStore): { prompt: string; skill: string | null } {
-  const match = /^\/([a-z0-9][a-z0-9_-]*)(?:\s+([\s\S]*))?$/.exec(prompt.trim());
+  const match = /^\/(?:skill:)?([a-z0-9][a-z0-9_-]*)(?:\s+([\s\S]*))?$/.exec(prompt.trim());
   if (!match) return { prompt, skill: null };
   const name = match[1]!;
   if (!store.get(name)) return { prompt, skill: null };

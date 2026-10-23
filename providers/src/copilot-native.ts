@@ -13,8 +13,10 @@ import { copilotTitle, validNativeId } from "./session-metadata.js";
 import { buildTurnPrompt } from "./prompt.js";
 import { ensureWorkspaceDir } from "./workspace.js";
 import type { SendTurnInput, StartSessionContext } from "./types.js";
+import { normalizeCommands } from "./commands.js";
 
 interface NativeSession {
+  ask: StartSessionContext["requestUserInput"];
   client: CopilotClient;
   session: CopilotSession;
   reader: CopilotUsageReader;
@@ -27,6 +29,21 @@ interface NativeSession {
 export class CopilotNativeSessions {
   private readonly sessions = new Map<string, NativeSession>();
   has(id: string) { return this.sessions.has(id); }
+
+  async listCommands(command: string, env: NodeJS.ProcessEnv, id?: string) {
+    const current = id ? this.sessions.get(id) : undefined;
+    if (current) return normalizeCommands((await current.session.rpc.commands.list()).commands);
+    const { CopilotClient, RuntimeConnection } = await import("@github/copilot-sdk");
+    const client = new CopilotClient({ connection: RuntimeConnection.forStdio({ path: resolveCopilotPath(command, env),
+      args: ["--no-custom-instructions", "--no-remote", "--disable-builtin-mcps"] }),
+      workingDirectory: ensureWorkspaceDir(), env, logLevel: "error" });
+    try {
+      await client.start();
+      const session = await client.createSession({ availableTools: [], onPermissionRequest: () => ({ kind: "reject" }) });
+      try { return normalizeCommands((await session.rpc.commands.list()).commands); }
+      finally { await session.disconnect(); }
+    } finally { await client.stop(); }
+  }
 
   async start(ctx: StartSessionContext, command: string, env: NodeJS.ProcessEnv): Promise<string> {
     if (ctx.resumeSessionId && !validNativeId(ctx.resumeSessionId)) throw new Error("Invalid Copilot resume session ID");
@@ -70,7 +87,7 @@ export class CopilotNativeSessions {
       if (ctx.resumeSessionId && session.sessionId !== ctx.resumeSessionId) throw new Error("Copilot resumed a different session");
       const reader = new CopilotUsageReader(path.join(env.COPILOT_HOME ?? path.join(os.homedir(), ".copilot"),
         "session-state", session.sessionId, "events.jsonl"), session.sessionId);
-      state = { client, session, reader, usage: new CumulativeUsage(), baselinePending: false };
+      state = { client, session, reader, usage: new CumulativeUsage(), baselinePending: false, ask: ctx.requestUserInput };
       if (ctx.resumeSessionId) {
         const baseline = await reader.snapshot().catch(() => null);
         if (baseline) state.usage.next(baseline);
@@ -127,7 +144,36 @@ export class CopilotNativeSessions {
     input.signal.addEventListener("abort", cancel, { once: true });
     const context = buildTurnPrompt(input.prompt, input.selection);
     const prompt = input.userPrompt?.trim() ? `${input.userPrompt}\n\n<addin_context>\n${context}\n</addin_context>` : context;
-    void state.session.sendAndWait({ prompt }, 30 * 60_000).then(async () => {
+    const run = async () => {
+      if (!input.command) { await state.session.sendAndWait({ prompt }, 30 * 60_000); return; }
+      const { name } = input.command;
+      let args = input.command.args;
+      for (let depth = 0; depth < 5; depth++) {
+        if (input.signal.aborted || controller.signal.aborted) return;
+        const result = await state.session.rpc.commands.invoke({ name, input: args });
+        switch (result.kind) {
+          case "text": queue.push({ type: "message_completed", requestId, text: result.text }); return;
+          case "completed":
+            if (result.mode) await state.session.rpc.mode.set({ mode: result.mode });
+            queue.push({ type: "message_completed", requestId, text: result.message ?? `/${name} completed.` }); return;
+          case "add-timeline-entry": queue.push({ type: "message_completed", requestId, text: result.entry.text }); return;
+          case "agent-prompt":
+            if (result.notice) queue.push({ type: "message_completed", requestId, text: result.notice });
+            await state.session.sendAndWait({ prompt: result.prompt, agentMode: result.mode }, 30 * 60_000); return;
+          case "select-subcommand": {
+            const answer = await askProviderQuestions(UserInputRequestSchema.parse({ questions: [{ id: "subcommand", question: result.title,
+              options: result.options.slice(0, 30).map(option => ({ label: option.name, description: option.description })), allowFreeform: true }] }),
+            state.ask, AbortSignal.any([input.signal, controller.signal]));
+            if (answer.cancelled) { queue.push({ type: "message_completed", requestId, text: "Command cancelled." }); return; }
+            args = `${args}${args ? " " : ""}${answer.answers.subcommand![0]}`;
+            break;
+          }
+          default: throw new Error(`/${name} requires a CLI dialog. Use the add-in's corresponding setting instead.`);
+        }
+      }
+      throw new Error(`/${name} needs more arguments. Choose a subcommand explicitly.`);
+    };
+    void run().then(async () => {
       queue.push(await info());
       const total = await state.reader.snapshot().catch(() => null);
       if (total) {
@@ -163,7 +209,9 @@ export class CopilotNativeSessions {
 
 /** The SDK needs an actual file path, while the add-in setting also accepts PATH commands. */
 export function resolveCopilotPath(command: string, env: NodeJS.ProcessEnv): string {
-  const extensions = process.platform === "win32" ? (env.PATHEXT ?? ".EXE;.CMD;.BAT").split(";") : [""];
+  const suffixes = (env.PATHEXT ?? ".EXE;.CMD;.BAT").split(";");
+  // npm also installs a Unix shell script without an extension. Windows must prefer its .cmd shim.
+  const extensions = process.platform === "win32" ? path.extname(command) ? ["", ...suffixes] : [...suffixes, ""] : [""];
   const candidates = path.isAbsolute(command) || command.includes(path.sep) ? [command]
     : (env.PATH ?? "").split(path.delimiter).flatMap(directory => extensions.map(extension => path.join(directory, command + extension)));
   for (const candidate of candidates) {

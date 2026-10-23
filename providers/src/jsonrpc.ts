@@ -123,6 +123,14 @@ export class JsonRpcPeer {
   /** Terminate the child; escalates to SIGKILL if it ignores SIGTERM. */
   async close(graceMs = 1500): Promise<void> {
     if (this.exitInfo) return;
+    if (process.platform === "win32" && this.child.pid) {
+      // npm .cmd launchers own the real CLI as a grandchild. Killing only cmd.exe leaks it.
+      await new Promise<void>(resolve => {
+        const killer = spawn("taskkill", ["/PID", String(this.child.pid), "/T", "/F"], { windowsHide: true, stdio: "ignore" });
+        killer.once("error", () => resolve()); killer.once("close", () => resolve());
+      });
+      if (this.exitInfo) return;
+    }
     this.child.stdin?.end();
     this.child.kill("SIGTERM");
     await new Promise<void>((resolve) => {

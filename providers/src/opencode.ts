@@ -20,6 +20,9 @@ import { ensureWorkspaceDir } from "./workspace.js";
 import { nativeTitle, validNativeId } from "./session-metadata.js";
 import { parseOpencodeExport } from "./opencode-usage.js";
 import { reserveOpencodePort, watchOpencodeQuestions } from "./opencode-questions.js";
+import { cachedCommands, normalizeCommands } from "./commands.js";
+import { discoverAcpCommands } from "./command-discovery.js";
+import type { ProviderCommand } from "../../protocol/src/commands.js";
 
 /** One entry of the CLI's `session/new` / `config_option_update` config list. */
 export interface OpencodeConfigOption {
@@ -32,6 +35,7 @@ export interface OpencodeConfigOption {
 }
 
 interface OpencodeSession {
+  commands?: ProviderCommand[];
   questionApi?: { port: number; password: string; cwd: string; ask: StartSessionContext["requestUserInput"] };
   peer: JsonRpcPeer;
   /** ACP session id returned by `session/new`. */
@@ -90,6 +94,13 @@ export function parseOpencodeModels(options: OpencodeConfigOption[] | undefined)
  * forwards other permission requests to the pane’s Ask/Auto approval flow.
  */
 export class OpencodeAdapter extends BaseCliAdapter {
+  private readonly commandCatalog = cachedCommands(() => discoverAcpCommands(this.command, ["acp"], this.env, ensureWorkspaceDir()));
+  async listCommands(id?: string) {
+    const commands = await ((id ? this.sessions.get(id)?.commands : undefined) ?? this.commandCatalog());
+    const version = (await this.detect()).version ?? "";
+    return /\bv?[2-9]\./.test(version) && !commands.some(command => command.name === "skills")
+      ? [...commands, ...normalizeCommands([{ name: "skills", description: "List available OpenCode skills" }])] : commands;
+  }
   private titleCache?: { at: number; value: Promise<Map<string, string>> };
   async sessionTitle(id: string): Promise<string | undefined> {
     if (!validNativeId(id)) return undefined;
@@ -192,7 +203,9 @@ export class OpencodeAdapter extends BaseCliAdapter {
     const cwd = ensureWorkspaceDir();
     const providerSessionId = `opencode-${randomUUID()}`;
     const log = this.runtime.logger;
-    const questionApi = ctx.requestUserInput ? { port: await reserveOpencodePort(), password: randomUUID(), cwd, ask: ctx.requestUserInput } : undefined;
+    // v2 ACP owns a private server and no longer accepts --hostname/--port.
+    const version = ctx.requestUserInput ? (await this.detect()).version ?? "" : "";
+    const questionApi = ctx.requestUserInput && !/\bv[2-9]\.|\b[2-9]\./.test(version) ? { port: await reserveOpencodePort(), password: randomUUID(), cwd, ask: ctx.requestUserInput } : undefined;
     const { dir: configDir, path: configPath } = this.writePermissionConfig(Boolean(questionApi));
 
     let session: OpencodeSession | null = null;
@@ -278,6 +291,21 @@ export class OpencodeAdapter extends BaseCliAdapter {
       return;
     }
 
+    if (input.command?.name === "skills") {
+      yield { type: "session_info", requestId, provider: this.id, providerSessionId: session.acpSessionId, title: session.title };
+      yield { type: "turn_started", requestId };
+      if (input.signal.aborted) { yield { type: "turn_finished", requestId, reason: "cancelled" }; return; }
+      if (input.command.args && input.command.args !== "list") throw new Error("Use /skills or /skills list. Ask OpenCode to use a named skill in your next message.");
+      const result = await execCli(this.command, ["api", "GET", "/api/skill", "--standalone"], this.env, 15_000, ensureWorkspaceDir());
+      if (result.code !== 0) throw new Error(result.stderr || "Could not list OpenCode skills.");
+      const catalog = JSON.parse(result.stdout) as { data: Array<{ name: string; description?: string }> };
+      if (!Array.isArray(catalog.data)) throw new Error("OpenCode returned an unsupported skill catalog.");
+      yield { type: "message_completed", requestId, text: catalog.data.length ? "Available OpenCode skills:\n\n" + catalog.data.map(skill => `- **${skill.name}** — ${skill.description ?? ""}`).join("\n")
+        + "\n\nAsk OpenCode to use a named skill in your next message." : "No OpenCode skills were found." };
+      yield { type: "turn_finished", requestId, reason: input.signal.aborted ? "cancelled" : "completed" };
+      return;
+    }
+
     const queue = new AsyncQueue<ProviderEvent>();
     const questionController = new AbortController();
     if (session.questionApi) {
@@ -300,8 +328,9 @@ export class OpencodeAdapter extends BaseCliAdapter {
     // ACP has no system-prompt field, so the instructions travel with the first prompt.
     const userText = buildTurnPrompt(input.prompt, input.selection);
     const systemPrompt = input.systemPrompt ?? SYSTEM_PROMPT;
-    const text = session.primed || !systemPrompt.trim() ? userText : `${systemPrompt}\n\n---\n\n${userText}`;
-    session.primed = true;
+    const text = input.command ? `/${input.command.name}${input.command.args ? ` ${input.command.args}` : ""}`
+      : session.primed || !systemPrompt.trim() ? userText : `${systemPrompt}\n\n---\n\n${userText}`;
+    if (!input.command) session.primed = true;
 
     const run = async () => {
       if (input.model && input.model !== session.model) await this.selectModel(session, input.model);
@@ -456,6 +485,10 @@ export class OpencodeAdapter extends BaseCliAdapter {
     const params = (raw ?? {}) as { sessionId?: string; update?: Record<string, any> };
     const update = params.update;
     if (!update) return;
+    if (update.sessionUpdate === "available_commands_update" && params.sessionId === session.acpSessionId) {
+      session.commands = normalizeCommands(update.availableCommands);
+      return;
+    }
     if (update.sessionUpdate === "config_option_update") {
       if (Array.isArray(update.configOptions)) session.configOptions = update.configOptions;
       return;

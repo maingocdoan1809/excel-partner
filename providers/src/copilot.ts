@@ -22,6 +22,7 @@ import { MCP_SERVER_NAME, type ProviderModelCatalog, type SendTurnInput, type St
 import { ensureWorkspaceDir } from "./workspace.js";
 import { effortConfig, type EffortConfigOption } from "./effort.js";
 import { CopilotNativeSessions } from "./copilot-native.js";
+import { cachedCommands } from "./commands.js";
 
 interface CopilotSession {
   peer: JsonRpcPeer;
@@ -54,6 +55,8 @@ interface ActiveTurn {
  *   tool_call_update); cancel = session/cancel notification.
  */
 export class CopilotAdapter extends BaseCliAdapter {
+  private readonly commandCatalog = cachedCommands(() => this.native.listCommands(this.command, this.env));
+  async listCommands(id?: string) { return id && this.native.has(id) ? this.native.listCommands(this.command, this.env, id) : this.commandCatalog(); }
   async sessionTitle(id: string): Promise<string | undefined> { return copilotTitle(id, this.env); }
   async listModels(): Promise<ProviderModelCatalog> {
     const peer = new JsonRpcPeer({

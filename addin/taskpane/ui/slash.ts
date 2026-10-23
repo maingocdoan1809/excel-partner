@@ -2,19 +2,20 @@
 export interface SlashCommand {
   name: string;
   description: string;
-  kind: "skill" | "builtin";
+  kind: "skill" | "builtin" | "provider";
+  command?: import("../../../protocol/src/commands.js").ProviderCommand;
 }
 
 export const BUILTIN_COMMANDS: SlashCommand[] = [{ name: "clear", description: "Clear this conversation", kind: "builtin" }];
 
-const MAX_ITEMS = 12;
+const MAX_ITEMS = 200;
 
 /**
  * The text typed after the leading `/` while the user is still on the command word
  * (`/ast` -> "ast", `/` -> ""); null once there is a space or the text does not start with `/`.
  */
 export function slashQuery(text: string): string | null {
-  const match = /^\/([\w-]*)$/.exec(text);
+  const match = /^\/([\w:-]*)$/.exec(text);
   return match ? match[1]!.toLowerCase() : null;
 }
 
@@ -38,7 +39,7 @@ export function filterCommands(commands: SlashCommand[], query: string): SlashCo
 
 /** `/name rest of the message` -> the command word, for highlighting in the chat. */
 export function leadingCommand(text: string): { command: string; rest: string } | null {
-  const match = /^(\/[\w-]+)(\s[\s\S]*)?$/.exec(text);
+  const match = /^(\/[\w:-]+)(\s[\s\S]*)?$/.exec(text);
   return match ? { command: match[1]!, rest: match[2] ?? "" } : null;
 }
 
