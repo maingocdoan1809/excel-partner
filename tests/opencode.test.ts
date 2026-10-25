@@ -1,7 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { acpPermissionOutcome, contentText, toolNameOf } from "../providers/src/acp.js";
 import { effortConfig } from "../providers/src/effort.js";
-import { OpencodeAdapter, parseOpencodeModels } from "../providers/src/opencode.js";
+import { OpencodeAdapter, isOpencodeV2, parseOpencodeModels } from "../providers/src/opencode.js";
 
 const PERMISSION_OPTIONS = [
   { optionId: "once", kind: "allow_once", name: "Allow once" },
@@ -94,5 +94,27 @@ describe("OpenCode pane permission routing", () => {
     expect(await ask(request, async () => { throw new Error("disconnected"); })).toEqual({ outcome: { outcome: "selected", optionId: "reject" } });
     expect(await ask({ ...request, toolCall: { title: "excel_write_range" } }, async () => { throw new Error("should not ask"); }))
       .toEqual({ outcome: { outcome: "selected", optionId: "once" } });
+  });
+});
+
+
+describe("OpenCode ACP retry diagnostics", () => {
+  it("reports retry status without exposing the upstream body or message", () => {
+    const adapter = new OpencodeAdapter({ bridgeUrl: "", mcp: { command: "", args: [] }, logger: { debug() {}, warn() {} } });
+    const diagnostic = vi.fn();
+    const session = { acpSessionId: "native", active: {}, diagnostic };
+    const notify = (adapter as any).onNotification.bind(adapter);
+    const update = { sessionUpdate: "session_info_update", _meta: { "opencode/retry": {
+      attempt: 1, nextRetryAt: "2026-10-24T08:00:00Z",
+      error: { type: "provider.rate-limit", status: 429, message: "PRIVATE_MESSAGE", response: { body: "PRIVATE_BODY" } },
+    } } };
+    notify(session, "session/update", { sessionId: "different", update });
+    expect(diagnostic).not.toHaveBeenCalled();
+    notify(session, "session/update", { sessionId: "native", update });
+    expect(diagnostic).toHaveBeenLastCalledWith({ phase: "model_retry_scheduled", attempt: 1, status: 429,
+      errorType: "provider.rate-limit", nextRetryAt: "2026-10-24T08:00:00.000Z" });
+    notify(session, "session/update", { sessionId: "native", update: { sessionUpdate: "session_info_update", _meta: { "opencode/retry": null } } });
+    expect(diagnostic).toHaveBeenLastCalledWith({ phase: "model_retry_started" });
+    expect(JSON.stringify(diagnostic.mock.calls)).not.toContain("PRIVATE");
   });
 });

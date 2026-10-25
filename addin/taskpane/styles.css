@@ -59,6 +59,7 @@ button { font: inherit; cursor: pointer; }
 button:disabled { cursor: default; }
 
 .user-input-card { padding: 14px; margin: 8px 0; border: 1px solid var(--border); border-radius: 12px; background: var(--panel); }
+.bubble.assistant .user-input-card { padding: 0; margin: 0; border: 0; background: transparent; }
 .user-input-card fieldset { border: 0; padding: 0; margin: 0 0 16px; min-width: 0; }
 .user-input-card legend { font-weight: 600; color: var(--accent); }
 .user-input-card p { white-space: pre-wrap; overflow-wrap: anywhere; margin: 6px 0 10px; }

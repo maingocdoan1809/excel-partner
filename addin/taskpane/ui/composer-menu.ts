@@ -1,3 +1,5 @@
+import { positionComposerPopover } from "./popover-position.js";
+
 export function setupComposerMenu(select: HTMLSelectElement, button: HTMLButtonElement, menu: HTMLElement, label: (value: string) => string = (value) => value): { refresh(): void; close(): void } {
   const close = () => {
     menu.hidden = true;
@@ -24,11 +26,13 @@ export function setupComposerMenu(select: HTMLSelectElement, button: HTMLButtonE
       });
       return item;
     }));
+    if (!menu.hidden) positionComposerPopover(button, menu);
   };
   const open = () => {
     document.dispatchEvent(new CustomEvent("composer-picker-open", { detail: button.id }));
     refresh();
     menu.hidden = false;
+    positionComposerPopover(button, menu);
     button.setAttribute("aria-expanded", "true");
     const selected = menu.querySelector<HTMLButtonElement>('[aria-selected="true"]:not(:disabled)');
     (selected ?? menu.querySelector<HTMLButtonElement>("button:not(:disabled)"))?.focus();
@@ -57,6 +61,7 @@ export function setupComposerMenu(select: HTMLSelectElement, button: HTMLButtonE
     if ((event as CustomEvent<string>).detail !== button.id) close();
   });
   select.addEventListener("change", refresh);
+  window.addEventListener("resize", () => { if (!menu.hidden) positionComposerPopover(button, menu); });
   const observer = new MutationObserver(refresh);
   observer.observe(select, { childList: true, subtree: true, characterData: true });
   window.addEventListener("pagehide", () => observer.disconnect(), { once: true });

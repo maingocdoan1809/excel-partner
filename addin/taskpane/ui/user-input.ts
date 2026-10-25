@@ -7,14 +7,26 @@ export function showUserInput(container: HTMLElement, request: UserInputRequest,
     const form = document.createElement("form");
     form.className = "user-input-card";
     form.setAttribute("aria-label", "Assistant questions");
+    const close = document.createElement("button");
+    close.type = "button";
+    close.className = "user-input-close";
+    close.setAttribute("aria-label", "Skip question");
+    close.textContent = "×";
+    form.append(close);
+    const quickChoice = request.questions.length === 1 && !request.questions[0]!.multiSelect && request.questions[0]!.options.length > 0;
+    form.dataset.quickChoice = String(quickChoice);
     const fields = request.questions.map((question, index) => {
       const fieldset = document.createElement("fieldset");
       const legend = document.createElement("legend");
-      legend.textContent = question.header || `Question ${index + 1}`;
-      const text = document.createElement("p");
-      text.textContent = question.question;
-      fieldset.append(legend, text);
-      const inputs = question.options.map(option => {
+      legend.textContent = question.question;
+      fieldset.append(legend);
+      if (request.questions.length > 1) {
+        const progress = document.createElement("p");
+        progress.className = "user-input-progress";
+        progress.textContent = `${question.header || "Question"} · ${index + 1} of ${request.questions.length}`;
+        fieldset.append(progress);
+      }
+      const inputs = question.options.map((option, optionIndex) => {
         const label = document.createElement("label");
         label.className = "user-input-option";
         const input = document.createElement("input");
@@ -30,7 +42,16 @@ export function showUserInput(container: HTMLElement, request: UserInputRequest,
           description.textContent = option.description;
           copy.append(description);
         }
-        label.append(input, copy);
+        const number = document.createElement("span");
+        number.className = "user-input-number";
+        number.setAttribute("aria-hidden", "true");
+        number.textContent = String(optionIndex + 1);
+        const enter = document.createElement("span");
+        enter.className = "user-input-enter";
+        enter.setAttribute("aria-hidden", "true");
+        enter.textContent = "↵";
+        label.append(input, number, copy, enter);
+        if (quickChoice) input.addEventListener("click", () => form.requestSubmit());
         fieldset.append(label);
         return input;
       });
@@ -38,8 +59,9 @@ export function showUserInput(container: HTMLElement, request: UserInputRequest,
       if (question.allowFreeform || inputs.length === 0) {
         const label = document.createElement("label");
         label.className = "user-input-freeform";
-        label.append(inputs.length ? "Other answer" : "Your answer");
         freeform = document.createElement("input");
+        freeform.placeholder = inputs.length ? "Something else" : "Your answer";
+        freeform.setAttribute("aria-label", inputs.length ? "Other answer" : "Your answer");
         freeform.type = question.isSecret ? "password" : "text";
         freeform.maxLength = 20_000;
         freeform.autocomplete = "off";
@@ -78,6 +100,7 @@ export function showUserInput(container: HTMLElement, request: UserInputRequest,
     };
     const cancel = () => finish(CANCELLED_USER_INPUT);
     skip.addEventListener("click", cancel);
+    close.addEventListener("click", cancel);
     form.addEventListener("submit", event => {
       event.preventDefault();
       const answers = Object.create(null) as Record<string, string[]>;

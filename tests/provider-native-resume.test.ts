@@ -26,6 +26,12 @@ import { CopilotAdapter } from "../providers/src/copilot.js";
 import { OpencodeAdapter } from "../providers/src/opencode.js";
 import { CodexAdapter } from "../providers/src/codex.js";
 import { ClaudeAdapter } from "../providers/src/claude.js";
+vi.mock("../providers/src/claude-process.js", () => ({
+  ClaudeProcess: class {
+    async request() { return {}; }
+    async close() {}
+  },
+}));
 
 const runtime = { bridgeUrl: "", mcp: { command: "", args: [] }, logger: { debug() {}, warn() {} } };
 const nativeId = "native-session";
@@ -40,6 +46,7 @@ beforeEach(() => {
   rpc.calls = [];
   rpc.launches = [];
   rpc.reply = async () => ({});
+  vi.spyOn(OpencodeAdapter.prototype, "detect").mockResolvedValue({ provider: "opencode", installed: true, version: "1.19.3", status: "ready", hint: null, capabilities: { streaming: true, cancel: true, sessionResume: true, mcp: true, acp: true } });
 });
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllEnvs(); fs.rmSync(dir, { recursive: true, force: true }); });
 async function turn(adapter: CopilotAdapter | OpencodeAdapter | CodexAdapter, internalId: string) {
@@ -166,30 +173,63 @@ describe("each provider resumes its native session independently", () => {
     } finally { await adapter.dispose(); }
   });
 
-  it("OpenCode loads its ACP session and uses exported totals including cache and reasoning", async () => {
+  it.each([false, true])("OpenCode loads its ACP session and uses exported totals including cache and reasoning (v2=%j)", async v2 => {
+    if (v2) vi.mocked(OpencodeAdapter.prototype.detect).mockResolvedValue({ provider: "opencode", installed: true, version: "2.0.32", status: "ready", hint: null, capabilities: { streaming: true, cancel: true, sessionResume: true, mcp: true, acp: true } });
     let exports = 0;
     vi.spyOn(base, "execCli").mockImplementation(async (_command, args) => {
-      if (args[0] === "export") {
+      if (v2 ? args[0] === "session" && args[1] === "export" : args[0] === "export") {
         exports++;
         const tokens = exports === 1
           ? { input: 100, output: 20, reasoning: 5, cache: { read: 30, write: 10 } }
           : { input: 200, output: 50, reasoning: 8, cache: { read: 60, write: 20 } };
-        return { code: 0, stdout: JSON.stringify({ info: { id: nativeId, title: "Native OpenCode Title", tokens } }), stderr: "" };
+        return { code: 0, stdout: JSON.stringify({ info: { id: nativeId, title: "Native OpenCode Title", tokens }, ...(v2 ? { messages: [{ id: "msg", type: "assistant", tokens }] } : {}) }), stderr: "" };
       }
       return { code: 0, stdout: "[]", stderr: "" };
     });
     rpc.reply = async method => method === "session/prompt"
       ? { stopReason: "end_turn", usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 } } : {};
     const adapter = new OpencodeAdapter(runtime);
-    const internalId = await adapter.startSession(context());
+    const ctx = context();
+    if (v2) ctx.mcp.toolNames = ["execute_office_js"];
+    const internalId = await adapter.startSession(ctx);
     try {
       const events = await turn(adapter, internalId);
       expect(rpc.calls.some(c => c.method === "session/new")).toBe(false);
-      expect(rpc.calls.find(c => c.method === "session/load")?.params.sessionId).toBe(nativeId);
+      const load = rpc.calls.find(c => c.method === "session/load")!;
+      expect(load.params.sessionId).toBe(nativeId);
+      expect(load.params.mcpServers).toHaveLength(1);
+      if (v2) {
+        const config = JSON.parse(fs.readFileSync(rpc.launches.at(-1)!.env.OPENCODE_CONFIG, "utf8"));
+        expect(config.permissions).toContainEqual({ action: "websearch", resource: "*", effect: "deny" });
+        expect(config.permissions).toContainEqual({ action: "execute", resource: "*", effect: "allow" });
+        expect(config.permissions).toContainEqual({ action: "excel_*", resource: "*", effect: "allow" });
+        expect(config.permissions).toContainEqual({ action: "*", resource: "*", effect: "ask" });
+        expect(config.permission).toBeUndefined();
+      }
       expect(events.filter(e => e.type === "session_info").at(-1)).toMatchObject({ providerSessionId: nativeId, title: "Native OpenCode Title" });
       expect(events.find(e => e.type === "usage_update")).toMatchObject({ usage: {
         totalTokens: 173, inputTokens: 140, outputTokens: 33, reasoningTokens: 3, cachedInputTokens: 30, cacheWriteTokens: 10,
       } });
+    } finally { await adapter.dispose(); }
+  });
+
+  it("keeps workbook add-in OpenCode V2 sessions on their existing configuration and export path", async () => {
+    const adapter = new OpencodeAdapter(runtime);
+    const detected = await adapter.detect();
+    vi.mocked(adapter.detect).mockResolvedValue({ ...detected, version: "2.0.32" });
+    const exportCli = vi.spyOn(base, "execCli").mockResolvedValue({ code: 0, stderr: "", stdout: JSON.stringify({
+      info: { id: nativeId, tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } } },
+    }) });
+    const ctx = context();
+    ctx.requestUserInput = async () => ({ cancelled: true, answers: {} });
+    try {
+      await adapter.startSession(ctx);
+      const launch = rpc.launches.at(-1)!;
+      const config = JSON.parse(fs.readFileSync(launch.env.OPENCODE_CONFIG, "utf8"));
+      expect(config.permission).toMatchObject({ "*": "ask", websearch: "deny", "excel_*": "allow" });
+      expect(config.permissions).toBeUndefined();
+      expect(exportCli).toHaveBeenCalledWith(expect.any(String), ["export", nativeId, "--pure"], expect.any(Object), 10_000);
+      expect(launch.args).toEqual(["acp"]);
     } finally { await adapter.dispose(); }
   });
 
@@ -227,7 +267,7 @@ describe("each provider resumes its native session independently", () => {
     } finally { await adapter.dispose(); }
   });
 
-  it("Claude keeps the native conversation ID and marks it resumable before spawning a turn", async () => {
+  it("Claude keeps the native conversation ID when opening a saved conversation", async () => {
     const adapter = new ClaudeAdapter(runtime);
     const internalId = await adapter.startSession(context());
     try {

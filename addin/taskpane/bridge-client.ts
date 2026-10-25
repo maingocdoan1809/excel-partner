@@ -41,7 +41,7 @@ export interface BridgeClientHandlers {
   onProviderEvent(event: ProviderEvent): void;
   onError(message: string): void;
   /** A tool request from the bridge finished running in this workbook. */
-  onToolExecuted?(tool: string, args: unknown, result: ToolResult): void;
+  onToolExecuted?(tool: string, args: unknown, result: ToolResult, context: { callId: string; requestId: string }): void;
 }
 
 const MAX_BACKOFF_MS = 15_000;
@@ -363,7 +363,7 @@ export class BridgeClient {
         (detail) => this.askPermission("Allow workbook change?", detail, "Allow change", message.timeoutMs),
       );
     this.send({ type: "tool_result", callId: message.callId, result });
-    if (!message.tool.startsWith("__authorize_")) this.handlers.onToolExecuted?.(message.tool, message.args, result);
+    if (!message.tool.startsWith("__authorize_")) this.handlers.onToolExecuted?.(message.tool, message.args, result, { callId: message.callId, requestId: message.requestId });
   }
 
   private closeQuestions(requestId?: string): void {

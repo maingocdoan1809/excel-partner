@@ -165,6 +165,7 @@ export class CodexAdapter extends BaseCliAdapter {
         tokenTotals: baseline, baselinePending: Boolean(ctx.resumeSessionId && !baseline) };
       this.sessions.set(providerSessionId, session);
       peer.onExit(() => {
+        ctx.onRuntimeClosed?.();
         for (const question of session?.questions.values() ?? []) question.abort();
         const current = this.sessions.get(providerSessionId);
         if (current?.active) {
@@ -278,7 +279,8 @@ export class CodexAdapter extends BaseCliAdapter {
       }
       return session.peer.request<{ turn: TurnLike }>("turn/start", {
         threadId: session.threadId,
-        input: [{ type: "text", text: buildTurnPrompt(input.prompt, input.selection), text_elements: [] }],
+        input: [{ type: "text", text: buildTurnPrompt(input.prompt, input.selection), text_elements: [] },
+          ...(input.images ?? []).map(image => ({ type: "image", image: { type: "inline", url: `data:${image.mediaType};base64,${image.data}` }, detail: null }))],
         effort: input.effort ?? "medium",
         ...(session.mode && session.model ? { collaborationMode: { mode: session.mode,
           settings: { model: session.model, reasoning_effort: input.effort ?? "medium", developer_instructions: null } } } : {}),

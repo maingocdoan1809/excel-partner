@@ -52,6 +52,8 @@ interface OpencodeSession {
   title?: string;
   /** Temp directory holding the permission config handed to the CLI. */
   configDir: string;
+  v2?: boolean;
+  diagnostic?: StartSessionContext["onDiagnostic"];
 }
 
 interface ActiveTurn {
@@ -93,12 +95,17 @@ export function parseOpencodeModels(options: OpencodeConfigOption[] | undefined)
  * question: only the Excel MCP tools are pre-approved, and this adapter
  * forwards other permission requests to the pane’s Ask/Auto approval flow.
  */
+/** Major version >= 2. Anchored so "1.2.3" is not mistaken for "2.". */
+export function isOpencodeV2(version: string): boolean {
+  return /^\D*(?:[2-9]|\d{2,})\./.test(version);
+}
+
 export class OpencodeAdapter extends BaseCliAdapter {
   private readonly commandCatalog = cachedCommands(() => discoverAcpCommands(this.command, ["acp"], this.env, ensureWorkspaceDir()));
   async listCommands(id?: string) {
     const commands = await ((id ? this.sessions.get(id)?.commands : undefined) ?? this.commandCatalog());
     const version = (await this.detect()).version ?? "";
-    return /\bv?[2-9]\./.test(version) && !commands.some(command => command.name === "skills")
+    return isOpencodeV2(version) && !commands.some(command => command.name === "skills")
       ? [...commands, ...normalizeCommands([{ name: "skills", description: "List available OpenCode skills" }])] : commands;
   }
   private titleCache?: { at: number; value: Promise<Map<string, string>> };
@@ -121,10 +128,10 @@ export class OpencodeAdapter extends BaseCliAdapter {
     return (await this.titleCache.value).get(id);
   }
 
-  private async originalUsage(id: string): Promise<ReturnType<typeof parseOpencodeExport>> {
-    const result = await execCli(this.command, ["export", id, "--pure"], this.env, 10_000);
+  private async originalUsage(id: string, v2 = false): Promise<ReturnType<typeof parseOpencodeExport>> {
+    const result = await execCli(this.command, v2 ? ["session", "export", id] : ["export", id, "--pure"], this.env, 10_000);
     if (result.code !== 0) throw new Error("OpenCode original session export is unavailable");
-    return parseOpencodeExport(JSON.parse(result.stdout), id);
+    return parseOpencodeExport(JSON.parse(result.stdout), id, v2);
   }
   readonly id: ProviderId = "opencode";
   readonly capabilities: ProviderCapabilities = {
@@ -204,9 +211,11 @@ export class OpencodeAdapter extends BaseCliAdapter {
     const providerSessionId = `opencode-${randomUUID()}`;
     const log = this.runtime.logger;
     // v2 ACP owns a private server and no longer accepts --hostname/--port.
-    const version = ctx.requestUserInput ? (await this.detect()).version ?? "" : "";
-    const questionApi = ctx.requestUserInput && !/\bv[2-9]\.|\b[2-9]\./.test(version) ? { port: await reserveOpencodePort(), password: randomUUID(), cwd, ask: ctx.requestUserInput } : undefined;
-    const { dir: configDir, path: configPath } = this.writePermissionConfig(Boolean(questionApi));
+    const clientTools = ctx.mcp.toolNames !== undefined;
+    const version = ctx.requestUserInput || clientTools ? (await this.detect()).version ?? "" : "";
+    const v2 = isOpencodeV2(version);
+    const questionApi = ctx.requestUserInput && !v2 ? { port: await reserveOpencodePort(), password: randomUUID(), cwd, ask: ctx.requestUserInput } : undefined;
+    const { dir: configDir, path: configPath } = this.writePermissionConfig(Boolean(questionApi), clientTools && v2);
 
     let session: OpencodeSession | null = null;
     const peer = new JsonRpcPeer({
@@ -258,14 +267,17 @@ export class OpencodeAdapter extends BaseCliAdapter {
         primed: Boolean(ctx.resumeSessionId),
         active: null,
         configDir,
+        v2: clientTools && v2,
+        diagnostic: clientTools ? ctx.onDiagnostic : undefined,
       };
       if (ctx.resumeSessionId) {
         session.usage = new CumulativeUsage();
-        try { session.usage.next((await this.originalUsage(created.sessionId)).usage); }
+        try { session.usage.next((await this.originalUsage(created.sessionId, clientTools && v2)).usage); }
         catch { session.usageBaselinePending = true; }
       }
       this.sessions.set(providerSessionId, session);
       peer.onExit(() => {
+        ctx.onRuntimeClosed?.();
         const current = this.sessions.get(providerSessionId);
         current?.active?.queue.fail(
           new Error(`opencode exited unexpectedly: ${peer.stderrTail.slice(-3).join(" | ")}`),
@@ -349,7 +361,7 @@ export class OpencodeAdapter extends BaseCliAdapter {
         usage?: { inputTokens: number; outputTokens: number; totalTokens: number; cachedReadTokens?: number };
       }>(
         "session/prompt",
-        { sessionId: session.acpSessionId, prompt: [{ type: "text", text }] },
+        { sessionId: session.acpSessionId, prompt: [{ type: "text", text }, ...(input.images ?? []).map(image => ({ type: "image", mimeType: image.mediaType, data: image.data }))] },
         30 * 60_000,
       );
     };
@@ -405,7 +417,7 @@ export class OpencodeAdapter extends BaseCliAdapter {
 
   private async reportUsage(session: OpencodeSession, active: ActiveTurn): Promise<void> {
     try {
-      const snapshot = await this.originalUsage(session.acpSessionId);
+      const snapshot = await this.originalUsage(session.acpSessionId, session.v2);
       session.title = snapshot.title ?? session.title;
       active.queue.push({ type: "session_info", requestId: active.requestId, provider: this.id,
         providerSessionId: session.acpSessionId, title: session.title });
@@ -441,19 +453,28 @@ export class OpencodeAdapter extends BaseCliAdapter {
    * only the Excel MCP tools are pre-approved. Everything else reaches this
    * adapter as a permission request and is approved through the pane.
    */
-  private writePermissionConfig(questions = false): { dir: string; path: string } {
+  private writePermissionConfig(questions = false, v2 = false): { dir: string; path: string } {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "excel-ai-opencode-"));
     const configPath = path.join(dir, "opencode.json");
     fs.writeFileSync(
       configPath,
       JSON.stringify({
         $schema: "https://opencode.ai/config.json",
-        permission: {
+        ...(v2 ? {
+          permissions: [
+            { action: "*", resource: "*", effect: "ask" },
+            { action: "websearch", resource: "*", effect: "deny" },
+            // V2 reaches MCP tools through Code Mode. Nested operations
+            // still enforce their own permissions and pane authorization.
+            { action: "execute", resource: "*", effect: "allow" },
+            { action: `${MCP_SERVER_NAME}_*`, resource: "*", effect: "allow" },
+          ],
+        } : { permission: {
           "*": "ask",
           websearch: "deny",
           ...(questions ? { question: "allow" } : {}),
           [`${MCP_SERVER_NAME}_*`]: "allow",
-        },
+        } }),
       }),
       { mode: 0o600 },
     );
@@ -485,6 +506,24 @@ export class OpencodeAdapter extends BaseCliAdapter {
     const params = (raw ?? {}) as { sessionId?: string; update?: Record<string, any> };
     const update = params.update;
     if (!update) return;
+    // ACP exposes retry metadata separately from assistant text/tool events.
+    // Only API sessions opt in; no response bodies or error messages are logged.
+    if (session.diagnostic && session.active && params.sessionId === session.acpSessionId
+      && update.sessionUpdate === "session_info_update" && update._meta && Object.hasOwn(update._meta, "opencode/retry")) {
+      const retry = update._meta["opencode/retry"];
+      if (retry === null) session.diagnostic({ phase: "model_retry_started" });
+      else if (retry && typeof retry === "object") {
+        const error = retry.error;
+        session.diagnostic({ phase: "model_retry_scheduled",
+          ...(Number.isInteger(retry.attempt) && retry.attempt >= 0 ? { attempt: retry.attempt } : {}),
+          ...(Number.isInteger(error?.status) && error.status >= 100 && error.status <= 599 ? { status: error.status } : {}),
+          ...(typeof error?.type === "string" && /^[a-zA-Z0-9_.-]{1,100}$/.test(error.type) ? { errorType: error.type } : {}),
+          ...(typeof retry.nextRetryAt === "string" && Number.isFinite(Date.parse(retry.nextRetryAt))
+            ? { nextRetryAt: new Date(retry.nextRetryAt).toISOString() } : {}),
+        });
+      }
+      return;
+    }
     if (update.sessionUpdate === "available_commands_update" && params.sessionId === session.acpSessionId) {
       session.commands = normalizeCommands(update.availableCommands);
       return;

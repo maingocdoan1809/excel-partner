@@ -1,3 +1,5 @@
+import { positionComposerPopover } from "./popover-position.js";
+
 export function setupUsagePopover(button: HTMLButtonElement, popover: HTMLElement, refresh: () => void): void {
   const close = () => {
     popover.hidden = true;
@@ -9,6 +11,7 @@ export function setupUsagePopover(button: HTMLButtonElement, popover: HTMLElemen
     popover.hidden = false;
     button.setAttribute("aria-expanded", "true");
     refresh();
+    positionComposerPopover(button, popover);
   });
   document.addEventListener("pointerdown", event => {
     if (!button.contains(event.target as Node) && !popover.contains(event.target as Node)) close();
@@ -23,4 +26,5 @@ export function setupUsagePopover(button: HTMLButtonElement, popover: HTMLElemen
   document.addEventListener("composer-picker-open", event => {
     if ((event as CustomEvent<string>).detail !== button.id) close();
   });
+  window.addEventListener("resize", () => { if (!popover.hidden) positionComposerPopover(button, popover); });
 }

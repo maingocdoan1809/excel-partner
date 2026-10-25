@@ -43,7 +43,7 @@ export class Harness {
       port,
       tls: null,
       publicBaseUrl: `http://127.0.0.1:${port}`,
-      logLevel: "error",
+      logLevel: (process.env.HARNESS_LOG_LEVEL as "debug" | "error" | undefined) ?? "error",
       mcp: { command: process.execPath, args: [path.join(root, "dist/excel_mcp/src/cli.js")] },
       ...overrides,
     });

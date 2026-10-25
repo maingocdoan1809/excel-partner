@@ -138,13 +138,27 @@ In **Settings > Manage skills**, use the **Enabled / Disabled** switch on any in
 
 | Command | Description |
 | --- | --- |
-| `excel-partner setup` | Register the add-in, configure certificate trust and startup, and restart the bridge. |
-| `excel-partner start` | Start the bridge after setup. |
-| `excel-partner stop` | Stop the bridge. |
-| `excel-partner update` | Install the latest npm release, refresh registration, and restart the bridge. |
-| `excel-partner status` | Check whether the bridge is healthy. |
-| `excel-partner uninstall` | Stop the bridge and remove add-in registration, startup entry, and certificate trust. |
-| `excel-partner --help` | Show CLI usage. |
+Every command takes an optional target: `addin` (the default), `gateway` or `all`.
+
+| Command | Description |
+| --- | --- |
+| `excel-partner setup [addin\|gateway\|all]` | Register and start. The add-in registers with Excel; the gateway creates its token and prints the URL and token. |
+| `excel-partner start` / `stop` / `restart [target]` | Control the bridge (add-in) or the gateway. |
+| `excel-partner status [target]` | Show what is running. Without a target it shows both. |
+| `excel-partner info [--copy]` | Show the gateway URL and token and optionally copy the token. |
+| `excel-partner logs [target]` | Show recent log lines. |
+| `excel-partner doctor [target]` | Check the installation and say what to fix. |
+| `excel-partner update` | Install the latest npm release and refresh both the add-in and the gateway. |
+| `excel-partner uninstall [target]` | Stop and remove registration and startup entries. The add-in also removes certificate trust. |
+| `excel-partner gateway <command>` | Gateway settings: `config`, `alias`, `model-name`, `provider`, `models`, `warmup`, `autostart`. |
+| `excel-partner help` | Show CLI usage. |
+
+Typical flows: `excel-partner setup` for the add-in only, `excel-partner setup gateway`
+for the gateway only, or `excel-partner setup all` for both. The
+[Agent Gateway](gateway/README.md) exposes the same providers as a local
+Anthropic-compatible API. It ships in this package, starts at Windows sign-in like the
+add-in bridge, and shares the add-in's localhost certificate when both are installed.
+The `agent-gateway` command is an alias for the gateway commands.
 
 ## Update
 
@@ -263,7 +277,7 @@ If startup reports that port `8765` is already in use, stop the other Excel Part
 
 ### The task pane shows a certificate error
 
-Run `excel-partner setup` again to restore registration and certificate trust, then restart Excel.
+Run `excel-partner setup` again to restore registration and certificate trust, then restart Excel. If the Agent Gateway is also installed, it shares this certificate: after `excel-partner uninstall`, run `agent-gateway setup` to trust it again.
 
 If setup reports an expired certificate, a certificate that expires soon, or an incomplete certificate pair, save your workbook and close Excel, then recreate the certificate:
 
@@ -317,6 +331,12 @@ Run the update steps above, reopen the task pane, and start a new chat so the pr
 
 ## Development
 
+A standalone CLI-backed API is available in [gateway/README.md](gateway/README.md).
+It installs separately and does not require this add-in or its bridge.
+
+See [Provider session architecture](docs/provider-sessions.md) for the shared
+runtime lifecycle, adapter contracts and transport tests.
+
 From a source checkout:
 
 ```powershell
@@ -332,10 +352,18 @@ Refresh the Codex slash-command catalog from the official source matching an ins
 
 After building, run `node scripts/smoke-commands.mjs` to verify command discovery and informational command execution through all four real CLIs without submitting model tasks. These checks run in a normal Node host rather than a Vitest worker.
 
-To build a distributable tarball:
+To run the gateway from source with automatic restart (separate data folder and port 8767):
 
 ```powershell
-npm pack
+npm run dev:gateway
 ```
 
-`npm pack` builds the server and task pane through `prepack`. The package includes the compiled runtime and add-in assets; users do not need to build from source.
+To build the release tarball (add-in, bridge and gateway in one package) into `release/`:
+
+```powershell
+npm run pack:release
+```
+
+Packing builds the server, task pane and gateway through `prepack`. The package includes
+only compiled runtime and assets; users do not need to build from source. To publish
+after `npm login`, run `npm publish`.

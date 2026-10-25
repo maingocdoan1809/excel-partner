@@ -3,8 +3,12 @@
   "version": "0.1.15",
   "description": "Excel Partner: local Excel desktop AI add-in with Claude Code, GitHub Copilot CLI, Codex CLI and OpenCode CLI providers.",
   "type": "module",
+  "license": "MIT",
+  "repository": { "type": "git", "url": "git+https://github.com/maingocdoan1809/excel-partner.git" },
+  "publishConfig": { "access": "public" },
   "bin": {
-    "excel-partner": "bin/excel-partner.mjs"
+    "excel-partner": "bin/excel-partner.mjs",
+    "agent-gateway": "gateway/bin/agent-gateway.mjs"
   },
   "files": [
     "addin/assets/",
@@ -12,21 +16,27 @@
     "addin/manifest.xml",
     "addin/taskpane/index.html",
     "addin/taskpane/styles.css",
+    "addin/taskpane/workspace.css",
     "bin/",
+    "gateway/bin/",
+    "gateway/dist/*.mjs",
+    "gateway/README.md",
     "dist/bridge/src/",
     "dist/excel_mcp/src/",
     "dist/protocol/src/",
     "dist/providers/src/",
     "scripts/package-windows.ps1",
     "scripts/workspace-windows.ps1",
-    "skills/"
+    "skills/",
+    "!**/*.map"
   ],
   "engines": {
     "node": ">=20"
   },
   "scripts": {
     "update:codex-commands": "node scripts/update-codex-commands.mjs",
-    "build": "npm run build:server && npm run build:addin",
+    "build": "npm run build:server && npm run build:addin && npm run build:gateway",
+    "build:gateway": "node scripts/build-gateway.mjs",
     "build:server": "tsc -p tsconfig.json",
     "build:addin": "esbuild addin/taskpane/main.ts --bundle --format=iife --target=es2020 --outfile=addin/dist/taskpane.js",
     "prepack": "npm run build",
@@ -36,6 +46,8 @@
     "test:watch": "vitest",
     "bridge": "node dist/bridge/src/index.js",
     "dev:bridge": "tsx watch bridge/src/index.ts",
+    "dev:gateway": "node scripts/dev-gateway.mjs",
+    "pack:release": "node scripts/pack-release.mjs",
     "cert": "bash scripts/gen-cert.sh",
     "smoke": "tsx scripts/live-smoke.ts",
     "test:live": "vitest run tests/providers.live.test.ts"

@@ -1,4 +1,3 @@
-import type { ChildProcess } from "node:child_process";
 import spawn from "cross-spawn";
 import { randomUUID } from "node:crypto";
 import fs from "node:fs";
@@ -19,6 +18,8 @@ import { claudeTitle, validNativeId } from "./session-metadata.js";
 import { answerClaudeQuestion, type RequestUserInput } from "./user-input.js";
 import { cachedCommands, normalizeCommands } from "./commands.js";
 import { discoverClaudeCommands } from "./command-discovery.js";
+import { ClaudeProcess } from "./claude-process.js";
+import { AsyncQueue } from "./async-queue.js";
 
 interface ClaudeSession {
   requestUserInput?: RequestUserInput;
@@ -28,7 +29,17 @@ interface ClaudeSession {
   /** Conversation id; becomes resumable when the CLI confirms initialization. */
   conversationId: string;
   resumable: boolean;
-  child: ChildProcess | null;
+  process: ClaudeProcess;
+  active: ClaudeTurn | null;
+}
+
+interface ClaudeTurn {
+  input: SendTurnInput;
+  queue: AsyncQueue<ProviderEvent>;
+  translator: ClaudeStreamTranslator;
+  questions: Map<string, AbortController>;
+  interruptSent: boolean;
+  interruptController: AbortController;
 }
 
 /** Shape of one entry in the CLI's `initialize` control response (`models`). */
@@ -61,11 +72,9 @@ const MCP_PREFIX = `mcp__${MCP_SERVER_NAME}__`;
 /**
  * Claude Code CLI.
  *
- * One `claude -p --output-format stream-json` process per turn, continued
- * across turns with `--resume <session-id>`. The Excel MCP server is injected
- * with `--mcp-config` (+ `--strict-mcp-config`), built-in tools are disabled
- * and only the Excel MCP tools are pre-approved. Cancel = SIGTERM to the
- * running turn process; the conversation stays resumable.
+ * One persistent stream-json process per session. Each result completes one
+ * turn; stdin stays open for the next prompt. Resume is only used when opening
+ * an existing conversation. Interrupt cancels a turn without closing its runtime.
  */
 export class ClaudeAdapter extends BaseCliAdapter {
   private readonly commandCatalog = cachedCommands(() => discoverClaudeCommands(this.command, this.env, ensureWorkspaceDir()));
@@ -167,46 +176,70 @@ export class ClaudeAdapter extends BaseCliAdapter {
 
   override async startSession(ctx: StartSessionContext): Promise<string> {
     if (ctx.resumeSessionId && !validNativeId(ctx.resumeSessionId)) throw new Error("Invalid Claude resume session ID");
+    ctx.signal.throwIfAborted();
     const providerSessionId = `claude-${randomUUID()}`;
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "excel-ai-claude-"));
     const mcpConfigPath = path.join(dir, "mcp.json");
-    fs.writeFileSync(
-      mcpConfigPath,
-      JSON.stringify({
-        mcpServers: {
-          [MCP_SERVER_NAME]: { command: ctx.mcp.command, args: ctx.mcp.args, env: ctx.mcp.env },
+    let transport: ClaudeProcess | undefined;
+    try {
+      fs.writeFileSync(mcpConfigPath, JSON.stringify({ mcpServers: {
+        [MCP_SERVER_NAME]: { command: ctx.mcp.command, args: ctx.mcp.args, env: ctx.mcp.env },
+      } }), { mode: 0o600 });
+      const conversationId = ctx.resumeSessionId ?? randomUUID();
+      const model = ctx.model ?? process.env.CLAUDE_MODEL;
+      const systemPrompt = ctx.systemPrompt ?? SYSTEM_PROMPT;
+      const webTools = ctx.mcp.env.EXCEL_WEB_SEARCH === "1" ? ["WebSearch", "WebFetch"] : [];
+      let session: ClaudeSession | undefined;
+      transport = new ClaudeProcess({
+        command: this.command,
+        args: [
+          "-p", "--input-format", "stream-json", "--permission-prompt-tool", "stdio",
+          "--output-format", "stream-json", "--verbose", "--include-partial-messages",
+          ...(ctx.resumeSessionId ? ["--resume", conversationId] : ["--session-id", conversationId]),
+          "--mcp-config", mcpConfigPath, "--strict-mcp-config",
+          "--tools", [...(ctx.mcp.toolNames ? [] : ["AskUserQuestion"]), ...webTools].join(","),
+          "--allowedTools", `mcp__${MCP_SERVER_NAME}`, ...webTools,
+          "--permission-mode", "default",
+          ...(systemPrompt.trim() ? ["--system-prompt", systemPrompt] : []),
+          // Preserve the existing restriction to the empty scratch workspace.
+          "--setting-sources", "project",
+          ...(model ? ["--model", model] : []), "--effort", ctx.effort ?? "medium",
+        ],
+        cwd: ensureWorkspaceDir(),
+        env: { ...this.env, CLAUDE_CODE_EFFORT_LEVEL: ctx.effort ?? "medium" },
+        onStderr: line => this.runtime.logger.debug(`claude stderr: ${line}`),
+        onMessage: message => { if (session) this.onMessage(session, message); },
+        onRuntimeClosed: ctx.onRuntimeClosed,
+        onExit: error => {
+          const active = session?.active;
+          if (!active) return;
+          if (!active.input.signal.aborted) active.queue.push({ type: "error", requestId: active.input.requestId,
+            code: "provider_error", message: error.message });
+          this.finish(session!, active.input.signal.aborted ? "cancelled" : "error");
         },
-      }),
-      { mode: 0o600 },
-    );
-    this.sessions.set(providerSessionId, {
-      requestUserInput: ctx.requestUserInput,
-      mcp: ctx.mcp,
-      mcpConfigPath,
-      conversationId: ctx.resumeSessionId ?? randomUUID(),
-      resumable: Boolean(ctx.resumeSessionId),
-      child: null,
-    });
-    return providerSessionId;
+      });
+      session = { requestUserInput: ctx.requestUserInput, mcp: ctx.mcp, mcpConfigPath,
+        conversationId, resumable: Boolean(ctx.resumeSessionId), process: transport, active: null };
+      await transport.request("initialize", ctx.signal);
+      ctx.signal.throwIfAborted();
+      this.sessions.set(providerSessionId, session);
+      return providerSessionId;
+    } catch (error) {
+      await transport?.close();
+      fs.rmSync(dir, { recursive: true, force: true });
+      throw error;
+    }
   }
 
   override async *sendTurn(input: SendTurnInput): AsyncIterable<ProviderEvent> {
     const session = this.sessions.get(input.providerSessionId);
     const { requestId } = input;
-    if (!session) {
-      yield { type: "error", requestId, code: "no_session", message: "claude session is not running" };
-      yield { type: "turn_finished", requestId, reason: "error" };
-      return;
-    }
-    if (session.resumable) {
-      yield { type: "session_info", requestId, provider: this.id, providerSessionId: session.conversationId,
-        title: await this.sessionTitle(session.conversationId) };
-    }
+    if (!session || !session.process.alive) throw new Error("Claude session is not running; reconnect to resume the conversation");
+    if (session.active) throw new Error("Another Claude turn is already running");
+    if (input.signal.aborted) { yield { type: "turn_finished", requestId, reason: "cancelled" }; return; }
+    if (session.resumable) yield { type: "session_info", requestId, provider: this.id,
+      providerSessionId: session.conversationId, title: await this.sessionTitle(session.conversationId) };
     yield { type: "turn_started", requestId };
-    if (input.signal.aborted) {
-      yield { type: "turn_finished", requestId, reason: "cancelled" };
-      return;
-    }
 
     if (input.command?.name === "skills") {
       const commands = await this.listCommands();
@@ -222,173 +255,123 @@ export class ClaudeAdapter extends BaseCliAdapter {
       if (!target) throw new Error(`Unknown Claude skill or command: ${name}`);
       input = { ...input, command: { name: target.name, args: task ?? "" } };
     }
-
-    const model = input.model ?? process.env.CLAUDE_MODEL;
-    const systemPrompt = input.systemPrompt ?? SYSTEM_PROMPT;
-    const webTools = session.mcp.env.EXCEL_WEB_SEARCH === "1" ? ["WebSearch", "WebFetch"] : [];
-    const args = [
-      "-p",
-      "--input-format", "stream-json",
-      "--permission-prompt-tool", "stdio",
-      "--output-format",
-      "stream-json",
-      "--verbose",
-      "--include-partial-messages",
-      ...(session.resumable ? ["--resume", session.conversationId] : ["--session-id", session.conversationId]),
-      "--mcp-config",
-      session.mcpConfigPath,
-      "--strict-mcp-config",
-      "--tools",
-      ["AskUserQuestion", ...webTools].join(","),
-      "--allowedTools",
-      `mcp__${MCP_SERVER_NAME}`,
-      ...webTools,
-      "--permission-mode",
-      "default",
-      ...(systemPrompt.trim() ? ["--system-prompt", systemPrompt] : []),
-      // The scratch cwd is empty, so this skips the user's own hooks, CLAUDE.md
-      // and plugins (auth is unaffected) and keeps the Excel session predictable.
-      "--setting-sources",
-      "project",
-      ...(model ? ["--model", model] : []),
-      "--effort",
-      input.effort ?? "medium",
-    ];
-
-    const child = spawn(this.command, args, {
-      cwd: ensureWorkspaceDir(),
-      env: { ...this.env, CLAUDE_CODE_EFFORT_LEVEL: input.effort ?? "medium" },
-      stdio: ["pipe", "pipe", "pipe"],
-      windowsHide: true,
-    });
-    session.child = child;
-    child.stdin!.on("error", () => undefined);
-    // The prompt (which may contain workbook data) goes over stdin, never argv.
-    child.stdin!.write(JSON.stringify({ type: "user", session_id: session.conversationId,
-      message: { role: "user", content: input.command ? `/${input.command.name}${input.command.args ? ` ${input.command.args}` : ""}` : buildTurnPrompt(input.prompt, input.selection) }, parent_tool_use_id: null }) + "\n");
-    const questions = new Map<string, AbortController>();
-
-    const stderrTail: string[] = [];
-    createInterface({ input: child.stderr! }).on("line", (line) => {
-      stderrTail.push(line);
-      if (stderrTail.length > 40) stderrTail.shift();
-      this.runtime.logger.debug(`claude stderr: ${line}`);
-    });
-
-    const onAbort = () => {
-      for (const question of questions.values()) question.abort();
-      terminate(child);
-    };
-    input.signal.addEventListener("abort", onAbort, { once: true });
-
-    const exited = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolve) => {
-      child.once("exit", (code, signal) => resolve({ code, signal }));
-      child.once("error", () => resolve({ code: null, signal: null }));
-    });
-
-    const translator = new ClaudeStreamTranslator(requestId);
-    let finished = false;
+    const active: ClaudeTurn = { input, queue: new AsyncQueue(), translator: new ClaudeStreamTranslator(requestId),
+      questions: new Map(), interruptSent: false, interruptController: new AbortController() };
+    session.active = active;
+    const abort = () => { void this.interrupt(session); };
+    input.signal.addEventListener("abort", abort, { once: true });
     try {
-      for await (const line of createInterface({ input: child.stdout!, crlfDelay: Infinity })) {
-        const trimmed = line.trim();
-        if (!trimmed.startsWith("{")) continue;
-        let message: Record<string, any>;
-        try {
-          message = JSON.parse(trimmed);
-        } catch {
-          continue;
-        }
-        if (message.type === "control_cancel_request") {
-          questions.get(message.request_id)?.abort();
-          continue;
-        }
-        if (message.type === "control_request") {
-          const controller = new AbortController();
-          questions.set(message.request_id, controller);
-          // Keep reading stdout while the pane waits for the user, so cancellation can arrive.
-          void (async () => {
-            let response: unknown = { behavior: "deny", message: "This tool is unavailable in the add-in." };
-            try {
-              if (message.request?.subtype === "can_use_tool" && message.request.tool_name === "AskUserQuestion") {
-                response = await answerClaudeQuestion(message.request.input, session.requestUserInput, controller.signal);
-              }
-            } catch { response = { behavior: "deny", message: "Could not collect the user's answer." }; }
-            if (!controller.signal.aborted && !input.signal.aborted && !child.stdin!.destroyed) {
-              child.stdin!.write(JSON.stringify({ type: "control_response", response: {
-                subtype: "success", request_id: message.request_id, response,
-              } }) + "\n");
-            }
-          })().finally(() => questions.delete(message.request_id));
-          continue;
-        }
-        const confirmsSession = (message.type === "result" || (message.type === "system" && message.subtype === "init"))
-          && typeof message.session_id === "string" && validNativeId(message.session_id);
-        if (confirmsSession) {
-          session.conversationId = message.session_id;
-          session.resumable = true;
-        }
-        if (confirmsSession || (message.type === "result" && session.resumable)) yield { type: "session_info", requestId, provider: this.id,
-          providerSessionId: session.conversationId, title: await this.sessionTitle(session.conversationId) };
-        for (const event of translator.translate(message)) {
-          if (event.type === "turn_finished") {
-            for (const question of questions.values()) question.abort();
-            child.stdin!.end();
-            finished = true;
-            yield input.signal.aborted ? { ...event, reason: "cancelled" } : event;
-          } else {
-            yield event.type === "usage_update" ? { ...event, usage: { ...event.usage,
-              source: "claude_result", providerSessionId: session.conversationId } } : event;
-          }
-        }
-      }
-
-      const { code, signal } = await exited;
-      if (!finished) {
-        if (input.signal.aborted) {
-          yield { type: "turn_finished", requestId, reason: "cancelled" };
-        } else {
-          const detail = stderrTail.slice(-3).join(" | ");
-          yield {
-            type: "error",
-            requestId,
-            code: "provider_error",
-            message: `claude exited without a result (code=${code}, signal=${signal})${detail ? `: ${detail}` : ""}`,
-          };
-          yield { type: "turn_finished", requestId, reason: "error" };
-        }
+      input.signal.throwIfAborted();
+      const text = input.command ? `/${input.command.name}${input.command.args ? ` ${input.command.args}` : ""}` : buildTurnPrompt(input.prompt, input.selection);
+      const content = input.images?.length ? [{ type: "text", text }, ...input.images.map(image => ({ type: "image", source: { type: "base64", media_type: image.mediaType, data: image.data } }))] : text;
+      session.process.write({ type: "user", session_id: session.conversationId, parent_tool_use_id: null,
+        message: { role: "user", content } });
+      for await (const event of active.queue) {
+        // Read the native title at completion, outside the stdout callback.
+        if (event.type === "session_info") yield { ...event, title: await this.sessionTitle(event.providerSessionId) };
+        else yield event;
       }
     } finally {
-      for (const question of questions.values()) question.abort();
-      input.signal.removeEventListener("abort", onAbort);
-      if (child.exitCode === null && child.signalCode === null) terminate(child);
-      if (session.child === child) session.child = null;
+      active.interruptController.abort();
+      input.signal.removeEventListener("abort", abort);
+      for (const question of active.questions.values()) question.abort();
+      if (session.active === active) {
+        // An abandoned consumer must not leave a live turn feeding a future one.
+        await session.process.close();
+        session.active = null;
+      }
+    }
+  }
+
+  private onMessage(session: ClaudeSession, message: Record<string, any>): void {
+    const active = session.active;
+    if (!active) return; // Late notifications belong to the completed turn.
+    const { requestId } = active.input;
+    if (message.type === "control_cancel_request") {
+      active.questions.get(message.request_id)?.abort();
+      return;
+    }
+    if (message.type === "control_request") {
+      void this.answerControl(session, active, message);
+      return;
+    }
+    const confirmsSession = (message.type === "result" || (message.type === "system" && message.subtype === "init"))
+      && typeof message.session_id === "string" && validNativeId(message.session_id);
+    if (confirmsSession) {
+      if (session.resumable && session.conversationId !== message.session_id) {
+        active.queue.push({ type: "error", requestId, code: "provider_error", message: "Claude returned a different session while resuming" });
+        this.finish(session, "error");
+        void session.process.close();
+        return;
+      }
+      session.conversationId = message.session_id;
+      session.resumable = true;
+    }
+    if (confirmsSession || (message.type === "result" && session.resumable)) active.queue.push({ type: "session_info", requestId,
+      provider: this.id, providerSessionId: session.conversationId });
+    for (const event of active.translator.translate(message)) {
+      if (event.type === "turn_finished") this.finish(session, active.input.signal.aborted ? "cancelled" : event.reason);
+      else active.queue.push(event.type === "usage_update" ? { ...event,
+        usage: { ...event.usage, source: "claude_result", providerSessionId: session.conversationId } } : event);
+    }
+  }
+
+  private async answerControl(session: ClaudeSession, active: ClaudeTurn, message: Record<string, any>): Promise<void> {
+    const controller = new AbortController();
+    active.questions.set(message.request_id, controller);
+    let response: unknown = { behavior: "deny", message: "This tool is unavailable in the add-in." };
+    try {
+      if (message.request?.subtype === "can_use_tool" && message.request.tool_name === "AskUserQuestion") {
+        response = await answerClaudeQuestion(message.request.input, session.requestUserInput, controller.signal);
+      }
+      if (session.active === active && !controller.signal.aborted && !active.input.signal.aborted) {
+        session.process.write({ type: "control_response", response: { subtype: "success", request_id: message.request_id, response } });
+      }
+    } catch (error) {
+      this.runtime.logger.warn("Claude permission response failed", { error: String(error) });
+      if (session.active === active) await session.process.close();
+    } finally { active.questions.delete(message.request_id); }
+  }
+
+  private finish(session: ClaudeSession, reason: "completed" | "cancelled" | "error"): void {
+    const active = session.active;
+    if (!active) return;
+    session.active = null;
+    active.interruptController.abort();
+    for (const question of active.questions.values()) question.abort();
+    active.queue.push({ type: "turn_finished", requestId: active.input.requestId, reason });
+    active.queue.end();
+  }
+
+  private async interrupt(session: ClaudeSession): Promise<void> {
+    const active = session.active;
+    if (!active || active.interruptSent) return;
+    active.interruptSent = true;
+    for (const question of active.questions.values()) question.abort();
+    try { await session.process.request("interrupt", active.interruptController.signal, 5000); }
+    catch {
+      // Completion may race an interrupt ACK. Its timeout must never close a
+      // process that has already moved on to another turn.
+      if (session.active === active) await session.process.close();
     }
   }
 
   override async cancelTurn(providerSessionId: string): Promise<void> {
-    const child = this.sessions.get(providerSessionId)?.child;
-    if (child) terminate(child);
+    const session = this.sessions.get(providerSessionId);
+    if (session) await this.interrupt(session);
   }
 
   override async closeSession(providerSessionId: string): Promise<void> {
     const session = this.sessions.get(providerSessionId);
     this.sessions.delete(providerSessionId);
     if (!session) return;
-    if (session.child) terminate(session.child);
-    fs.rmSync(path.dirname(session.mcpConfigPath), { recursive: true, force: true });
+    try { await session.process.close(); }
+    finally { fs.rmSync(path.dirname(session.mcpConfigPath), { recursive: true, force: true }); }
   }
 
   override async dispose(): Promise<void> {
-    await Promise.all([...this.sessions.keys()].map((id) => this.closeSession(id)));
+    await Promise.all([...this.sessions.keys()].map(id => this.closeSession(id)));
   }
-}
-
-function terminate(child: ChildProcess): void {
-  if (child.exitCode !== null || child.signalCode !== null) return;
-  child.kill("SIGTERM");
-  const timer = setTimeout(() => child.kill("SIGKILL"), 3000);
-  timer.unref();
-  child.once("exit", () => clearTimeout(timer));
 }
 
 /**

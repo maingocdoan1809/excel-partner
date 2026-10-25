@@ -81,6 +81,7 @@ export class CopilotAdapter extends BaseCliAdapter {
         seen.add(item.modelId);
         return [{ id: item.modelId, name: item.name || item.modelId }];
       });
+      if (!models.length) return await this.native.listModels(this.command, this.env);
       return { models, defaultModelId: session.models?.currentModelId ?? null };
     } finally {
       await peer.close();
@@ -183,7 +184,7 @@ export class CopilotAdapter extends BaseCliAdapter {
         ...(webSearch ? [] : ["--disable-builtin-mcps"]),
         // Expose Excel MCP and, when selected, only the provider-native web tools.
         "--available-tools",
-        ...exposedToolNames(ctx.mcp.env.EXCEL_ALLOW_OFFICE_JS === "1", { webSearch: ctx.mcp.env.EXCEL_WEB_SEARCH === "1", playwright: ctx.mcp.env.EXCEL_PLAYWRIGHT === "1" }).map((name) => `${MCP_SERVER_NAME}-${name}`),
+        ...(ctx.mcp.toolNames ?? exposedToolNames(ctx.mcp.env.EXCEL_ALLOW_OFFICE_JS === "1", { webSearch: ctx.mcp.env.EXCEL_WEB_SEARCH === "1", playwright: ctx.mcp.env.EXCEL_PLAYWRIGHT === "1" })).map((name) => `${MCP_SERVER_NAME}-${name}`),
         ...(webSearch ? ["web_search", "web_fetch"] : []),
         "--allow-tool",
         MCP_SERVER_NAME,
@@ -224,6 +225,7 @@ export class CopilotAdapter extends BaseCliAdapter {
       }
       this.sessions.set(providerSessionId, session);
       peer.onExit(() => {
+        ctx.onRuntimeClosed?.();
         const current = this.sessions.get(providerSessionId);
         current?.active?.queue.fail(
           new Error(`copilot exited unexpectedly: ${peer.stderrTail.slice(-3).join(" | ")}`),
@@ -270,7 +272,7 @@ export class CopilotAdapter extends BaseCliAdapter {
     session.peer
       .request<{ stopReason?: string; usage?: { inputTokens: number; outputTokens: number; totalTokens: number; cachedReadTokens?: number } }>(
         "session/prompt",
-        { sessionId: session.acpSessionId, prompt: [{ type: "text", text }] },
+        { sessionId: session.acpSessionId, prompt: [{ type: "text", text }, ...(input.images ?? []).map(image => ({ type: "image", mimeType: image.mediaType, data: image.data }))] },
         30 * 60_000,
       )
       .then(async (response) => {

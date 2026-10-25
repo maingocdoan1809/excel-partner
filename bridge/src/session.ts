@@ -1,5 +1,6 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import type { WebSocket } from "ws";
+import type { ProviderSessionState } from "../../providers/src/session-manager.js";
 import type { SessionAttachment } from "./attachments.js";
 import {
   encodeMessage,
@@ -38,7 +39,7 @@ export interface WorkbookSessionState {
  * turned into `tool_request` messages and resolved when the pane answers with
  * `tool_result`.
  */
-export class WorkbookSession {
+export class WorkbookSession implements ProviderSessionState {
   readonly id: string;
   readonly sessionToken: string;
   readonly workbookConnectionId: string;

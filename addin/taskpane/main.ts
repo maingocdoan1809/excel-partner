@@ -17,8 +17,10 @@ import { setupComposerMenu } from "./ui/composer-menu.js";
 import { setupTheme } from "./ui/theme.js";
 import { setupSavedReferences } from "./ui/saved-references.js";
 import { setupUserSkills } from "./ui/user-skills.js";
-import { createTextEditor } from "./ui/text-editor.js";
 import { showUserInput } from "./ui/user-input.js";
+import { setupSettings } from "./ui/settings.js";
+import { renderToolCard, paintTool, formatToolValue, toolChevron } from "./ui/tool-view.js";
+import { exposedToolNames } from "../../protocol/src/index.js";
 import {
   SessionStore,
   buildContextPreface,
@@ -56,6 +58,7 @@ const els = {
   menuNew: byId<HTMLButtonElement>("menu-new"),
   changesCount: byId<HTMLSpanElement>("changes-count"),
   panels: {
+    settings: byId<HTMLElement>("panel-settings"),
     skills: byId<HTMLElement>("panel-skills"),
     login: byId<HTMLElement>("panel-login"),
     changes: byId<HTMLElement>("panel-changes"),
@@ -157,6 +160,7 @@ const pendingPrompts = new Map<string, PendingPrompt>();
 let autoQueueAllowed = true;
 let live: { element: HTMLElement; message: StoredMessage } | null = null;
 const liveTools = new Map<string, { card: HTMLElement; tool: StoredTool }>();
+const workbookToolNames = new Set<string>(exposedToolNames(true, { playwright: true, webSearch: true }));
 let liveToolGroup: { element: HTMLDetailsElement; message: StoredMessage } | null = null;
 let thinking: HTMLElement | null = null;
 const pendingAttachments: Array<{ reference: UploadedAttachment; name: string }> = [];
@@ -212,8 +216,13 @@ const slash = createSlashMenu({
 });
 const savedReferences = setupSavedReferences(() => client);
 const userSkills = setupUserSkills(() => client, () => slash.reload());
-const promptEditor = createTextEditor();
 const toolSettings = setupToolSettings(() => provider);
+const settings = setupSettings({
+  loadInstructions: () => client.systemPrompt(),
+  saveInstructions: (content, revision) => client.saveSystemPrompt(content, revision),
+  historyCount: () => store.list().length,
+  clearHistory: () => els.historyClear.click(), historyClearButton: els.historyClear,
+});
 
 Office.onReady((info) => {
   if (info.host !== Office.HostType.Excel) return;
@@ -223,13 +232,20 @@ Office.onReady((info) => {
       if (requestId !== currentRequestId || signal.aborted) return { cancelled: true, answers: {} };
       clearThinking();
       live = null;
-      append({ kind: "note", text: request.questions.map(q => q.question).join("\n\n") });
+      const questionText = request.questions.map(q => q.question).join("\n\n");
+      const questionBubble = append({ kind: "assistant", text: questionText });
       const owner = session;
-      const pending = showUserInput(els.messages, request, signal);
+      const dock = byId("question-dock");
+      dock.hidden = false;
+      document.body.classList.add("question-active");
+      const pending = showUserInput(dock, request, signal);
       scrollToEnd();
       const response = await pending;
+      dock.hidden = true;
+      document.body.classList.remove("question-active");
+      if (session === owner) questionBubble.innerHTML = renderMarkdown(questionText);
       if (session === owner && requestId === currentRequestId) {
-        append({ kind: "note", text: response.cancelled ? "Question skipped or cancelled." : request.questions.map(q =>
+        append({ kind: response.cancelled ? "note" : "user", text: response.cancelled ? "Question skipped or cancelled." : request.questions.map(q =>
           `${q.header || q.question}: ${q.isSecret ? "[Hidden answer]" : response.answers[q.id]!.join(", ")}`).join("\n") });
         if (!signal.aborted) showThinking();
       }
@@ -259,7 +275,9 @@ Office.onReady((info) => {
     },
     onProviderEvent: handleEvent,
     onError: (message) => append({ kind: "error", text: message }),
-    onToolExecuted: (tool, args, result) => {
+    onToolExecuted: (tool, args, result, context) => {
+      if (context.requestId === currentRequestId && session === requestSession) appendTurnTool({ name: tool, args: summarize(args), input: formatToolValue(args),
+        result: formatToolValue(result), state: result.ok ? "ok" : "error", error: result.ok ? null : result.error.message });
       recordChange(tool, args, result);
       if (result.ok && ["add_shape", "add_connector", "add_line", "update_shape", "delete_shapes", "execute_office_js", "manage_sheet", "insert_sheets_from_file"].includes(tool)) {
         refreshSelectionSubscriptions?.();
@@ -309,9 +327,7 @@ Office.onReady((info) => {
     if (!els.menu.hidden) closeMenu();
     else if (!slash.isOpen && openPanel() !== null) showPanel(null);
   });
-  els.menu.querySelectorAll<HTMLButtonElement>("[data-provider]").forEach((button) =>
-    button.addEventListener("click", () => selectProvider(button.dataset.provider as ProviderId)),
-  );
+  byId<HTMLSelectElement>("provider-select").addEventListener("change", event => selectProvider((event.target as HTMLSelectElement).value as ProviderId));
   els.menuChanges.addEventListener("click", () => showPanel("changes"));
   byId("menu-login").addEventListener("click", () => showPanel("login"));
   byId("provider-login-button").addEventListener("click", () => showPanel("login"));
@@ -325,15 +341,18 @@ Office.onReady((info) => {
   byId("tab-changes").addEventListener("click", () => showPanel("changes"));
   byId("tab-history").addEventListener("click", () => showPanel("history"));
   els.menuHistory.addEventListener("click", () => showPanel("history"));
+  byId("history-button").addEventListener("click", () => showPanel("history"));
+  byId("menu-settings").addEventListener("click", () => showPanel("settings"));
+  document.querySelectorAll<HTMLButtonElement>("[data-settings-panel]").forEach(button => button.addEventListener("click", () => {
+    const panel = button.dataset.settingsPanel;
+    if (panel === "changes" || panel === "references" || panel === "skills" || panel === "templates") showPanel(panel);
+  }));
   els.menuReferences.addEventListener("click", () => showPanel("references"));
   els.menuTemplates.addEventListener("click", () => showPanel("templates"));
   byId("menu-skills").addEventListener("click", () => showPanel("skills"));
-  byId("menu-system-prompt").addEventListener("click", () => {
-    closeMenu();
-    void promptEditor.open({ title: "System prompt", detail: "Optional instructions shared by all AI providers on this computer. Leave empty for no add-in prompt. This does not enable additional tools or permissions. Saved changes apply to the next request; start a new chat to avoid instructions retained in history.", files: ["System prompt"],
-      load: () => client.systemPrompt(), save: document => client.saveSystemPrompt(document.content, document.revision),
-      reset: revision => client.saveSystemPrompt(null, revision),
-    });
+  byId("tools-button").addEventListener("click", () => {
+    showPanel("settings");
+    byId("settings-tools-section").scrollIntoView({ block: "nearest" });
   });
   els.menuNew.addEventListener("click", () => {
     closeMenu();
@@ -451,6 +470,9 @@ Office.onReady((info) => {
 /* -------------------------------------------------------------------------- */
 
 function renderMessage(container: HTMLElement, message: StoredMessage): HTMLElement {
+  // Older saved chats may contain tool-only assistant records with no text.
+  // Keep them out of the transcript as well as newly streamed empty messages.
+  if (message.kind === "assistant" && !message.text.trim()) return document.createElement("div");
   container.querySelector(".welcome")?.remove();
   let element: HTMLElement;
   switch (message.kind) {
@@ -487,7 +509,12 @@ function renderMessage(container: HTMLElement, message: StoredMessage): HTMLElem
       const group = document.createElement("details");
       group.className = "tool-group";
       const summary = document.createElement("summary");
-      summary.textContent = toolGroupLabel(message.tools?.length ?? 0);
+      const label = document.createElement("span");
+      label.textContent = toolGroupLabel(message.tools?.length ?? 0);
+      const chevron = document.createElement("span");
+      chevron.className = "tool-group-chevron";
+      chevron.append(toolChevron());
+      summary.append(label, chevron);
       const list = document.createElement("div");
       list.className = "tool-list";
       for (const tool of message.tools ?? []) list.append(renderToolCard(tool));
@@ -501,18 +528,23 @@ function renderMessage(container: HTMLElement, message: StoredMessage): HTMLElem
   return element;
 }
 
-function renderToolCard(tool: StoredTool): HTMLElement {
-  const card = document.createElement("div");
-  card.className = "tool";
-  card.innerHTML = '<span class="mark"></span><span class="name"></span><span class="args"></span>';
-  card.querySelector(".name")!.textContent = tool.name;
-  card.querySelector(".name")!.setAttribute("title", tool.name);
-  paintTool(card, tool);
-  return card;
-}
 
 function toolGroupLabel(count: number): string {
   return `${count} tool${count === 1 ? "" : "s"} called`;
+}
+
+/** One disclosure per provider turn, shared by native and workbook tool calls. */
+function appendTurnTool(tool: StoredTool): HTMLElement {
+  if (!liveToolGroup) {
+    const message: StoredMessage = { kind: "tool_group", text: "", tools: [] };
+    liveToolGroup = { element: append(message) as HTMLDetailsElement, message };
+  }
+  liveToolGroup.message.tools!.push(tool);
+  liveToolGroup.element.querySelector("summary > span")!.textContent = toolGroupLabel(liveToolGroup.message.tools!.length);
+  const card = renderToolCard(tool);
+  liveToolGroup.element.querySelector(".tool-list")!.append(card);
+  schedulePersist();
+  return card;
 }
 
 function bubble(kind: "user" | "assistant" | "error"): HTMLDivElement {
@@ -521,11 +553,6 @@ function bubble(kind: "user" | "assistant" | "error"): HTMLDivElement {
   return element;
 }
 
-function paintTool(card: HTMLElement, tool: StoredTool): void {
-  card.dataset.state = tool.state;
-  card.querySelector(".args")!.textContent = tool.error ?? tool.args;
-  card.title = tool.error ?? tool.args;
-}
 
 /** Add a message to the current chat, show it and save. */
 function append(message: StoredMessage): HTMLElement {
@@ -703,6 +730,8 @@ async function submit(queued?: PendingPrompt): Promise<void> {
   }
 
   const requestId = randomId();
+  if (liveToolGroup) liveToolGroup.element.open = false;
+  liveToolGroup = null;
   currentRequestId = requestId;
   requestSession = session;
   setBusy(true);
@@ -915,7 +944,7 @@ function renderWorkspaceMenu(): void {
       button.title = entry.path;
       const isFolder = !workspaceStack.length || ("type" in entry && entry.type === "folder");
       const supported = isFolder || ("supported" in entry && entry.supported);
-      button.textContent = `${isFolder ? "📁" : "📄"}  ${entry.name}${!workspaceStack.length && "isDefault" in entry && entry.isDefault ? "  · current workbook" : ""}${!supported ? "  · unsupported" : ""}`;
+      setWorkspaceRow(button, `${entry.name}${!workspaceStack.length && "isDefault" in entry && entry.isDefault ? " · current workbook" : ""}${!supported ? " · unsupported" : ""}`, isFolder);
       button.disabled = !supported;
       button.addEventListener("click", () => {
         if (isFolder) void openWorkspaceFolder(entry.path, entry.name);
@@ -935,7 +964,7 @@ function renderWorkspaceMenu(): void {
         menu.append(line);
       } else menu.append(button);
     }
-    if (!workspaceStack.length && workspaceDefaultError) menu.append(workspaceNote("Workbook folder unavailable. Choose local files below."));
+    if (!workspaceStack.length && workspaceDefaultError && visible.length) menu.append(workspaceNote("Workbook folder unavailable. Choose local files below."));
   }
 
   if (!workspaceStack.length && !workspaceLoading && !workspaceError) {
@@ -952,7 +981,7 @@ function renderWorkspaceMenu(): void {
         button.type = "button";
         button.className = "workspace-row";
         button.title = ref.available ? `${ref.path}${ref.description ? `\n${ref.description}` : ""}` : `File not found: ${ref.path}`;
-        button.textContent = `📄  ${ref.name}${ref.available ? "" : "  · file not found"}`;
+        setWorkspaceRow(button, `${ref.name}${ref.available ? "" : " · file not found"}`, false);
         button.disabled = !ref.available;
         button.addEventListener("click", () => void chooseWorkspaceFile(ref.path));
         menu.append(button);
@@ -964,10 +993,24 @@ function renderWorkspaceMenu(): void {
   actions.className = "workspace-actions";
   const pick = document.createElement("button");
   pick.type = "button";
-  pick.textContent = "Choose local files…";
+  setWorkspaceRow(pick, "Choose local files…", false);
   pick.addEventListener("click", openLocalFilePicker);
   actions.append(pick);
   menu.append(actions);
+}
+
+function setWorkspaceRow(button: HTMLButtonElement, text: string, folder: boolean): void {
+  const icon = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  icon.setAttribute("viewBox", "0 0 20 20");
+  icon.setAttribute("aria-hidden", "true");
+  icon.classList.add("workspace-icon");
+  const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+  path.setAttribute("d", folder ? "M2.5 6V4.5h6l2 2h7v10h-15z" : "M5 2.5h6l4 4v11H5z M11 2.5v4h4 M7.5 10h5 M7.5 13h5");
+  icon.append(path);
+  const label = document.createElement("span");
+  label.className = "workspace-row-label";
+  label.textContent = text;
+  button.replaceChildren(icon, label);
 }
 
 async function removeWorkspace(path: string): Promise<void> {
@@ -1183,14 +1226,18 @@ function handleEvent(event: ProviderEvent): void {
       }
       return;
     case "message_delta":
-      if (!live) live = startLive("assistant");
-      live.message.text += event.text;
+      if (!event.text || (!live && !event.text.trim())) return;
+      if (!live) live = startLive("assistant", event.text);
+      else live.message.text += event.text;
       live.element.innerHTML = renderMarkdown(live.message.text);
       scrollToEnd();
       schedulePersist();
       return;
     case "message_completed":
-      if (!live) live = startLive("assistant");
+      // Providers can finish an assistant message that only calls a tool.
+      // It has no chat text and must not create (or erase) a visible bubble.
+      if (!event.text.trim()) { live = null; return; }
+      if (!live) live = startLive("assistant", event.text);
       live.message.text = event.text;
       live.element.innerHTML = renderMarkdown(event.text);
       live = null; // the next message (after a tool call) gets its own bubble
@@ -1199,17 +1246,11 @@ function handleEvent(event: ProviderEvent): void {
       return;
     case "tool_started": {
       live = null;
-      const tool: StoredTool = { name: event.tool, args: summarize(event.args), state: "running", error: null };
-      if (!liveToolGroup) {
-        const message: StoredMessage = { kind: "tool_group", text: "", tools: [] };
-        const element = append(message) as HTMLDetailsElement;
-        element.open = true;
-        liveToolGroup = { element, message };
-      }
-      liveToolGroup.message.tools!.push(tool);
-      liveToolGroup.element.querySelector("summary")!.textContent = toolGroupLabel(liveToolGroup.message.tools!.length);
-      const card = renderToolCard(tool);
-      liveToolGroup.element.querySelector(".tool-list")!.append(card);
+      // Workbook calls get their exact result from onToolExecuted. Provider-local
+      // tools have a separate native call ID and must not be paired by name.
+      if (workbookToolNames.has(event.tool)) return;
+      const tool: StoredTool = { name: event.tool, args: summarize(event.args), input: formatToolValue(event.args), state: "running", error: null };
+      const card = appendTurnTool(tool);
       liveTools.set(event.callId, { card, tool });
       schedulePersist();
       return;
@@ -1366,8 +1407,8 @@ function clearThinking(): void {
   thinking = null;
 }
 
-function startLive(kind: "assistant"): { element: HTMLElement; message: StoredMessage } {
-  const message: StoredMessage = { kind, text: "" };
+function startLive(kind: "assistant", text: string): { element: HTMLElement; message: StoredMessage } {
+  const message: StoredMessage = { kind, text };
   session.messages.push(message);
   return { element: renderMessage(els.messages, message), message };
 }
@@ -1465,9 +1506,7 @@ function closeMenu(): void {
 
 function renderProviderMenu(): void {
   toolSettings.refreshProvider();
-  els.menu.querySelectorAll<HTMLButtonElement>("[data-provider]").forEach((button) => {
-    button.setAttribute("aria-checked", String(button.dataset.provider === provider));
-  });
+  byId<HTMLSelectElement>("provider-select").value = provider;
   els.providerHint.textContent = providerHints.get(provider) ?? "";
   byId("menu-login").textContent = `Sign in to ${PROVIDER_NAMES[provider]}`;
 }
@@ -1549,14 +1588,17 @@ function saveModelChoice(): void {
 /* Panels: changes, history, past chat                                         */
 /* -------------------------------------------------------------------------- */
 
-function openPanel(): "changes" | "history" | "session" | "templates" | "login" | "skills" | "references" | null {
-  for (const name of ["changes", "history", "session", "templates", "login", "skills", "references"] as const) if (!els.panels[name].hidden) return name;
+type PanelName = keyof typeof els.panels;
+function openPanel(): PanelName | null {
+  for (const name of Object.keys(els.panels) as PanelName[]) if (!els.panels[name].hidden) return name;
   return null;
 }
 
-function showPanel(name: "changes" | "history" | "session" | "templates" | "login" | "skills" | "references" | null): void {
+function showPanel(name: PanelName | null): void {
   closeMenu();
-  for (const key of ["changes", "history", "session", "templates", "login", "skills", "references"] as const) els.panels[key].hidden = key !== name;
+  for (const key of Object.keys(els.panels) as PanelName[]) els.panels[key].hidden = key !== name;
+  document.body.classList.toggle("settings-active", name === "settings");
+  if (name === "settings") { persistNow(); void settings.open(); }
   if (name === "references") void savedReferences.refresh();
   if (name === "skills") void userSkills.refresh();
   document.body.classList.toggle("login-active", name === "login");

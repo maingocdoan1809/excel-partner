@@ -7,6 +7,7 @@
     <title>Excel Partner</title>
     <script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
     <link rel="stylesheet" href="./styles.css" />
+    <link rel="stylesheet" href="./workspace.css" />
   </head>
   <body>
     <header class="app-header">
@@ -15,35 +16,19 @@
         <div class="brand-text"><strong>Excel Partner</strong><span id="connection-status" class="status" data-state="idle"><i class="dot"></i><span id="connection-label">Waiting for Excel</span></span></div>
       </div>
       <div class="header-actions">
+        <button id="history-button" type="button" class="icon-button" aria-label="Chat history" title="Chat history"><svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="6.5" fill="none" stroke="currentColor" stroke-width="1.2"/><path d="M10 6v4l3 2" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg></button>
         <button id="new-chat-button" type="button" class="icon-button" aria-label="New chat" title="New chat">＋</button>
         <button id="menu-button" type="button" class="icon-button" aria-haspopup="menu" aria-expanded="false" aria-label="Settings" title="Settings">
-          <svg viewBox="0 0 20 20" aria-hidden="true">
-            <path d="M8.3 2h3.4l.5 2a6 6 0 0 1 1.4.8l2-.6 1.7 2.9-1.5 1.4a6 6 0 0 1 0 1.6l1.5 1.4-1.7 2.9-2-.6a6 6 0 0 1-1.4.8l-.5 2H8.3l-.5-2a6 6 0 0 1-1.4-.8l-2 .6L2.7 11l1.5-1.4a6 6 0 0 1 0-1.6L2.7 6.6l1.7-2.9 2 .6a6 6 0 0 1 1.4-.8z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" />
-            <circle cx="10" cy="9.8" r="2.3" fill="none" stroke="currentColor" stroke-width="1.3" />
-          </svg>
+          <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="4" r="1" fill="currentColor"/><circle cx="10" cy="10" r="1" fill="currentColor"/><circle cx="10" cy="16" r="1" fill="currentColor"/></svg>
           <span id="menu-dot" class="menu-dot" hidden></span>
         </button>
       </div>
 
       <div id="settings-menu" class="menu" role="menu" aria-label="Settings" hidden>
-        <div class="menu-label">Provider</div>
-        <div id="provider-list" role="group" aria-label="Provider">
-          <button type="button" class="menu-item" role="menuitemradio" data-provider="claude" aria-checked="false"><span class="check"></span>Claude Code</button>
-          <button type="button" class="menu-item" role="menuitemradio" data-provider="copilot" aria-checked="false"><span class="check"></span>GitHub Copilot</button>
-          <button type="button" class="menu-item" role="menuitemradio" data-provider="codex" aria-checked="false"><span class="check"></span>Codex</button>
-          <button type="button" class="menu-item" role="menuitemradio" data-provider="opencode" aria-checked="false"><span class="check"></span>OpenCode</button>
-        </div>
-        <div id="provider-hint" class="menu-hint"></div>
-        <button id="menu-login" type="button" class="menu-item" role="menuitem">Sign in to GitHub Copilot</button>
-        <label class="menu-label" for="theme-select">Appearance</label>
-        <select id="theme-select" class="theme-select" aria-label="Appearance"><option value="auto">Follow Excel</option><option value="light">Light</option><option value="dark">Dark</option></select>
+        <button id="menu-settings" type="button" class="menu-item" role="menuitem">Settings</button>
         <div class="menu-sep"></div>
         <button id="menu-changes" type="button" class="menu-item" role="menuitem">Changes <span id="changes-count" class="badge" hidden>0</span></button>
         <button id="menu-history" type="button" class="menu-item" role="menuitem">History</button>
-        <button id="menu-references" type="button" class="menu-item" role="menuitem">Reference files</button>
-        <button id="menu-templates" type="button" class="menu-item" role="menuitem">Skill templates</button>
-        <button id="menu-skills" type="button" class="menu-item" role="menuitem">Manage skills</button>
-        <button id="menu-system-prompt" type="button" class="menu-item" role="menuitem">System prompt</button>
         <button id="menu-new" type="button" class="menu-item" role="menuitem">New chat</button>
       </div>
     </header>
@@ -61,6 +46,52 @@
 
     <main class="layout" id="layout">
       <section id="messages" class="messages" aria-live="polite"></section>
+
+      <section id="panel-settings" class="panel settings-panel" hidden aria-label="Settings">
+        <header class="panel-head"><button type="button" class="back" data-close="settings" aria-label="Back to chat">←</button><h2 id="settings-heading" tabindex="-1">Settings</h2></header>
+        <div class="settings-body">
+          <section class="settings-section" aria-labelledby="settings-provider-title">
+            <div class="settings-row"><div><label id="settings-provider-title" class="settings-title" for="provider-select">AI provider</label><p class="settings-description">Choose the account used for new chats.</p></div>
+              <select id="provider-select" class="theme-select"><option value="claude">Claude Code</option><option value="copilot">GitHub Copilot</option><option value="codex">Codex</option><option value="opencode">OpenCode</option></select>
+            </div>
+            <p id="provider-hint" class="settings-description"></p>
+            <button id="menu-login" type="button" class="secondary settings-account">Sign in to GitHub Copilot</button>
+          </section>
+          <section class="settings-section">
+            <label class="settings-title" for="settings-instructions">Instructions</label>
+            <p class="settings-description">Tell Excel Partner how it should work in Excel.</p>
+            <textarea id="settings-instructions" rows="4" placeholder="e.g. Use Vietnamese. Format numbers with thousand separators. Always bold column headers."></textarea>
+            <div class="settings-save-row"><p id="settings-instructions-status" role="status" aria-live="polite"></p><button id="settings-save-instructions" type="button" class="secondary">Save</button></div>
+          </section>
+          <section class="settings-section settings-row">
+            <div><h3>Text size</h3><p class="settings-description">Adjust the conversation text size.</p></div>
+            <div class="text-size-control"><button id="text-size-decrease" type="button" aria-label="Decrease text size">−</button><button id="text-size-reset" type="button" title="Reset text size to 100%">100%</button><button id="text-size-increase" type="button" aria-label="Increase text size">+</button></div>
+          </section>
+          <section class="settings-section settings-row">
+            <div><label class="settings-title" for="theme-select">Appearance</label><p class="settings-description">Choose a theme or follow Excel.</p></div>
+            <select id="theme-select" class="theme-select" aria-label="Appearance"><option value="auto">Follow Excel</option><option value="light">Light</option><option value="dark">Dark</option></select>
+          </section>
+          <section class="settings-section settings-row">
+            <div><h3>Chat history</h3><p id="settings-history-count" class="settings-description">Saved on this computer.</p></div>
+            <button id="settings-clear-history" type="button" class="secondary">Delete all</button>
+          </section>
+          <section id="settings-tools-section" class="settings-section"><h3>AI tools</h3>
+            <div id="tools-menu" class="settings-tools" aria-label="AI tools">
+              <label><input id="tool-web-search" type="checkbox" /> Web search</label>
+              <p id="tool-web-search-description">Use the selected AI provider’s built-in web search. No separate search service is added.</p>
+              <label><input id="tool-playwright" type="checkbox" /> Playwright browser</label>
+              <p>Use a separate local browser. First use may download Playwright MCP; Chrome must be installed. Ask/Auto controls browser actions.</p>
+              <p>Changes apply to the next message.</p>
+            </div>
+          </section>
+          <section class="settings-section settings-links" aria-label="Workspace settings">
+            <button type="button" data-settings-panel="changes">Workbook changes <span>›</span></button>
+            <button id="menu-references" type="button">Reference files <span>›</span></button>
+            <button id="menu-skills" type="button">Manage skills <span>›</span></button>
+            <button id="menu-templates" type="button">Skill templates <span>›</span></button>
+          </section>
+        </div>
+      </section>
 
       <section id="panel-skills" class="panel" hidden aria-label="Manage skills">
         <header class="panel-head"><button type="button" class="back" data-close="skills" aria-label="Back to chat">←</button><h2>Your skills</h2></header>
@@ -165,6 +196,7 @@
     </main>
 
     <footer class="composer">
+      <div id="question-dock" hidden aria-label="Assistant question"></div>
       <div id="composer-resizer" class="resizer" role="separator" aria-orientation="horizontal" tabindex="0" title="Drag to resize the input">
         <span></span>
       </div>
@@ -177,7 +209,7 @@
           <textarea
             id="prompt-input"
             rows="3"
-            placeholder="What would you like to do with this workbook?"
+            placeholder="Reply or / to use a skill"
           ></textarea>
         </div>
         <div class="composer-actions">
@@ -198,14 +230,8 @@
             <div id="permission-menu" class="picker-menu" role="listbox" aria-label="Permissions" hidden></div>
           </div>
           <div class="composer-picker tools-picker">
-            <button id="tools-button" type="button" class="picker-button" aria-label="Tools" aria-haspopup="dialog" aria-expanded="false" aria-controls="tools-menu"><span class="picker-label">Tools</span><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 5h14M3 10h14M3 15h14"/><circle cx="7" cy="5" r="2"/><circle cx="13" cy="10" r="2"/><circle cx="7" cy="15" r="2"/></svg></button>
-            <div id="tools-menu" class="picker-menu tools-menu" role="dialog" aria-label="AI tools" hidden>
-              <label><input id="tool-web-search" type="checkbox" /> Web search</label>
-              <p id="tool-web-search-description">Use the selected AI provider’s built-in web search. No separate search service is added.</p>
-              <label><input id="tool-playwright" type="checkbox" /> Playwright browser</label>
-              <p>Use a separate local browser. First use may download Playwright MCP; Chrome must be installed. Ask/Auto controls browser actions.</p>
-              <p>Changes apply to the next message.</p>
-            </div>
+            <button id="tools-button" type="button" class="picker-button" aria-label="Tools" aria-controls="settings-tools-section"><span class="picker-label">Tools</span><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 5h14M3 10h14M3 15h14"/><circle cx="7" cy="5" r="2"/><circle cx="13" cy="10" r="2"/><circle cx="7" cy="15" r="2"/></svg></button>
+
           </div>
           <div class="composer-picker usage-picker">
             <button id="usage-button" type="button" class="picker-button usage-button" aria-label="Session usage" title="Session usage" aria-haspopup="dialog" aria-expanded="false" aria-controls="usage-popover">

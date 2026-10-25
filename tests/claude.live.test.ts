@@ -89,14 +89,41 @@ describe.skipIf(!hasClaude())("claude adapter (real CLI, fake model)", () => {
     expect(result.text).toContain("Received your choice.");
   }, 120_000);
 
-  it("keeps conversation history across turns (resume) ", async () => {
+  it("keeps conversation history across turns on one persistent process", async () => {
     const h = await setup([{ text: "noted" }]);
-    expect((await h.turn("remember ZEBRA")).finished.reason).toBe("completed");
-    expect((await h.turn("what did I say?")).finished.reason).toBe("completed");
+    const first = await h.turn("remember ZEBRA");
+    expect(first.finished.reason, JSON.stringify(first.events.filter(e => e.type === "error"))).toBe("completed");
+    const second = await h.turn("what did I say?");
+    expect(second.finished.reason).toBe("completed");
+    // The fake API reports identical usage per call. Persistent transport must
+    // not accidentally charge the first turn again on the second result.
+    const firstUsage = first.events.find(e => e.type === "usage_update");
+    const secondUsage = second.events.find(e => e.type === "usage_update");
+    expect(firstUsage?.type).toBe("usage_update");
+    expect(secondUsage?.type).toBe("usage_update");
+    if (firstUsage?.type === "usage_update" && secondUsage?.type === "usage_update") {
+      expect(secondUsage.usage.totalTokens).toBe(firstUsage.usage.totalTokens);
+    }
 
     const last = fake!.requests.filter((r) => r.body.tools?.length).at(-1)!.body.messages;
     expect(JSON.stringify(last)).toContain("ZEBRA");
   }, 180_000);
+
+  it("reopens the runtime for new settings while resuming the same conversation", async () => {
+    const h = await setup([{ text: "noted" }]);
+    const first = await h.turn("remember GIRAFFE");
+    expect(first.finished.reason).toBe("completed");
+    const native = first.events.find(e => e.type === "session_info");
+    if (native?.type !== "session_info") throw new Error("Missing native session ID");
+    const from = h.pane.received.length;
+    h.pane.send({ type: "prompt", requestId: "reconfigured", prompt: "what did I say?", selection: null, effort: "high" });
+    const result = await h.pane.waitFor(m => m.type === "turn_finished" && m.requestId === "reconfigured", 60_000);
+    expect(result).toMatchObject({ reason: "completed" });
+    const resumed = h.pane.received.slice(from).find(m => m.type === "session_info");
+    expect(resumed).toMatchObject({ providerSessionId: native.providerSessionId });
+    const last = fake!.requests.filter(r => r.body.tools?.length).at(-1)!;
+    expect(JSON.stringify(last.body.messages)).toContain("GIRAFFE");
+  }, 120_000);
 
   it("passes a pending user message through the next MCP tool result to the real CLI", async () => {
     const h = await setup([{ tool: "get_selection", input: {} }, { text: "Received the update." }]);

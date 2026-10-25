@@ -30,6 +30,16 @@ export class CopilotNativeSessions {
   private readonly sessions = new Map<string, NativeSession>();
   has(id: string) { return this.sessions.has(id); }
 
+  async listModels(command: string, env: NodeJS.ProcessEnv) {
+    const { CopilotClient, RuntimeConnection } = await import("@github/copilot-sdk");
+    const client = new CopilotClient({ connection: RuntimeConnection.forStdio({ path: resolveCopilotPath(command, env),
+      args: ["--no-custom-instructions", "--no-remote", "--disable-builtin-mcps"] }), workingDirectory: ensureWorkspaceDir(), env, logLevel: "error" });
+    try {
+      await client.start();
+      return { models: (await client.listModels()).map(model => ({ id: model.id, name: model.name })), defaultModelId: null };
+    } finally { await client.stop(); }
+  }
+
   async listCommands(command: string, env: NodeJS.ProcessEnv, id?: string) {
     const current = id ? this.sessions.get(id) : undefined;
     if (current) return normalizeCommands((await current.session.rpc.commands.list()).commands);
@@ -49,8 +59,9 @@ export class CopilotNativeSessions {
     if (ctx.resumeSessionId && !validNativeId(ctx.resumeSessionId)) throw new Error("Invalid Copilot resume session ID");
     const { CopilotClient, RuntimeConnection, ToolSet } = await import("@github/copilot-sdk");
     const web = ctx.mcp.env.EXCEL_WEB_SEARCH === "1";
-    const names = exposedToolNames(ctx.mcp.env.EXCEL_ALLOW_OFFICE_JS === "1", { playwright: ctx.mcp.env.EXCEL_PLAYWRIGHT === "1" });
-    const tools = new ToolSet().addBuiltIn("ask_user");
+    const names = ctx.mcp.toolNames ?? exposedToolNames(ctx.mcp.env.EXCEL_ALLOW_OFFICE_JS === "1", { playwright: ctx.mcp.env.EXCEL_PLAYWRIGHT === "1" });
+    const tools = new ToolSet();
+    if (!ctx.mcp.toolNames) tools.addBuiltIn("ask_user");
     for (const name of names) tools.addMcp(`excel-${name}`);
     if (web) tools.addBuiltIn(["web_search", "web_fetch"]);
     const cliPath = resolveCopilotPath(command, env);
@@ -61,9 +72,12 @@ export class CopilotNativeSessions {
     });
     let state: NativeSession | undefined;
     const config: SessionConfig = {
-      model: ctx.model ?? undefined, reasoningEffort: ctx.effort, streaming: true, availableTools: tools,
+      model: ctx.model ?? undefined, streaming: true, availableTools: tools,
+      // Auto selects its own reasoning settings. The CLI accepts effort at
+      // creation but rejects it on resume, for both workbook and API sessions.
+      ...(!ctx.model || ctx.model === "auto" ? {} : { reasoningEffort: ctx.effort }),
       workingDirectory: ensureWorkspaceDir(),
-      ...(ctx.systemPrompt?.trim() ? { systemMessage: { mode: "append", content: ctx.systemPrompt } } : {}),
+      ...(ctx.systemPrompt?.trim() ? { systemMessage: { mode: ctx.systemPromptMode ?? "append", content: ctx.systemPrompt } } : {}),
       mcpServers: { excel: { type: "local", command: ctx.mcp.command, args: ctx.mcp.args, env: ctx.mcp.env, tools: names } },
       onPermissionRequest: request => (request.kind === "mcp" && request.serverName === "excel") || (web && request.kind === "url")
         ? { kind: "approve-once" } : { kind: "reject" },

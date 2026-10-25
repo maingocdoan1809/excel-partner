@@ -28,6 +28,7 @@ import { SkillError } from "./skills.js";
 import { UserSkills, SkillEditConflict, MAX_SKILL_UPLOAD_BYTES } from "./skill-upload.js";
 import { SkillStore, expandSkillPrompt, projectTemplateReminder } from "./skills.js";
 import { SessionManager } from "./session-manager.js";
+import { ProviderSessionManager } from "./provider-session-manager.js";
 import { SystemPromptStore, PromptSettingsError, PromptSettingsConflict } from "./system-prompt.js";
 import { WorkbookSession } from "./session.js";
 import { ToolGateway } from "./tool-gateway.js";
@@ -72,6 +73,7 @@ export class Bridge {
   readonly sessions: SessionManager;
   readonly gateway: ToolGateway;
   readonly providers: ProviderRegistry;
+  private readonly providerSessions: ProviderSessionManager<WorkbookSession>;
   private readonly references: ReferenceFiles;
   private readonly savedReferences: SavedReferences;
   private readonly workspaceConfigPath: string | null;
@@ -126,6 +128,8 @@ export class Bridge {
       logger: this.logger.child("providers"),
     };
     this.providers = options.registry ?? createDefaultRegistry(runtime);
+    this.providerSessions = new ProviderSessionManager<WorkbookSession>(this.providers,
+      session => this.gateway.externalTools.closeSession(session.id), this.logger);
 
     const mockProvider = process.env.BRIDGE_MOCK_PROVIDER;
     if (mockProvider) {
@@ -949,23 +953,8 @@ export class Bridge {
     }
 
     capabilities = { ...capabilities, webSearch: capabilities.webSearch && supportsNativeWebSearch(session.provider) };
-    if (session.providerSessionId && (session.capabilities.webSearch !== capabilities.webSearch || session.capabilities.playwright !== capabilities.playwright)) {
-      await this.closeProviderProcess(session, "tool_settings_change");
-    }
-    if (!capabilities.playwright && session.capabilities.playwright) await this.gateway.externalTools.closeSession(session.id, "browser");
-    session.capabilities = capabilities;
     const selectedModel = model ?? null;
     const promptSettings = this.systemPrompt.read();
-    if (session.providerSessionId && session.systemPromptRevision !== promptSettings.revision) {
-      await this.closeProviderProcess(session, "system_prompt_change");
-    }
-    if (session.providerSessionId && ((resumeSessionId && resumeSessionId !== session.providerNativeSessionId)
-      || (!resumeSessionId && chatSessionId && session.providerChatSessionId && chatSessionId !== session.providerChatSessionId))) {
-      await this.closeProviderProcess(session, "chat_change");
-    }
-    if (session.providerSessionId && (session.providerModel !== selectedModel || session.providerEffort !== effort)) {
-      await this.closeProviderProcess(session, "model_change");
-    }
     const adapter = this.providers.require(session.provider);
     const controller = session.beginTurn(requestId);
     this.activeUsage.set(`${session.id}:${requestId}`, {
@@ -993,31 +982,27 @@ export class Bridge {
         command = parsed;
       }
       controller.signal.throwIfAborted();
-      if (!session.providerSessionId) {
-        session.providerSessionId = await adapter.startSession({
-          requestUserInput: (request, signal) => session.requestUserInput(request, signal),
-          authorizeTool: async (args) => {
-            const result = await session.requestTool("__authorize_provider_tool", args, 120_000);
-            return result.ok && (result.data as { approved?: boolean })?.approved === true;
-          },
-          workbookConnectionId: session.workbookConnectionId,
-          sessionId: session.id,
-          model: selectedModel,
-          effort,
-          resumeSessionId,
-          mcp: this.mcpEndpointFor(session),
-          signal: controller.signal,
-          systemPrompt: promptSettings.content,
-        });
-        session.providerModel = selectedModel;
-        session.systemPromptRevision = promptSettings.revision;
-        session.providerEffort = effort;
-        session.providerChatSessionId = chatSessionId ?? session.id;
-      }
-
-      for await (const event of adapter.sendTurn({
+      await this.providerSessions.ensure(session, {
+        model: selectedModel, effort, chatSessionId, resumeSessionId, capabilities,
+        systemPromptRevision: promptSettings.revision,
+      }, () => ({
+        requestUserInput: (request, signal) => session.requestUserInput(request, signal),
+        authorizeTool: async (args) => {
+          const result = await session.requestTool("__authorize_provider_tool", args, 120_000);
+          return result.ok && (result.data as { approved?: boolean })?.approved === true;
+        },
+        workbookConnectionId: session.workbookConnectionId,
+        sessionId: session.id,
+        model: selectedModel,
+        effort,
+        resumeSessionId,
+        mcp: this.mcpEndpointFor(session),
+        signal: controller.signal,
         systemPrompt: promptSettings.content,
-        providerSessionId: session.providerSessionId,
+      }));
+
+      for await (const event of this.providerSessions.sendTurn(session, {
+        systemPrompt: promptSettings.content,
         requestId,
         model: selectedModel,
         effort,
@@ -1031,11 +1016,9 @@ export class Bridge {
           this.finishTurn(session, requestId, event.reason);
         } else if (!session.hasFinished(requestId)) {
           if (event.type === "session_info" && event.requestId === requestId && event.provider === session.provider) {
-            session.providerNativeSessionId = event.providerSessionId;
-            session.providerChatSessionId = providerSessionKey(event.provider, event.providerSessionId);
             const record = this.activeUsage.get(`${session.id}:${requestId}`);
             if (record) {
-              record.sessionId = session.providerChatSessionId;
+              record.sessionId = providerSessionKey(event.provider, event.providerSessionId);
               record.providerSessionId = event.providerSessionId;
               if (event.title) record.title = event.title;
             }
@@ -1094,12 +1077,10 @@ export class Bridge {
     if (session.activeRequestId !== requestId) return;
     session.abortTurn();
     void this.gateway.externalTools.closeSession(session.id, "browser");
-    if (session.provider && session.providerSessionId) {
-      try {
-        await this.providers.get(session.provider)?.cancelTurn(session.providerSessionId);
-      } catch (error) {
-        this.logger.warn("cancelTurn failed", { error: String(error) });
-      }
+    try {
+      await this.providerSessions.cancel(session);
+    } catch (error) {
+      this.logger.warn("cancelTurn failed", { error: String(error) });
     }
     // The adapter normally ends its stream right after cancel. If it hangs,
     // report the cancellation anyway and drop the provider process so the
@@ -1115,23 +1096,10 @@ export class Bridge {
   }
 
   private async closeProviderProcess(session: WorkbookSession, reason: string): Promise<void> {
-    await this.gateway.externalTools.closeSession(session.id);
     if (session.activeRequestId) session.takeFollowups(session.activeRequestId, "next_turn");
     session.abortTurn();
-    const provider = session.provider;
-    const providerSessionId = session.providerSessionId;
-    session.providerSessionId = null;
-    session.providerNativeSessionId = null;
-    session.providerChatSessionId = null;
-    session.providerModel = null;
     session.activeRequestId = null;
-    if (!provider || !providerSessionId) return;
-    try {
-      await this.providers.get(provider)?.closeSession(providerSessionId);
-      this.logger.debug("provider session closed", { provider, reason });
-    } catch (error) {
-      this.logger.warn("closeSession failed", { error: String(error) });
-    }
+    await this.providerSessions.close(session, reason);
   }
 
   private mcpEndpointFor(session: WorkbookSession): McpEndpoint {

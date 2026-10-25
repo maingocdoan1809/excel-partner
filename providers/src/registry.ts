@@ -1,5 +1,5 @@
 import type { ProviderAdapter, ProviderModelCatalog, ProviderRuntime } from "./types.js";
-import type { ProviderId } from "../../protocol/src/index.js";
+import { PROVIDER_IDS, type ProviderId } from "../../protocol/src/index.js";
 import { ClaudeAdapter } from "./claude.js";
 import { CopilotAdapter } from "./copilot.js";
 import { CodexAdapter } from "./codex.js";
@@ -51,10 +51,16 @@ export class ProviderRegistry {
   }
 }
 
+/** Exhaustive against the shared protocol catalog: adding an ID requires a factory. */
+const factories: Record<ProviderId, (runtime: ProviderRuntime) => ProviderAdapter> = {
+  claude: runtime => new ClaudeAdapter(runtime),
+  copilot: runtime => new CopilotAdapter(runtime),
+  codex: runtime => new CodexAdapter(runtime),
+  opencode: runtime => new OpencodeAdapter(runtime),
+};
+
 export function createDefaultRegistry(runtime: ProviderRuntime): ProviderRegistry {
-  return new ProviderRegistry()
-    .register(new ClaudeAdapter(runtime))
-    .register(new CopilotAdapter(runtime))
-    .register(new CodexAdapter(runtime))
-    .register(new OpencodeAdapter(runtime));
+  const registry = new ProviderRegistry();
+  for (const id of PROVIDER_IDS) registry.register(factories[id](runtime));
+  return registry;
 }

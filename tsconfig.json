@@ -20,6 +20,7 @@
   "include": [
     "protocol/**/*.ts",
     "bridge/**/*.ts",
+    "gateway/**/*.ts",
     "providers/**/*.ts",
     "excel_mcp/**/*.ts",
     "tests/**/*.ts",

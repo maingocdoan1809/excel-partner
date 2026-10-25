@@ -7,3 +7,5 @@ export * from "./codex.js";
 export * from "./opencode.js";
 export * from "./mock.js";
 export * from "./registry.js";
+export * from "./session-manager.js";
+export * from "./client-tools.js";

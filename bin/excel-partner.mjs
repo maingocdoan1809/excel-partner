@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { spawn, spawnSync } from "node:child_process";
 import { X509Certificate } from "node:crypto";
-import { existsSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import https from "node:https";
 import os from "node:os";
 import path from "node:path";
@@ -58,6 +58,15 @@ async function ensureCertificate() {
   }
   if (existsSync(cert) || existsSync(key)) fail(`Incomplete certificate pair in ${dataDir}; remove it and rerun setup.`);
   mkdirSync(dataDir, { recursive: true });
+  // Reuse the Agent Gateway's localhost certificate so the user trusts one certificate only.
+  const shared = path.join(process.env.LOCALAPPDATA || os.homedir(), "Agent Gateway");
+  const sharedCert = path.join(shared, "localhost.crt"), sharedKey = path.join(shared, "localhost.key");
+  if (existsSync(sharedCert) && existsSync(sharedKey)
+    && new Date(new X509Certificate(readFileSync(sharedCert)).validTo).getTime() > Date.now() + 30 * 86400000) {
+    copyFileSync(sharedCert, cert); copyFileSync(sharedKey, key);
+    console.log(`Reusing the Agent Gateway certificate from ${shared}`);
+    return;
+  }
   const pems = await selfsigned.generate([{ name: "commonName", value: "localhost" }], {
     algorithm: "sha256",
     notAfterDate: new Date(Date.now() + 365 * 86400000),
@@ -107,29 +116,149 @@ async function stop() {
   rmSync(pidFile, { force: true });
 }
 
-async function main() {
-  const command = process.argv[2] || "help";
-  if (command === "help" || command === "--help") {
-    console.log("Usage: excel-partner <setup|start|stop|status|update|uninstall>\nExcel desktop on Windows; setup registers the local add-in for the current user.\nupdate: install the latest npm release, refresh registration, and restart the bridge.");
-    return;
+const gatewayBin = path.join(root, "gateway", "bin", "agent-gateway.mjs");
+const gatewayDir = process.env.AGENT_GATEWAY_HOME ?? path.join(process.env.LOCALAPPDATA || path.join(os.homedir(), ".config"), "Agent Gateway");
+
+/** Runs one Agent Gateway CLI command; its own output and exit code are passed through. */
+function gateway(args) {
+  if (!existsSync(gatewayBin)) fail("This installation is missing the gateway. Reinstall excel-partner.");
+  const result = spawnSync(process.execPath, [gatewayBin, ...args], { stdio: "inherit" });
+  if (result.error) throw result.error;
+  if (result.status !== 0) { process.exitCode = result.status ?? 1; return false; }
+  return true;
+}
+function tail(file, lines = 40) {
+  if (!existsSync(file)) return [];
+  return readFileSync(file, "utf8").split(/\r?\n/).filter(Boolean).slice(-lines);
+}
+function logsAddin() {
+  for (const name of ["bridge.err.log", "bridge.log"]) {
+    console.log(`--- ${path.join(dataDir, name)}`);
+    console.log(tail(path.join(dataDir, name)).join("\n") || "(empty)");
   }
-  requireWindows();
-  if (command === "setup") {
-    await ensureCertificate();
-    powershell("register");
-    await stop();
-    await start();
-    console.log("Restart Excel, then open Home > Excel Partner. Use Settings > Sign in to GitHub Copilot for device-code sign-in; other providers use their own CLI login.");
-  } else if (command === "start") await start();
-  else if (command === "stop") await stop();
-  else if (command === "status") console.log((await health()) ? "Bridge running at https://localhost:8765" : "Bridge stopped or unhealthy");
-  else if (command === "update") await updatePackage({ root, dataDir, nodePath: process.execPath, stop, wasRunning: Boolean(livePid()) });
-  else if (command === "uninstall") {
-    await stop();
-    powershell("unregister");
-    rmSync(cert, { force: true });
-    rmSync(key, { force: true });
-    console.log(`Registration removed. User data remains at ${dataDir}`);
-  } else fail(`Unknown command: ${command}`);
+}
+async function doctorAddin() {
+  const line = (ok, text) => console.log(`${ok === true ? "[ ok ]" : ok === false ? "[fail]" : "[warn]"} ${text}`);
+  line(Number(process.versions.node.split(".")[0]) >= 20, `Node.js ${process.versions.node} (20 or later required)`);
+  const hasCert = existsSync(cert) && existsSync(key);
+  line(hasCert, hasCert ? "Certificate present" : "Certificate missing. Run: excel-partner setup");
+  if (hasCert) {
+    const days = Math.floor((new Date(new X509Certificate(readFileSync(cert)).validTo).getTime() - Date.now()) / 86400000);
+    line(days > 30 ? true : days > 0 ? null : false, `Certificate valid for ${days} more day(s)`);
+  }
+  const run = spawnSync("reg.exe", ["query", "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run", "/v", "Excel Partner Bridge"], { stdio: "ignore", windowsHide: true });
+  line(run.status === 0, run.status === 0 ? "Starts automatically at Windows sign-in" : "No sign-in startup entry. Run: excel-partner setup");
+  const healthy = await health();
+  line(healthy, healthy ? "Bridge running at https://localhost:8765" : "Bridge not running. Run: excel-partner start");
+}
+
+const TARGETS = { addin: "addin", app: "addin", gateway: "gateway", all: "all" };
+const HELP = `Usage: excel-partner <command> [addin|gateway|all]
+
+  setup      Register and start. No target = the Excel add-in. 'all' sets up both.
+  start      Start the bridge (add-in) or the gateway.
+  stop       Stop it.
+  restart    Stop, then start.
+  status     Show what is running (default: both).
+  info       Show the gateway URL and token (add --copy to copy the token).
+  logs       Show recent log lines.
+  doctor     Check the installation and explain what to fix (default: both).
+  update     Install the latest release and refresh both (always the whole package).
+  uninstall  Stop and remove registration and startup entries.
+
+Gateway settings use: excel-partner gateway <config|alias|model-name|provider|models|warmup|autostart> ...
+Examples: excel-partner setup            excel-partner setup gateway
+          excel-partner start all        excel-partner info --copy`;
+
+async function main() {
+  const args = process.argv.slice(2).filter(arg => arg !== "--help");
+  const command = args[0] || "help";
+  if (command === "help" || process.argv.includes("--help")) { console.log(HELP); return; }
+  if (command === "gateway") { gateway(args.slice(1)); return; }
+  const flags = args.filter(arg => arg.startsWith("--"));
+  const positional = args.filter(arg => !arg.startsWith("--"));
+  const given = TARGETS[positional[1]];
+  if (positional[1] && !given) fail(`Unknown target: ${positional[1]}. Use addin, gateway or all.`);
+  const everything = ["status", "doctor", "update", "info", "token"].includes(command);
+  const target = given ?? (everything ? "all" : "addin");
+  const wantAddin = target !== "gateway", wantGateway = target !== "addin";
+  // The add-in needs Excel desktop on Windows; the gateway does not. Each part
+  // runs on its own, so a failure in one never prevents the other from running.
+  const addin = fn => async () => { requireWindows(); await fn(); };
+  const steps = [];
+  const add = (name, fn) => steps.push([name, fn]);
+  const gatewayStep = args => () => { if (!gateway(args)) throw new Error("see the output above"); };
+
+  switch (command) {
+    case "setup":
+      if (wantAddin) add("Add-in", addin(async () => {
+        await ensureCertificate();
+        powershell("register");
+        await stop();
+        await start();
+        console.log("Restart Excel, then open Home > Excel Partner. Use Settings > Sign in to GitHub Copilot for device-code sign-in; other providers use their own CLI login.");
+      }));
+      if (wantGateway) add("Gateway", gatewayStep(["setup"]));
+      break;
+    case "start":
+      if (wantAddin) add("Add-in", addin(start));
+      if (wantGateway) add("Gateway", gatewayStep(["start"]));
+      break;
+    case "stop":
+      if (wantGateway) add("Gateway", gatewayStep(["stop"]));
+      if (wantAddin) add("Add-in", addin(stop));
+      break;
+    case "restart":
+      if (wantGateway) add("Gateway", gatewayStep(["restart"]));
+      if (wantAddin) add("Add-in", addin(async () => { await stop(); await start(); }));
+      break;
+    case "status":
+      if (wantAddin) add("Add-in", async () => console.log((await health()) ? "Add-in bridge: running at https://localhost:8765" : "Add-in bridge: stopped or unhealthy"));
+      if (wantGateway) add("Gateway", gatewayStep(["status"]));
+      break;
+    case "info":
+    case "token":
+      if (wantAddin && target === "all") add("Add-in", async () => console.log("Add-in bridge: https://localhost:8765 (the add-in connects automatically; no token needed)"));
+      if (wantGateway) add("Gateway", () => {
+        if (!existsSync(path.join(gatewayDir, "token.txt"))) console.log("Gateway: not set up. Run: excel-partner setup gateway");
+        else gatewayStep([command, ...flags])();
+      });
+      break;
+    case "logs":
+      if (wantAddin) add("Add-in", logsAddin);
+      if (wantGateway) add("Gateway", gatewayStep(["logs"]));
+      break;
+    case "doctor":
+      if (wantAddin) add("Add-in", async () => { console.log("Excel add-in"); await doctorAddin(); });
+      if (wantGateway) add("Gateway", () => { console.log("\nAgent Gateway"); gatewayStep(["doctor"])(); });
+      break;
+    case "update":
+      add("Update", addin(async () => {
+        // The gateway ships in the same package: stop it while files are replaced, then start the new one.
+        const gatewaySetUp = existsSync(path.join(gatewayDir, "token.txt"));
+        if (gatewaySetUp) gateway(["stop"]);
+        try { await updatePackage({ root, dataDir, nodePath: process.execPath, stop, wasRunning: Boolean(livePid()) }); }
+        finally {
+          if (gatewaySetUp) spawnSync(process.execPath, [fileURLToPath(import.meta.url), "gateway", "start"], { stdio: "inherit" });
+        }
+      }));
+      break;
+    case "uninstall":
+      if (wantGateway) add("Gateway", gatewayStep(["uninstall"]));
+      if (wantAddin) add("Add-in", addin(async () => {
+        await stop();
+        powershell("unregister");
+        rmSync(cert, { force: true });
+        rmSync(key, { force: true });
+        console.log(`Registration removed. User data remains at ${dataDir}`);
+      }));
+      break;
+    default:
+      fail(`Unknown command: ${command}. Run excel-partner help.`);
+  }
+  for (const [name, step] of steps) {
+    try { await step(); }
+    catch (error) { console.error(`${name}: ${error.message || error}`); process.exitCode = 1; }
+  }
 }
 main().catch((error) => { console.error(error.message || error); process.exitCode = 1; });

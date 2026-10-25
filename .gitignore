@@ -1,6 +1,7 @@
 node_modules/
 dist/
 addin/dist/
+gateway/dist/
 run/
 release/
 tmp/

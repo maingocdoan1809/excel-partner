@@ -90,6 +90,22 @@ describe("Copilot native question transport", () => {
     expect(sdk.resumeId).toBe("native-id");
     expect(sdk.config.onUserInputRequest).toBeTypeOf("function");
   });
+  it.each([[false, false], [false, true], [true, false], [true, true]])("omits unsupported reasoning effort for Auto (API=%s, resume=%s)", async (api, resume) => {
+    if (api) ctx.mcp.toolNames = ["read_probe"];
+    ctx.model = null;
+    ctx.effort = "high";
+    if (resume) ctx.resumeSessionId = "native-id";
+    await manager.start(ctx, process.execPath, process.env);
+    expect(sdk.config).not.toHaveProperty("reasoningEffort");
+    expect(sdk.resumeId).toBe(resume ? "native-id" : undefined);
+  });
+  it.each([false, true])("preserves explicit API model and add-in effort settings (%s)", async api => {
+    ctx.effort = "high";
+    ctx.model = "gpt-6-luna";
+    if (api) ctx.mcp.toolNames = ["read_probe"];
+    await manager.start(ctx, process.execPath, process.env);
+    expect(sdk.config.reasoningEffort).toBe("high");
+  });
   it("rejects requests outside a running turn and resolves PATH commands", async () => {
     await manager.start(ctx, process.execPath, process.env);
     await expect(sdk.config.onUserInputRequest({ question: "Stale?" })).rejects.toThrow("cancelled");

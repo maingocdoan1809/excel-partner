@@ -8,6 +8,8 @@ import { cleanSessionTitle } from "../../../protocol/src/session-title.js";
 export interface StoredTool {
   name: string;
   args: string;
+  input?: string;
+  result?: string;
   state: "running" | "ok" | "error";
   error: string | null;
 }
