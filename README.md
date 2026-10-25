@@ -1,45 +1,39 @@
 # Excel Partner
 
-Chat with Claude Code, GitHub Copilot CLI, or Codex CLI to read and edit the workbook open in Excel desktop on Windows.
+Chat with an AI coding assistant, **Claude Code, GitHub Copilot CLI, Codex CLI or OpenCode**, to read, analyse and edit the workbook you have open in **Excel desktop on Windows**.
 
-Excel Partner installs a local bridge and an Excel task pane. Workbook changes run through Office.js in Excel. The bridge runs on your computer; each AI provider uses its own CLI and account.
+> Example: select a range and type *"Add a Total column in D. Calculate B times C for each row and bold the header."*
+
+## How it works
+
+```
+Excel task pane  <-->  local bridge (localhost:8765)  <-->  your provider CLI (Claude / Copilot / Codex / OpenCode)
+```
+
+- The task pane is the chat UI inside Excel. Workbook changes run through Office.js in your open workbook.
+- The bridge runs on your PC. It uses the provider CLI you already installed and signed in to. Excel Partner never asks for or stores an API key.
+- Billing, usage limits and data policy belong to the provider you choose.
 
 ## Requirements
 
-- Windows with Excel desktop supporting ExcelApi 1.9 or later. Some features require newer Excel APIs.
-- Node.js 20 or later and npm, installed on Windows.
-- At least one supported provider CLI installed and signed in on Windows.
-- Internet access and an account with access to the selected provider's service.
+- Windows with Excel desktop (ExcelApi 1.9+; some features need a newer Excel)
+- Node.js 20+ and npm, installed on Windows
+- At least one provider CLI, installed and signed in on Windows (not only inside WSL)
 
-Run the commands below in Windows PowerShell. The npm CLI supports Windows desktop Excel. Provider CLIs installed only inside WSL are not available to this installation.
+## Quick start
 
-## Installation
+Run in **Windows PowerShell**.
 
-### 1. Check Node.js and npm
-
-```powershell
-node --version
-npm --version
-```
-
-If either command is unavailable, install Node.js with npm and reopen PowerShell.
-
-### 2. Install a provider
-
-Choose at least one provider:
+**1. Install a provider** (pick at least one):
 
 | Provider | Install | Sign in |
 | --- | --- | --- |
+| Claude Code | `npm install -g @anthropic-ai/claude-code` | `claude` |
 | GitHub Copilot | `npm install -g @github/copilot` | `copilot login` |
-| Claude Code | `npm install -g @anthropic-ai/claude-code` | `claude` and follow the login prompts |
 | Codex | `npm install -g @openai/codex` | `codex login` |
 | OpenCode | `npm install -g opencode-ai` | `opencode auth login` |
 
-Provider accounts, subscriptions, usage limits, and charges are managed by the provider. Provider CLIs are installed separately from Excel Partner.
-
-### 3. Install and configure Excel Partner
-
-Save your work and close Excel, then run:
+**2. Install Excel Partner** (save your work and close Excel first):
 
 ```powershell
 npm install -g excel-partner
@@ -47,164 +41,72 @@ excel-partner setup
 excel-partner status
 ```
 
-`setup` creates and trusts a localhost certificate for the current Windows user, registers the add-in, starts the bridge, and adds a Windows sign-in startup entry. Complete the certificate trust prompt if Windows displays one.
+`setup` trusts a localhost certificate for your user, registers the add-in, starts the bridge and adds it to Windows start-up. A healthy bridge prints `Bridge running at https://localhost:8765`.
 
-A healthy bridge reports `Bridge running at https://localhost:8765`.
+**3. Use it:** reopen Excel, open a workbook, choose **Home > Excel Partner**, pick a provider, select cells, type a request, press **Enter**. (**Ctrl+Enter** adds a new line.)
 
-To install a release tarball instead of downloading from npm:
+## What it can do
 
-```powershell
-npm install -g C:\path\to\excel-partner-0.1.8.tgz
-excel-partner setup
-```
+- **Read:** selections, ranges, formulas, formatting, tables, charts, pivots, shapes, and a rendered image of a range.
+- **Write:** values and formulas (with a check for `#REF!`/`#NAME?` errors), formatting, sort, filter, merge, validation, conditional formatting, named ranges, print layout, sheets.
+- **Build:** tables, charts, pivot tables, flowcharts with attached connectors.
+- **Audit:** `find_errors` scans for formula errors; writes refuse to overwrite existing data unless overwrite is approved.
+- **Extend:** your own reusable skills (`/skill-name`), reference files and templates, file attachments (`@`), optional web search and browser automation.
+- **Work your way:** choose provider, model and effort per chat; queue a message while the assistant works; review changes and reopen past chats from History.
 
-### 4. Open the add-in
+Type `/` in the chat to browse commands and skills of the selected provider.
 
-1. Reopen Excel and open a workbook.
-2. Select **Home > Excel Partner**.
-3. Choose your provider in the task pane and complete sign-in if requested.
-4. Select a cell range, enter a request, and send it.
+## Safety and permissions
 
-For example: **Add a Total column in D. Calculate B times C for each row and bold the header.**
+- **Ask / Auto** (next to the prompt): *Ask* approves each change, *Auto* approves automatically, including overwriting non-empty cells. In *Ask* mode, overwriting existing data needs your OK.
+- Excel edits are **not transactional** and there is no undo for AI changes. Save important work first and review what was changed.
+- Python and skill scripts (`run_python`, `run_skill_script`) run with **your Windows user permissions** and can reach local files and the network. Keep them on **Ask** unless you trust the task.
+- `execute_office_js` (free-form Office.js) is on by default. Disable it with `BRIDGE_ALLOW_OFFICE_JS=0` or `"allowOfficeJs": false` in `config.json`, then restart the bridge.
+- Selected cells and workbook context are sent to your chosen provider as part of each request. Their data policy applies.
 
-GitHub Copilot also supports device-code sign-in through **Settings > Sign in to GitHub Copilot**. Claude Code and Codex use their CLI login flows.
+### Instructions
 
-## Features
-
-- Read selections, ranges, formulas, formatting, and workbook objects.
-- Write formulas and values; format, sort, filter, and organize worksheets.
-- Work with tables, charts, pivot tables, and shapes where supported by Excel.
-- Inspect grouped flowcharts and connector attachments; use `validate_flowchart` to flag straight connector crossings, overlaps, and disconnected shapes. Routed connectors require visual review.
-- Choose a provider, model, and reasoning effort from the task pane.
-- Type `/` to browse the selected CLI's commands, native skills, and bridge skills. Commands show their argument hints and run through their native transport; add-in controls such as `/model`, `/resume`, `/permissions`, `/theme`, `/copy`, and `/export` use the pane's own UI. Commands requiring an unsupported CLI interface are labelled **CLI only** and never sent to the model as ordinary text.
-- Browse native skills with `/skills`. Copilot supports `/skills list` and `/skills info`; Codex supports `/skills <name> <request>` with native skill injection. Claude exposes its invocable commands and skills; OpenCode v2 lists its registered skills. If a bridge skill collides with a CLI command, invoke it as `/skill:<name>`.
-- Codex also maps `/compact`, `/review`, `/rename`, `/plan`, `/goal`, `/fork`, `/hooks`, `/mcp`, `/apps`, `/status`, `/usage`, `/ps`, `/stop`, and `/pwd` to app-server operations. `/plan` toggles planning for subsequent messages; `/plan <task>` starts a planning turn. Native commands run separately from workbook attachments and queued messages.
-- Attach local files or browse workspace files with `@`.
-- Add reusable instructions through **Settings > Manage skills**, then invoke them with `/skill-name`.
-- Edit installed skill text files through **Manage skills > Edit**, including instructions, references and scripts. Binary templates and images are preserved. Saving rejects a stale revision instead of overwriting newer edits.
-- Let the assistant update an installed skill with `read_skill` (`forEditing: true`) and `update_skill`. Ask/Auto applies to each save; updating a script does not run it.
-- Send another message while the assistant works. It appears as **Pending** and reaches the assistant with the next tool result, or starts the next turn if no tool follows. Stop and disconnect preserve unsent messages for manual resend.
-- Add optional shared instructions through **Settings > System prompt**. The shipped default is empty: no add-in system prompt is injected. Clear the editor and save, or choose **Restore default**, to remove custom instructions. Changes apply on the next request; start a new chat to avoid old instructions retained in conversation history. Provider-native instructions and tool permissions still apply.
-- Review workbook changes and return to conversations through chat history.
-
-Press **Enter** to send a message and **Ctrl+Enter** to insert a new line.
-
-Skill ZIP uploads retain scripts, templates and other assets, except nested `.zip` files. The existing upload size and path limits still apply. Python (`.py`) and Bash (`.sh`) scripts can be inspected with `read_skill` and run through `run_skill_script`. **Ask** requests approval for each run; **Auto** approves execution automatically. Scripts run with your local user permissions on the bridge machine and can modify local files. The skill folder is the working directory; the runner passes arguments literally, supports text stdin, and returns stdout, stderr and the exit status. Runs default to 30 seconds (maximum 60 seconds) and stop when their combined output exceeds 512 KB, the turn is cancelled, or the pane disconnects. Optional `outputFiles` paths inside the skill folder return generated files as `attachment://` references, up to 30 MB combined. Use the Excel tools to modify the open workbook.
-
-Install Python and any skill dependencies on the machine running the bridge. The runner uses `python` on Windows, `python3` on Linux/WSL, and `bash` for Shell scripts. On Windows it first checks common per-user and system Git Bash installation folders. Set `BRIDGE_PYTHON_BIN` or `BRIDGE_BASH_BIN` to an interpreter executable path when needed, then restart the bridge. Bash runs in the bridge's OS; a Windows bridge does not automatically run scripts through WSL.
-
-For example, after reading `bd-generator`, call `run_skill_script` with `{"name":"bd-generator","file":"tools/flow_layout.py","args":["--recipe","navigate"]}`. The returned JSON contains drawing calls; the assistant must apply them with the Excel tools before the workbook changes.
-
-For Python written by the assistant, use **`run_python`**. It writes `main.py` in a temporary working folder and runs Python directly on the user's machine with their permissions and installed libraries, including file and network access. Python must be installed locally (`python` on Windows, `python3` on Linux/WSL); `BRIDGE_PYTHON_BIN` can select its executable. Docker is not required. Ask/Auto controls execution approval.
-
-Selected attachments are copied into the working folder (10 MB combined); requested output files return as `attachment://` references (10 MB combined). Execution is limited to 60 seconds and 512 KB of console output. Cancellation stops the process tree and the temporary working folder is removed after execution. These limits do not isolate Python from the rest of the computer. Example: `run_python {"code":"from pathlib import Path; Path('result.txt').write_text('Hello', encoding='utf-8')","outputFiles":["result.txt"]}`. Both Python runners use UTF-8, including subprocess output.
-
-## AI capabilities and permissions
-
-| Capability | Available route | Requirements / permission |
-| --- | --- | --- |
-| Read selections, cells, formulas, styles and objects | Excel MCP read tools | Connected workbook; some features require a recent Excel version |
-| Write values/formulas; format, merge, resize, sort and filter | Excel MCP write tools | Ask/Auto controls supported changes and overwrite approvals |
-| Manage worksheets, named ranges, validation and print layout | Excel MCP management tools | Ask/Auto; worksheet deletion requires approval in Ask mode |
-| Create/edit tables, charts and pivot tables | Excel MCP object tools | Excel API support |
-| Draw/edit shapes, connectors and flowcharts | Excel MCP shape tools | Excel API support; visual review for routed connectors |
-| Run additional workbook operations | `execute_office_js` | Enabled by default; controlled by `BRIDGE_ALLOW_OFFICE_JS` / `allowOfficeJs`, plus Ask/Auto |
-| Inspect attachments, closed Excel files and reference templates; import sheets | File/reference tools and `insert_sheets_from_file` | Selected files, configured references or access approval |
-| Create/edit reusable instructions and run installed Python/Bash scripts | Skill tools and `run_skill_script` | Installed skill, local interpreter/dependencies; Ask/Auto for execution |
-| Analyze data, generate files, access local files or call HTTP APIs | `run_python` | Local Python, libraries, OS/network access and service credentials when needed; Ask/Auto for execution |
-| Search the web | Enable **Tools > Web search** beside the prompt | Uses Claude/Codex/Copilot native search; unavailable for OpenCode without an external search service |
-| Answer the assistant's questions | Native Codex `request_user_input`, Claude `AskUserQuestion`, Copilot `ask_user`, OpenCode `question` | Questions appear in chat with choices and optional text entry. Reply or Skip; Auto never chooses an answer for you. |
-| Automate a browser with Playwright | Enable **Tools > Playwright browser** beside the prompt | Local Node/npm and Chrome; first use may download Playwright MCP. Ask/Auto controls each browser action |
-
-Choose **Ask** or **Auto** in the task pane to control the add-in's approval flow. Auto does not install software, grant administrator rights, add service credentials, enable provider-native tools or remove execution time limits. Python and skill scripts run with the bridge user's OS permissions; they can access files and the network through that execution route.
-
-Removing the add-in prompt does not unlock provider-native tools. Claude and Copilot expose Excel MCP tools and optionally their native web tools; OpenCode allows Excel MCP tools and rejects other tool permission requests; Codex runs with a read-only sandbox and no approval escalation. Native web search is controlled separately by the Tools switch. Enabling native shell/browser tools or additional MCP servers requires changes to the relevant provider adapter and tool registration. Ask/Auto covers add-in tool calls, not arbitrary provider-native tool calls.
-
-### Optional tools beside the prompt
-
-Open **Tools** next to Ask/Auto and enable **Web search** and/or **Playwright browser**. Both default to off; choices are saved in this task pane and apply to the next message. Changing the selection reloads provider tool registration while preserving the native conversation where supported. Disabled tools are hidden from the model and direct calls are rejected by the bridge.
-
-Web search uses only the selected AI provider's native tool: Claude Code's `WebSearch`/`WebFetch`, Codex's hosted search (`web_search = "live"`), or Copilot CLI's `web_search`/`web_fetch`. The add-in does not add a separate search endpoint or API key. Provider account/model availability and policies still apply. OpenCode's web search requires an external search backend, so this switch is disabled for OpenCode; no fallback service is configured.
-
-Browser automation uses [Microsoft's Playwright MCP](https://playwright.dev/mcp/configuration/options), launched lazily as `npx --yes @playwright/mcp@latest --headless --isolated` on the bridge machine. Node/npm, network access for the first download, and Chrome must be available there. It uses a separate browser context for each connected workbook, without reusing your normal Chrome login. The assistant first lists available browser tools, then can navigate, inspect pages, click, fill forms and capture screenshots. **Ask** requests approval for each action; **Auto** approves it. Stop, tool/provider/chat changes, disconnect and bridge shutdown close the browser connection. Provider-native shell and other MCP servers retain their existing permissions.
-
-If Chrome is installed in a nonstandard location, or you want to use an existing Chromium executable, set `BRIDGE_PLAYWRIGHT_EXECUTABLE` to its full path before starting the bridge. A missing browser is reported by the tool; enabling the switch alone does not install Chrome.
-
-### Enable or disable skills
-
-In **Settings > Manage skills**, use the **Enabled / Disabled** switch on any installed or packaged skill. The choice is saved on the bridge machine and applies across chats. Disabled skills stay installed and editable, but disappear from `/`, AI skill discovery and automatic template inventories. The bridge rejects loading their instructions, reading their templates or running their scripts until re-enabled. Instructions already present in chat history cannot be removed by this switch; start a new chat to avoid that old context.
+**Settings > Instructions** adds your own rules for every chat (for example "answer in Vietnamese"). It is empty by default, so each provider keeps its native behaviour. **Use recommended** loads a ready-made set of Excel working rules (read before writing, use formulas, never overwrite silently, verify after editing). Press **Save**, then start a new chat so the old history does not keep earlier instructions. Note: with Claude, a non-empty instruction replaces its built-in prompt rather than adding to it.
 
 ## Commands
 
-| Command | Description |
+| Command | What it does |
 | --- | --- |
-Every command takes an optional target: `addin` (the default), `gateway` or `all`.
+| `excel-partner setup [addin\|gateway\|all]` | Register and start (default: add-in) |
+| `excel-partner start` / `stop` / `restart` | Control the bridge |
+| `excel-partner status` | Show what is running |
+| `excel-partner doctor` | Check the installation and say what to fix |
+| `excel-partner logs` | Show recent log lines |
+| `excel-partner update` | Install the latest release (close Excel first) |
+| `excel-partner uninstall` | Stop, unregister and remove start-up and certificate trust |
+| `excel-partner help` | Full CLI usage |
 
-| Command | Description |
-| --- | --- |
-| `excel-partner setup [addin\|gateway\|all]` | Register and start. The add-in registers with Excel; the gateway creates its token and prints the URL and token. |
-| `excel-partner start` / `stop` / `restart [target]` | Control the bridge (add-in) or the gateway. |
-| `excel-partner status [target]` | Show what is running. Without a target it shows both. |
-| `excel-partner info [--copy]` | Show the gateway URL and token and optionally copy the token. |
-| `excel-partner logs [target]` | Show recent log lines. |
-| `excel-partner doctor [target]` | Check the installation and say what to fix. |
-| `excel-partner update` | Install the latest npm release and refresh both the add-in and the gateway. |
-| `excel-partner uninstall [target]` | Stop and remove registration and startup entries. The add-in also removes certificate trust. |
-| `excel-partner gateway <command>` | Gateway settings: `config`, `alias`, `model-name`, `provider`, `models`, `warmup`, `autostart`. |
-| `excel-partner help` | Show CLI usage. |
+**Update:** `excel-partner update`, then reopen Excel and start a new chat. Configuration, skills and templates are kept.
 
-Typical flows: `excel-partner setup` for the add-in only, `excel-partner setup gateway`
-for the gateway only, or `excel-partner setup all` for both. The
-[Agent Gateway](gateway/README.md) exposes the same providers as a local
-Anthropic-compatible API. It ships in this package, starts at Windows sign-in like the
-add-in bridge, and shares the add-in's localhost certificate when both are installed.
-The `agent-gateway` command is an alias for the gateway commands.
+**Uninstall:** `excel-partner uninstall`, then `npm uninstall -g excel-partner`, then restart Excel. Local data stays on disk (see below).
 
-## Update
+## Optional: Agent Gateway
 
-Save your work and close Excel before updating:
+The same package includes a local **Anthropic Messages-compatible API** backed by the provider CLIs you have installed (for example to sign in to Claude for Excel with a gateway). It does not need the add-in.
 
 ```powershell
-excel-partner update
-excel-partner status
+excel-partner setup gateway     # prints the URL (https://localhost:8766) and a token
+excel-partner info --copy       # show them again
+excel-partner gateway models    # list advertised model IDs
 ```
 
-Reopen Excel after updating. The command preserves your configuration, certificates, usage statistics, skills, and templates. It supports global npm installations; source installations use `scripts/update.ps1` or `scripts/update.sh`.
+Model IDs look like `claude/default`, `codex/default` or `provider/native-model`. Run `excel-partner doctor gateway` if something fails. `agent-gateway` is an alias for these commands.
 
-For an older release that does not yet have the `update` command, run `excel-partner stop`, `npm install -g excel-partner@latest`, then `excel-partner setup` once.
-
-## Uninstall
-
-Run the cleanup command before removing the npm package:
-
-```powershell
-excel-partner uninstall
-npm uninstall -g excel-partner
-```
-
-Restart Excel. Local configuration, logs, skills, and templates remain on disk.
-
-`execute_office_js` is enabled by default so skills can collect workbook data and run Office.js operations. Set `BRIDGE_ALLOW_OFFICE_JS=0` or `"allowOfficeJs": false` in `excel-partner.config.json` to disable it. Environment variables take precedence; restart the bridge and start a new chat after changing this setting.
-
-## Session usage and export
-
-Click the small info icon beside **Ask/Auto** to open session usage. **Session tokens** shows provider-reported token usage for the current chat and **AI time** shows cumulative time spent processing requests. The popover includes Input/Cache read/Output counts, uncached input and cache write when available, Copilot AI Credits, and **Export CSV**. Copilot accounting reads the exact CLI session’s `session.usage_record` entries in `session-state/<session-id>/events.jsonl` under `COPILOT_HOME` (default `~/.copilot`). It adds each usage record once and ignores duplicate shutdown/checkpoint totals. Original credit amounts are retained as integer `totalNanoAiu` (1 credit = 1,000,000,000 nano units), with up to nine decimal places in the display and CSV. No `/usage` command or extra model request is made. If the original log is absent, unreadable, or behind ACP, tokens fall back to ACP and credit/cache split data remains unavailable; it is never estimated. Old rounded credit records are explicitly labelled rounded, including reports mixing old and original data. The timer runs while a response is being generated, including provider startup, tools, and approval waits; idle time between requests is excluded. New chat starts a new native provider session and a separate accounting row. Reopening a saved chat or reconnecting resumes its native session ID; a failed resume is reported without silently creating a replacement. Provider/model changes resume the same native session where supported. Native session IDs are namespaced by provider, so different providers never share accounting.
-
-**Export CSV** downloads one row per session with completed requests: session ID, title (when available in local history), timestamps, turn count, AI processing seconds, average seconds per turn, input/output/cache/total tokens, and token data completeness. Additional columns report known uncached input/cache write totals and coverage, original credit nano units and coverage, and Copilot CLI session IDs. Each new report row and History item identifies one native CLI session. Native titles are read from Copilot workspace metadata, Claude transcript title entries, Codex thread metadata, or OpenCode session export/list. If the provider has not assigned a title, the first user message remains a temporary title. Opening History refreshes available native titles without asking a model to generate one. Old entries without native IDs remain labelled legacy chats; their history and usage are preserved rather than guessed or reassigned. It includes requests that ended with an error or cancellation. The currently running request appears after it finishes. Old chats from before this feature have no retrospective usage data.
-
-Input includes both cache read and cache write tokens; neither cache bucket is added again. With a complete split, total tokens = uncached input + cache read + cache write + output. Missing cache write/uncached values remain unknown, not zero. Copilot reads usage at turn completion, including failed/cancelled requests when records are available. Background title generation after a turn has finished is outside this report. Existing ledger records are preserved; original precision and missing CLI session IDs are not reconstructed for old records. The CSV identifies native CLI rows versus legacy chat rows. Missing token data is shown as `N/A`, or `partial` when only some turns have usage; CSV leaves unknown totals blank. Claude uses each turn’s original result usage: input includes uncached input plus cache read/write; output already includes reasoning. Codex uses native thread token updates, with a persisted rollout baseline before resume; reasoning is a subset of output and cache write is exposed when the CLI reports it. Copilot original log totals (or fallback ACP totals) are converted to per-turn increments. OpenCode reads original session export totals, where input excludes cache and output excludes reasoning: both cache buckets are added to input, and reasoning is added to output once. Its ACP prompt response only describes the last model call, so it is never used as a whole-turn total. Resumed cumulative counters are seeded before the next request; when a baseline is unavailable, that turn stays unreported rather than charging earlier history again. The popover and CSV expose original-data coverage and missing values.
-
-Statistics are appended locally to `%LOCALAPPDATA%\Excel Partner\usage.jsonl` for the npm CLI, or `run/usage.jsonl` for a source checkout. Set `BRIDGE_USAGE_FILE` to override the path. The ledger contains IDs, provider/model, duration, result status, and token counts; chat history remains in the task pane's local storage. Deleting chat history does not delete the usage ledger.
-
-## Local data and configuration
+## Data and configuration
 
 | Location | Contents |
 | --- | --- |
-| `%LOCALAPPDATA%\Excel Partner` | Bridge configuration, certificate, installed manifest, process ID, logs, and `usage.jsonl`. |
-| `%USERPROFILE%\.excel-partner\skills` | User-installed skills. |
-| `%USERPROFILE%\.excel-partner\templates` | Templates associated with skills. |
+| `%LOCALAPPDATA%\Excel Partner` | Config (`config.json`), certificate, manifest, logs, `usage.jsonl` |
+| `%USERPROFILE%\.excel-partner\skills` | Your skills |
+| `%USERPROFILE%\.excel-partner\templates` | Templates used by skills |
+| `%LOCALAPPDATA%\Agent Gateway` | Gateway config, certificate and token |
 
-Optional settings for the npm installation belong in `%LOCALAPPDATA%\Excel Partner\config.json`. For example:
+Optional `config.json` settings (restart the bridge after editing):
 
 ```json
 {
@@ -213,157 +115,27 @@ Optional settings for the npm installation belong in `%LOCALAPPDATA%\Excel Partn
 }
 ```
 
-Restart the bridge after editing configuration:
+Useful environment variables: `BRIDGE_ALLOW_OFFICE_JS`, `BRIDGE_PYTHON_BIN`, `BRIDGE_BASH_BIN`, `BRIDGE_PLAYWRIGHT_EXECUTABLE`, `BRIDGE_USAGE_FILE`.
 
-```powershell
-excel-partner stop
-excel-partner start
-```
-
-The bridge uses localhost HTTPS on port `8765`. Selected file contents and workbook context may be passed to the chosen AI provider as part of a request. Provider data policies apply. Review requested workbook changes and save important work before using AI editing tools.
+The bridge listens only on `localhost:8765` over HTTPS. Chat history is stored in the task pane; the usage ledger (IDs, provider, model, duration, token counts) is local and contains no workbook content. Click the info icon beside **Ask/Auto** to see session tokens and export usage as CSV.
 
 ## Troubleshooting
 
-### PowerShell blocks npm scripts
+Start with `excel-partner doctor`. Then:
 
-If PowerShell reports that `npm.ps1` cannot run because script execution is disabled, use the Windows command shims:
+| Problem | Fix |
+| --- | --- |
+| PowerShell says script execution is disabled | Use the shims: `npm.cmd install -g excel-partner`, `excel-partner.cmd setup` |
+| `excel-partner` is not recognized | Reopen PowerShell. Check `npm.cmd prefix -g` is on `PATH`. Install from Windows PowerShell, not WSL |
+| No **Excel Partner** button | Run `excel-partner setup`, then fully close **all** Excel windows and reopen. Still missing? `npx.cmd --yes --package office-addin-dev-settings office-addin-dev-settings sideload "$env:LOCALAPPDATA\Excel Partner\manifest.xml" desktop --app Excel`. Company policy may block developer add-ins |
+| Task pane stuck on *Connecting* | `excel-partner stop`, `excel-partner start`, open `https://localhost:8765/health`, read `%LOCALAPPDATA%\Excel Partner\bridge.err.log`. If port 8765 is busy, stop the other instance |
+| Certificate error | Run `excel-partner setup` again and restart Excel. If it says the certificate expired: `excel-partner uninstall`, then `excel-partner setup` |
+| Provider shows *Not installed* / *Login required* | Check `claude --version`, `copilot --version`, `codex --version`, `opencode --version` in PowerShell, install or sign in again, restart the bridge and reselect the provider |
+| `would_overwrite` | Target cells already hold data. Tell the assistant which cells it may replace |
+| `disconnected`, `timeout`, `size_limit_exceeded` | Keep the pane open, close Excel dialogs, select a smaller range, and check whether part of the change was already applied. Writes are never replayed automatically |
+| Old behaviour after updating | Reopen the task pane and start a new chat |
+| File cannot be opened | Attach it with **Choose local files**, or add its folder to `referenceDirs` |
 
-```powershell
-npm.cmd install -g excel-partner
-excel-partner.cmd setup
-```
+## License
 
-The same `.cmd` suffix can be used for other npm-installed CLI commands.
-
-### `excel-partner` is not recognized
-
-Reopen PowerShell and check the global npm installation:
-
-```powershell
-npm.cmd list -g --depth=0
-npm.cmd prefix -g
-```
-
-Confirm `excel-partner` is listed and that the directory returned by `npm prefix -g` is on your Windows `PATH`. If it was installed in WSL, install it again from Windows PowerShell.
-
-### The Excel Partner button is missing
-
-Run `excel-partner setup`, then save your work and fully exit all Excel windows before reopening Excel. Registration does not activate the add-in in an already running Excel process.
-
-If the button is still missing, run the Microsoft sideload tool from PowerShell. It is downloaded on first use:
-
-```powershell
-npx.cmd --yes --package office-addin-dev-settings office-addin-dev-settings sideload "$env:LOCALAPPDATA\Excel Partner\manifest.xml" desktop --app Excel
-```
-
-If your organization blocks developer add-ins or certificate installation, ask your Microsoft 365 administrator about the applicable policy. This package registers a local sideloaded add-in.
-
-### The task pane stays on Connecting or the bridge is unhealthy
-
-```powershell
-excel-partner status
-excel-partner stop
-excel-partner start
-```
-
-Open `https://localhost:8765/health` in a Windows browser and inspect the logs:
-
-```powershell
-Get-Content "$env:LOCALAPPDATA\Excel Partner\bridge.err.log" -Tail 50
-Get-Content "$env:LOCALAPPDATA\Excel Partner\bridge.log" -Tail 50
-```
-
-If startup reports that port `8765` is already in use, stop the other Excel Partner bridge instance before retrying.
-
-### The task pane shows a certificate error
-
-Run `excel-partner setup` again to restore registration and certificate trust, then restart Excel. If the Agent Gateway is also installed, it shares this certificate: after `excel-partner uninstall`, run `agent-gateway setup` to trust it again.
-
-If setup reports an expired certificate, a certificate that expires soon, or an incomplete certificate pair, save your workbook and close Excel, then recreate the certificate:
-
-```powershell
-excel-partner uninstall
-excel-partner setup
-```
-
-### A provider shows Not installed, Login required, or a version error
-
-Check the selected provider in Windows PowerShell:
-
-```powershell
-copilot --version
-claude --version
-codex --version
-opencode --version
-```
-
-Only the provider you use needs to be installed. Install or update it using the command in the installation table, then sign in again. A CLI installed only in WSL cannot be used by the Windows bridge.
-
-After installation or login, restart the bridge and select the provider again in Excel. Follow any minimum-version or account-access hint shown in the pane.
-
-### Shared reference files
-
-Open **Settings → Reference files → Add reference file**. In the popup, paste the full path of a local file (in Explorer: Shift + right-click → **Copy as path**), then enter a display name and description. References are shared across all skills and chats on this machine.
-
-Only the name, path and description are stored in `~/.excel-partner/references.json`; the original file is never copied or uploaded. The assistant receives the catalog and reads relevant files on demand, using their latest contents. Registering a file grants read access to that exact file. Existing file-reading format and size limits still apply.
-
-You can also give the assistant a local file path directly. `read_attached_file`, `read_attached_image`, and `read_workbook_file` request access when the file is outside configured workspace folders or saved references: **Ask** shows the file path for approval; **Auto** approves automatically. Approval applies to that exact file in the current connected session, without granting its folder or sibling files. Repeated reads reuse the grant. Denied requests do not grant access. Text/general file reads retain the 30 MB limit; supported images retain the 10 MB image limit.
-
-Use **Edit** to change the description or choose a new location. Missing files are marked in the list. **Remove link** removes the saved metadata and its read access; it leaves the original file on disk.
-
-### A file cannot be opened
-
-Use **Choose local files** to attach it, or add its folder as a workspace. For persistent workspace access, add the folder to `referenceDirs` in the configuration file and restart the bridge.
-
-An unsaved workbook or a workbook with a cloud URL may not have a local workspace folder. Use the file picker in that case.
-
-### A write is refused with `would_overwrite`
-
-The target cells already contain data. Confirm which cells you want replaced so the assistant can retry with overwrite permission.
-
-### A tool reports `disconnected`, `timeout`, or `size_limit_exceeded`
-
-Keep the task pane open and connected while a request is running. Close modal dialogs in Excel, select a smaller range, and retry after checking whether any changes were already applied. A disconnected write is not automatically replayed.
-
-### The pane still shows an older version after updating
-
-Run the update steps above, reopen the task pane, and start a new chat so the provider receives the current tool configuration.
-
-## Development
-
-A standalone CLI-backed API is available in [gateway/README.md](gateway/README.md).
-It installs separately and does not require this add-in or its bridge.
-
-See [Provider session architecture](docs/provider-sessions.md) for the shared
-runtime lifecycle, adapter contracts and transport tests.
-
-From a source checkout:
-
-```powershell
-npm install
-npm run build
-npm run typecheck
-npm test
-```
-
-The default test suite includes real Claude CLI tests against a fake API when Claude is installed. Real-provider model tests are opt-in through `LIVE_PROVIDERS`.
-
-Refresh the Codex slash-command catalog from the official source matching an installed CLI with `npm run update:codex-commands` (or pass a version: `npm run update:codex-commands -- 0.164.0`). New names remain marked CLI only until an add-in handler is supplied. Claude, Copilot and OpenCode discover their catalogs from the installed runtime; discovery is cached for 30 seconds and does not call a model.
-
-After building, run `node scripts/smoke-commands.mjs` to verify command discovery and informational command execution through all four real CLIs without submitting model tasks. These checks run in a normal Node host rather than a Vitest worker.
-
-To run the gateway from source with automatic restart (separate data folder and port 8767):
-
-```powershell
-npm run dev:gateway
-```
-
-To build the release tarball (add-in, bridge and gateway in one package) into `release/`:
-
-```powershell
-npm run pack:release
-```
-
-Packing builds the server, task pane and gateway through `prepack`. The package includes
-only compiled runtime and assets; users do not need to build from source. To publish
-after `npm login`, run `npm publish`.
+MIT

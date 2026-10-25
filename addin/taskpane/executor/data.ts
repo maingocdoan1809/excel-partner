@@ -89,6 +89,26 @@ export function buildFilterCriteria(criteria: FilterCriteria): Excel.FilterCrite
 
 const pascalOn = (kind: string) => kind.charAt(0).toUpperCase() + kind.slice(1);
 
+/** Filtered range and how many data rows are visible; best effort, never fails the call. */
+async function describeFilter(context: Excel.RequestContext, filter: Excel.AutoFilter): Promise<Record<string, unknown>> {
+  try {
+    const range = filter.getRangeOrNullObject();
+    range.load("isNullObject,address,rowCount");
+    await context.sync();
+    if (range.isNullObject) return { enabled: false };
+    const out: Record<string, unknown> = { enabled: true, filteredRange: stripSheet(range.address), dataRows: Math.max(0, range.rowCount - 1) };
+    if (Office.context.requirements.isSetSupported("ExcelApi", "1.13")) {
+      const view = range.getVisibleView();
+      view.load("rowCount");
+      await context.sync();
+      out.visibleRows = Math.max(0, view.rowCount - 1);
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
+
 export async function filterRange(input: FilterRangeInput): Promise<unknown> {
   return Excel.run(async (context) => {
     const sheet = resolveSheet(context, input.sheet);
@@ -127,6 +147,12 @@ export async function filterRange(input: FilterRangeInput): Promise<unknown> {
       }
     }
     await context.sync();
-    return { sheet: sheet.name, operation: input.operation, ...(input.address ? { address: input.address } : {}) };
+    return {
+      sheet: sheet.name,
+      operation: input.operation,
+      ...(input.address ? { address: input.address } : {}),
+      ...(input.column && input.criteria ? { column: input.column, criteria: input.criteria } : {}),
+      ...(input.operation === "remove" ? { enabled: false } : await describeFilter(context, filter)),
+    };
   });
 }

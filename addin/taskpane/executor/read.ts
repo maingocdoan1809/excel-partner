@@ -6,6 +6,7 @@ import {
   type SearchDataInput,
 } from "../../../protocol/src/index.js";
 import {
+  ToolFailure,
   normalizeValues,
   resolveSheet,
   stripSheet,
@@ -164,7 +165,17 @@ export async function getSheets(): Promise<unknown> {
 
     const usedRanges = sheets.items.map((sheet) => sheet.getUsedRangeOrNullObject(true));
     usedRanges.forEach((range) => range.load("address"));
+    sheets.items.forEach((sheet) => sheet.tables.load("items/name"));
     await context.sync();
+
+    const tableRanges = sheets.items.map((sheet) =>
+      sheet.tables.items.map((table) => {
+        const range = table.getRange();
+        range.load("address");
+        return { name: table.name, range };
+      }),
+    );
+    if (tableRanges.some((tables) => tables.length > 0)) await context.sync();
 
     return {
       activeSheet: active.name,
@@ -174,6 +185,7 @@ export async function getSheets(): Promise<unknown> {
         visibility: sheet.visibility,
         usedRange: usedRanges[index]!.isNullObject ? null : stripSheet(usedRanges[index]!.address),
         isActive: sheet.name === active.name,
+        tables: tableRanges[index]!.map(({ name, range }) => ({ name, range: stripSheet(range.address) })),
       })),
     };
   });
@@ -195,6 +207,7 @@ export async function readRange(input: ReadRangeInput): Promise<unknown> {
     if (page) {
       page.load("values");
       if (input.includeFormulas) page.load("formulas");
+      if (input.includeText) page.load("text");
       await context.sync();
     }
 
@@ -213,7 +226,9 @@ export async function readRange(input: ReadRangeInput): Promise<unknown> {
       truncated: hasMore,
     };
     const formulas = input.includeFormulas && page ? (page.formulas as string[][]) : input.includeFormulas ? [] : null;
-    return input.format === "csv" ? { ...base, csv: toCsv(values), formulas } : { ...base, values, formulas };
+    const text = input.includeText ? (page ? (page.text as string[][]) : []) : undefined;
+    const extra = text ? { text } : {};
+    return input.format === "csv" ? { ...base, csv: toCsv(values), formulas, ...extra } : { ...base, values, formulas, ...extra };
   });
 }
 
@@ -221,6 +236,25 @@ interface Match {
   sheet: string;
   address: string;
   value: CellValue;
+  /** Present for formula cells. */
+  formula?: string;
+}
+
+function buildMatcher(input: SearchDataInput): (text: string) => boolean {
+  if (input.useRegex) {
+    let pattern: RegExp;
+    try {
+      pattern = new RegExp(input.wholeCell ? `^(?:${input.searchTerm})$` : input.searchTerm, input.matchCase ? "" : "i");
+    } catch (error) {
+      throw new ToolFailure("invalid_arguments", `searchTerm is not a valid regular expression: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    return (text) => pattern.test(text);
+  }
+  const needle = input.matchCase ? input.searchTerm : input.searchTerm.toLowerCase();
+  return (text) => {
+    const hay = input.matchCase ? text : text.toLowerCase();
+    return input.wholeCell ? hay === needle : hay.includes(needle);
+  };
 }
 
 export async function searchData(input: SearchDataInput): Promise<unknown> {
@@ -234,7 +268,7 @@ export async function searchData(input: SearchDataInput): Promise<unknown> {
       : sheets.items.filter((sheet) => sheet.visibility === "Visible");
     if (input.sheet) targets[0]!.load("name");
 
-    const needle = input.matchCase ? input.searchTerm : input.searchTerm.toLowerCase();
+    const isMatch = buildMatcher(input);
     const wanted = input.offset + input.limit + 1; // one extra tells us whether more exist
     const matches: Match[] = [];
     let scanned = 0;
@@ -262,20 +296,22 @@ export async function searchData(input: SearchDataInput): Promise<unknown> {
         }
         const rows = Math.min(rowsPerChunk, used.rowCount - offset);
         const chunk = sheet.getRangeByIndexes(used.rowIndex + offset, used.columnIndex, rows, used.columnCount);
-        chunk.load("values");
+        chunk.load(input.matchFormulas ? "values,formulas" : "values");
         await context.sync();
         scanned += rows * used.columnCount;
 
         for (let r = 0; r < rows; r++) {
           for (let c = 0; c < used.columnCount; c++) {
             const value = chunk.values[r]?.[c];
-            if (value === null || value === undefined || value === "") continue;
-            const text = input.matchCase ? String(value) : String(value).toLowerCase();
-            if (input.wholeCell ? text === needle : text.includes(needle)) {
+            const formula = input.matchFormulas ? String(chunk.formulas[r]?.[c] ?? "") : "";
+            const isFormula = formula.startsWith("=");
+            if (!isFormula && (value === null || value === undefined || value === "")) continue;
+            if (isMatch(isFormula ? formula : String(value))) {
               matches.push({
                 sheet: sheet.name,
                 address: `${numberToColumn(used.columnIndex + c + 1)}${used.rowIndex + offset + r + 1}`,
                 value: value as CellValue,
+                ...(isFormula ? { formula } : {}),
               });
               if (matches.length >= wanted) break outer;
             }

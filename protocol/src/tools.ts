@@ -60,6 +60,8 @@ export const ReadRangeInputSchema = z.object({
   address: A1AddressSchema,
   /** Also return the formulas of the range (parallel to `values`). */
   includeFormulas: z.boolean().default(false),
+  /** Also return the text as displayed (dates, percentages, currency as the user sees them), parallel to `values`. */
+  includeText: z.boolean().default(false),
   /** `grid` returns a 2D array; `csv` returns compact CSV text (cheaper for large reads). */
   format: z.enum(["grid", "csv"]).default("grid"),
   /** Return at most this many rows (paging with `offset`); default is the executor cap. */
@@ -126,6 +128,10 @@ export const SearchDataInputSchema = z.object({
   matchCase: z.boolean().default(false),
   /** Match only cells whose whole value equals the term. */
   wholeCell: z.boolean().default(false),
+  /** Search formula text (`=SUM(A1:A3)`) of formula cells instead of their computed value. */
+  matchFormulas: z.boolean().default(false),
+  /** Treat `searchTerm` as a regular expression (JavaScript syntax). */
+  useRegex: z.boolean().default(false),
   limit: z.number().int().min(1).max(500).default(50),
   offset: z.number().int().min(0).default(0),
 });

@@ -2,6 +2,7 @@ import type {
   AddConnectorInput,
   AddLineInput,
   AddShapeInput,
+  CheckFormulaConsistencyInput,
   ClearRangeInput,
   ConditionalFormatInput,
   CopyToInput,
@@ -9,6 +10,8 @@ import type {
   DeleteShapesInput,
   ExecuteOfficeJsInput,
   FilterRangeInput,
+  FindErrorsInput,
+  FindReplaceInput,
   FormatRangeInput,
   GetCellRangesInput,
   GetObjectsInput,
@@ -35,6 +38,8 @@ import type {
   UpdateShapeInput,
   WriteRangeInput,
 } from "../../../protocol/src/index.js";
+import { checkFormulaConsistency, findErrors } from "./audit.js";
+import { findReplace } from "./replace.js";
 import { copyTo, getCellRanges, readRangeImage, resizeRange, setCells } from "./cells.js";
 import { toToolError } from "./common.js";
 import { validateFlowchart } from "./flowchart.js";
@@ -54,6 +59,7 @@ import { clearRange, setFormula, writeRange } from "./write.js";
 export const WRITE_TOOLS: ReadonlySet<string> = new Set([
   "write_range",
   "set_formula",
+  "find_replace",
   "format_range",
   "clear_range",
   "insert_rows",
@@ -112,6 +118,12 @@ function run(tool: string, args: unknown): Promise<unknown> {
       return getCellRanges(args as GetCellRangesInput);
     case "search_data":
       return searchData(args as SearchDataInput);
+    case "find_errors":
+      return findErrors(args as FindErrorsInput);
+    case "check_formula_consistency":
+      return checkFormulaConsistency(args as CheckFormulaConsistencyInput);
+    case "find_replace":
+      return findReplace(args as FindReplaceInput);
     case "read_range_image":
       return readRangeImage(args as ReadRangeImageInput);
     case "get_objects":

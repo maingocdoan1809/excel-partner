@@ -92,6 +92,39 @@ export const GetCellRangesInputSchema = z.object({
 });
 export type GetCellRangesInput = z.infer<typeof GetCellRangesInputSchema>;
 
+export const FindErrorsInputSchema = z.object({
+  sheet: Sheet.describe("Limit to one sheet; omit to scan every visible sheet."),
+  address: A1AddressSchema.optional().describe("Limit the scan to this A1 range (needs `sheet`)."),
+  limit: z.number().int().min(1).max(500).default(100).describe("Max error cells listed; totals still count every error found."),
+});
+export type FindErrorsInput = z.infer<typeof FindErrorsInputSchema>;
+
+export const CheckFormulaConsistencyInputSchema = z.object({
+  sheet: Sheet.describe("Limit to one sheet; omit to check every visible sheet."),
+  address: A1AddressSchema.optional().describe("Limit the check to this A1 range (needs `sheet`); default is the used range."),
+  direction: z
+    .enum(["columns", "rows"])
+    .default("columns")
+    .describe("`columns`: a formula should repeat down each column (typical tables). `rows`: across each row (typical time series)."),
+  limit: z.number().int().min(1).max(200).default(50).describe("Max issues listed; totals still count all of them."),
+});
+export type CheckFormulaConsistencyInput = z.infer<typeof CheckFormulaConsistencyInputSchema>;
+
+export const MAX_REPLACE_CELLS = 2_000;
+
+export const FindReplaceInputSchema = z.object({
+  sheet: Sheet.describe("Limit to one sheet; omit for every visible sheet."),
+  address: A1AddressSchema.optional().describe("Limit to this A1 range (needs `sheet`)."),
+  find: z.string().min(1).max(500),
+  replace: z.string().max(2000).describe("Replacement text; may be empty to delete the found text. Taken literally (no regex groups)."),
+  matchCase: z.boolean().default(false),
+  wholeCell: z.boolean().default(false).describe("Only cells whose entire text equals `find`."),
+  inFormulas: z.boolean().default(false).describe("Also replace inside formula text. By default only text constants change; numbers and formulas are left alone."),
+  apply: z.boolean().default(false).describe("false (default) only previews the changes; true makes them."),
+  limit: z.number().int().min(1).max(500).default(100).describe("Max cells listed in the preview."),
+});
+export type FindReplaceInput = z.infer<typeof FindReplaceInputSchema>;
+
 export const CopyToInputSchema = z.object({
   sheet: Sheet,
   source: RangeRefSchema,
@@ -303,7 +336,7 @@ export type FilterRangeInput = z.infer<typeof FilterRangeInputSchema>;
 export const MergeRangeInputSchema = z.object({
   sheet: Sheet,
   address: A1AddressSchema,
-  operation: z.enum(["merge", "unmerge"]),
+  operation: z.enum(["merge", "unmerge"]).default("merge"),
   across: z.boolean().default(false).describe("Merge each row separately."),
   allowOverwrite: z.boolean().default(false).describe("Merging keeps only the top-left value; other non-empty cells need this."),
 });

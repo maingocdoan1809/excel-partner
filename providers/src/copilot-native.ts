@@ -125,6 +125,10 @@ export class CopilotNativeSessions {
     yield { type: "turn_started", requestId };
     if (input.signal.aborted) { state.active = undefined; yield { type: "turn_finished", requestId, reason: "cancelled" }; return; }
     const streamed = new Set<string>();
+    // Streamed text not yet matched to a final `assistant.message`. Some models (for example the
+    // "commentary" phase of gpt-6-luna) stream under one message id and put the final text in a later
+    // message with another id, after an empty one. Matching by text keeps that from being shown twice.
+    let pending = "";
     const toolNames = new Map<string, string>();
     let failed = false;
     const unsubscribe = state.session.on(event => {
@@ -132,12 +136,23 @@ export class CopilotNativeSessions {
       switch (event.type) {
         case "assistant.message_delta":
           streamed.add(event.data.messageId);
+          pending += event.data.deltaContent;
           queue.push({ type: "message_delta", requestId, text: event.data.deltaContent });
           break;
-        case "assistant.message":
-          if (!streamed.has(event.data.messageId) && event.data.content) queue.push({ type: "message_delta", requestId, text: event.data.content });
-          queue.push({ type: "message_completed", requestId, text: event.data.content });
+        case "assistant.message": {
+          const content = event.data.content ?? "";
+          // Reasoning-only or tool-only messages carry no text; keep any pending deltas for the message that does.
+          if (!content) break;
+          let missing = content;
+          if (streamed.has(event.data.messageId)) missing = "";
+          else if (pending && content.startsWith(pending)) missing = content.slice(pending.length);
+          else if (pending && pending.endsWith(content)) missing = "";
+          if (missing) queue.push({ type: "message_delta", requestId, text: missing });
+          streamed.add(event.data.messageId);
+          pending = "";
+          queue.push({ type: "message_completed", requestId, text: content });
           break;
+        }
         case "tool.execution_start": {
           const tool = event.data.mcpServerName === "excel" ? event.data.mcpToolName ?? event.data.toolName : event.data.toolName;
           toolNames.set(event.data.toolCallId, tool);

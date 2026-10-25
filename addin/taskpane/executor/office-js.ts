@@ -2,7 +2,7 @@ import type { ExecuteOfficeJsInput } from "../../../protocol/src/index.js";
 import { ToolFailure } from "./common.js";
 
 /** Largest JSON result (characters) sent back to the model. */
-const MAX_RESULT_CHARS = 100_000;
+const MAX_RESULT_CHARS = 30_000;
 
 const AsyncFunction = Object.getPrototypeOf(async function () {
   /* constructor access only */

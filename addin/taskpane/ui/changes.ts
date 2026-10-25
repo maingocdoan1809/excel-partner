@@ -25,6 +25,7 @@ export function describeChange(
   if (!writeTools.has(tool)) return null;
   const a0 = (args ?? {}) as Record<string, any>;
   // Some tools double as readers: listing/inspecting is not a change.
+  if (tool === "find_replace" && !a0.apply) return null;
   if ((tool === "conditional_format" && a0.operation === "list") || (tool === "data_validation" && a0.operation === "get") || (tool === "manage_names" && a0.operation === "list")) {
     return null;
   }
@@ -43,6 +44,8 @@ export function describeChange(
       return { tool, ok: true, target, summary: `Wrote ${dim(d.rowsWritten, d.columnsWritten)} at ${where}` };
     case "set_formula":
       return { tool, ok: true, target, summary: `Formula ${d.formula} in ${where}` };
+    case "find_replace":
+      return { tool, ok: true, target: null, summary: `Replaced "${a.find}" with "${a.replace}" in ${d.replaced} cell(s)` };
     case "format_range":
       return { tool, ok: true, target, summary: `Formatted ${where} (${(d.applied ?? []).join(", ")})` };
     case "clear_range":

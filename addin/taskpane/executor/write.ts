@@ -7,7 +7,66 @@ import {
   type SetFormulaInput,
   type WriteRangeInput,
 } from "../../../protocol/src/index.js";
-import { ToolFailure, resolveSheet, stripSheet } from "./common.js";
+import { ToolFailure, isErrorValue, resolveSheet, stripSheet } from "./common.js";
+
+/** Cells re-read after a write to report what formulas evaluated to. */
+const VERIFY_CELL_LIMIT = 2_000;
+/** Entries returned in `formulaResults`; errors beyond this are still counted. */
+const VERIFY_RESULT_LIMIT = 200;
+
+export interface FormulaReport {
+  formulaResults?: Record<string, number | string>;
+  messages?: string[];
+}
+
+/**
+ * Re-read a just-written block and report what its formulas evaluated to, so the model can catch
+ * `#REF!` / `#NAME?` without another call. Never fails the write: a failed read-back is reported
+ * as a message instead.
+ */
+export async function reportFormulaResults(
+  context: Excel.RequestContext,
+  sheet: Excel.Worksheet,
+  geometry: Geometry,
+  extraMessages: string[] = [],
+): Promise<FormulaReport> {
+  const messages = [...extraMessages];
+  const formulaResults: Record<string, number | string> = {};
+  try {
+    const columns = Math.max(1, geometry.columnCount);
+    const rows = Math.min(geometry.rowCount, Math.max(1, Math.floor(VERIFY_CELL_LIMIT / columns)));
+    const block = sheet.getRangeByIndexes(geometry.rowIndex, geometry.columnIndex, rows, geometry.columnCount);
+    block.load("formulas,values");
+    await context.sync();
+
+    const errors: string[] = [];
+    let listed = 0;
+    block.formulas.forEach((row, r) =>
+      row.forEach((formula, c) => {
+        if (!String(formula).startsWith("=")) return;
+        const value = block.values[r]?.[c];
+        const address = `${numberToColumn(geometry.columnIndex + c + 1)}${geometry.rowIndex + r + 1}`;
+        if (isErrorValue(value)) errors.push(`${address}=${value}`);
+        if (listed < VERIFY_RESULT_LIMIT && value !== null && value !== undefined && value !== "") {
+          formulaResults[address] = value as number | string;
+          listed++;
+        }
+      }),
+    );
+    if (errors.length > 0) {
+      messages.push(`${errors.length} formula(s) evaluated to an error: ${errors.slice(0, 5).join(", ")}${errors.length > 5 ? ", ..." : ""}. Fix them before reporting success.`);
+    }
+    if (rows < geometry.rowCount) {
+      messages.push(`Only the first ${rows} of ${geometry.rowCount} rows were checked for formula errors; use find_errors for the rest.`);
+    }
+  } catch (error) {
+    messages.push(`Could not read the formula results back (${error instanceof Error ? error.message : String(error)}); verify with read_range.`);
+  }
+  return {
+    ...(Object.keys(formulaResults).length > 0 ? { formulaResults } : {}),
+    ...(messages.length > 0 ? { messages } : {}),
+  };
+}
 
 /** Zero-based position and size of a range, as loaded from Office.js. */
 export interface Geometry {
@@ -129,12 +188,20 @@ export async function writeRange(input: WriteRangeInput): Promise<unknown> {
     target.load("address");
     await context.sync();
 
+    const formulaStrings = grid.flat().filter((cell) => typeof cell === "string" && cell.startsWith("=")).length;
+    const report = formulaStrings > 0
+      ? await reportFormulaResults(context, sheet, geometry, [
+          `${formulaStrings} value(s) starting with "=" were stored as formulas. To store literal text, prefix it with an apostrophe.`,
+        ])
+      : {};
+
     return {
       sheet: sheet.name,
       address: stripSheet(target.address),
       rowsWritten: rows,
       columnsWritten: columns,
       ...(notes.length > 0 ? { notesWritten: notes.length } : {}),
+      ...report,
     };
   });
 }
@@ -187,7 +254,8 @@ export async function setFormula(input: SetFormulaInput): Promise<unknown> {
     }
     range.load("address");
     await context.sync();
-    return { sheet: sheet.name, address: stripSheet(range.address), formula };
+    const report = await reportFormulaResults(context, sheet, geometry);
+    return { sheet: sheet.name, address: stripSheet(range.address), formula, ...report };
   });
 }
 

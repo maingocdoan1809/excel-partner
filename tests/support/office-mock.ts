@@ -468,6 +468,9 @@ export class MockRange {
       }),
     );
   }
+  get text() {
+    return this.values.map((row) => row.map((value) => (value === null || value === undefined ? "" : String(value))));
+  }
   get formulas() {
     return this.grid((cell) => cell.f ?? (cell.v === null ? "" : String(cell.v)));
   }

@@ -11,4 +11,7 @@ export const OFFICE_TOOL_GUIDANCE = [
   "Excel line signature: shapes.addLine(startLeft, startTop, endLeft, endTop, Excel.ConnectorType.straight). Coordinates in points come first; connectorType is the optional fifth argument. Do not use Excel.ShapeLineType or the PowerPoint signature with a type as the first argument.",
   "Chart.getData() is not an Office.js chart API. For source inspection, use getDataRange or getDataRangeOrNullObject only if supported by the current host. Otherwise report source inspection unavailable; do not invent methods or claim independent verification from the range originally supplied to setData.",
   "For addTextBox, pass the text, then set left/top/width/height as properties. Compare chart/shape geometry with a tolerance, not exact floating-point equality.",
+  "Never load a whole sheet's usedRange values. Load only the range you need, in bounded blocks, and return a summary or a small sample: results over about 30,000 characters are rejected.",
+  "Before calling an API from a newer requirement set, check Office.context.requirements.isSetSupported('ExcelApi', version) and fall back to an older equivalent or report the limit.",
+  "When writing many cells, set range.values/formulas once on a rectangular block instead of per cell, and keep each execute_office_js call to one logical change so a failure leaves a clear state.",
 ].join("\n");

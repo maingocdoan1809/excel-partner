@@ -6,7 +6,8 @@ const names: Record<string, string> = {
   write_range: "Writing cells", set_cells: "Writing cells", set_formula: "Writing formulas",
   execute_office_js: "Running Excel code", read_range_image: "Viewing cells", manage_sheet: "Updating worksheet",
   format_range: "Formatting cells", modify_chart: "Updating chart", modify_table: "Updating table",
-  get_sheets: "Reading sheets", search_data: "Searching cells", get_range_as_csv: "Reading cells as CSV",
+  get_sheets: "Reading sheets", search_data: "Searching cells", find_errors: "Checking formula errors",
+  check_formula_consistency: "Checking formula consistency", find_replace: "Replacing text", get_range_as_csv: "Reading cells as CSV",
 };
 const tableTools = new Set(["read_range", "get_cell_ranges", "get_selection", "get_sheet_info", "get_sheets", "get_objects", "search_data"]);
 

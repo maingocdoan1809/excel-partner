@@ -240,6 +240,198 @@ describe("search_data", () => {
   });
 });
 
+describe("formula feedback", () => {
+  it("set_formula reports what the formulas evaluated to", async () => {
+    const result = await call("set_formula", { address: "D2:D3", formula: "B2*C2" });
+    expect(result.ok && (result.data as any)).toMatchObject({ formulaResults: { D2: 4.5, D3: 4 } });
+    expect(result.ok && (result.data as any).messages).toBeUndefined();
+  });
+
+  it("write_range explains that '=' strings became formulas", async () => {
+    const result = await call("write_range", { address: "E1", values: [["=B2+B3"]] });
+    expect(result.ok && (result.data as any)).toMatchObject({ formulaResults: { E1: 5 } });
+    expect(result.ok && (result.data as any).messages[0]).toMatch(/stored as formulas/);
+  });
+
+  it("write_range of plain values adds no formula report", async () => {
+    const result = await call("write_range", { address: "E1", values: [["a"]] });
+    expect(result.ok && (result.data as any).formulaResults).toBeUndefined();
+  });
+});
+
+describe("read_range includeText", () => {
+  it("returns displayed text parallel to the values", async () => {
+    const result = await call("read_range", { address: "B2:C2", includeText: true });
+    expect(result.ok && (result.data as any)).toMatchObject({ values: [[3, 1.5]], text: [["3", "1.5"]] });
+  });
+
+  it("omits text by default", async () => {
+    const result = await call("read_range", { address: "B2:C2" });
+    expect(result.ok && (result.data as any).text).toBeUndefined();
+  });
+});
+
+describe("find_errors", () => {
+  it("lists error cells with their formulas and counts per type", async () => {
+    book.fill("Sheet1", [["#REF!", "#N/A", "ok"]], "E1");
+    const result = await call("find_errors", {});
+    expect(result.ok && (result.data as any)).toMatchObject({
+      totalFound: 2,
+      hasMore: false,
+      byType: { "#REF!": 1, "#N/A": 1 },
+      errors: [{ sheet: "Sheet1", address: "E1", error: "#REF!" }, { sheet: "Sheet1", address: "F1", error: "#N/A" }],
+    });
+  });
+
+  it("reports a clean sheet", async () => {
+    const result = await call("find_errors", { sheet: { name: "Sheet1" } });
+    expect(result.ok && (result.data as any)).toMatchObject({ totalFound: 0, errors: [] });
+  });
+
+  it("caps the listing but keeps the total", async () => {
+    book.fill("Sheet1", [["#REF!", "#REF!", "#REF!"]], "E1");
+    const result = await call("find_errors", { limit: 1 });
+    expect(result.ok && (result.data as any)).toMatchObject({ totalFound: 3, returned: 1, hasMore: true });
+  });
+});
+
+function resultAddresses(result: Awaited<ReturnType<typeof call>>): string[] {
+  return result.ok ? (result.data as any).matches.map((m: any) => m.address) : [];
+}
+
+describe("search_data formulas and regex", () => {
+  beforeEach(async () => {
+    await call("set_formula", { address: "D2:D3", formula: "B2*C2" });
+  });
+
+  it("matches formula text and returns the formula", async () => {
+    const result = await call("search_data", { searchTerm: "*C", matchFormulas: true });
+    expect(result.ok && (result.data as any).matches).toEqual([
+      { sheet: "Sheet1", address: "D2", value: 4.5, formula: "=B2*C2" },
+      { sheet: "Sheet1", address: "D3", value: 4, formula: "=B3*C3" },
+    ]);
+  });
+
+  it("does not look inside formulas unless asked", async () => {
+    const result = await call("search_data", { searchTerm: "*C" });
+    expect(result.ok && (result.data as any).matches).toEqual([]);
+  });
+
+  it("supports regular expressions, honouring wholeCell", async () => {
+    const found = await call("search_data", { searchTerm: "^(Apple|Pear)$", useRegex: true, wholeCell: true });
+    expect(resultAddresses(found)).toEqual(["A2", "A3"]);
+    const partial = await call("search_data", { searchTerm: "^Ap", useRegex: true });
+    expect(resultAddresses(partial)).toEqual(["A2"]);
+  });
+
+  it("rejects an invalid regular expression", async () => {
+    expectError(await call("search_data", { searchTerm: "(", useRegex: true }), "invalid_arguments");
+  });
+});
+
+describe("check_formula_consistency", () => {
+  beforeEach(() => {
+    const calc = book.addSheet("Calc");
+    book.fill("Calc", [["Q", "P", "Total"], [1, 2, null], [2, 3, null], [3, 4, null], [4, 5, 99], [5, 6, null], [6, 7, null]]);
+    const formulas: Record<number, string> = { 1: "=A2*B2", 2: "=A3*B3", 3: "=A4*B4", 5: "=A6+B6", 6: "=A7*B7" };
+    for (const [row, f] of Object.entries(formulas)) calc.setCell(Number(row), 2, { v: null, f });
+    calc.setCell(7, 2, { v: null, f: "=SUM(C2:C7)" });
+  });
+
+  it("flags a different formula and a hard-coded value but not the total", async () => {
+    const result = await call("check_formula_consistency", { sheet: { name: "Calc" } });
+    expect(result.ok && (result.data as any)).toMatchObject({
+      totalIssues: 2,
+      byKind: { different_formula: 1, hardcoded_value: 1 },
+      linesChecked: 1,
+      issues: [
+        { address: "C5", kind: "hardcoded_value", value: 99, expected: { address: "C2", formula: "=A2*B2" } },
+        { address: "C6", kind: "different_formula", formula: "=A6+B6", expected: { address: "C2", formula: "=A2*B2" } },
+      ],
+    });
+  });
+
+  it("reports a clean sheet", async () => {
+    const result = await call("check_formula_consistency", { sheet: { name: "Sheet1" } });
+    expect(result.ok && (result.data as any)).toMatchObject({ totalIssues: 0, issues: [] });
+  });
+});
+
+describe("relativePattern", () => {
+  it("makes copied formulas compare equal and keeps absolute refs and text intact", async () => {
+    const { relativePattern } = await import("../addin/taskpane/executor/audit.js");
+    expect(relativePattern("=B2*C2", 1, 3)).toBe(relativePattern("=B3*C3", 2, 3));
+    expect(relativePattern("=B2*$C$1", 1, 3)).toBe(relativePattern("=B3*$C$1", 2, 3));
+    expect(relativePattern("=B2*$C$1", 1, 3)).not.toBe(relativePattern("=B3*$C$2", 2, 3));
+    expect(relativePattern('=IF(A1="A1",LOG10(A1),Sheet1!A1)', 0, 5)).toBe('=IF(R[0]C[-5]="A1",LOG10(R[0]C[-5]),Sheet1!R[0]C[-5])');
+  });
+});
+
+describe("find_replace", () => {
+  it("previews without changing anything", async () => {
+    const result = await call("find_replace", { find: "apple", replace: "Mango" });
+    expect(result.ok && (result.data as any)).toMatchObject({
+      applied: false,
+      totalMatches: 1,
+      changes: [{ sheet: "Sheet1", address: "A2", before: "Apple", after: "Mango" }],
+    });
+    expect(book.get("Sheet1", "A2")).toBe("Apple");
+  });
+
+  it("applies the change and skips numbers", async () => {
+    const result = await call("find_replace", { find: "a", replace: "4", apply: true });
+    expect(result.ok && (result.data as any)).toMatchObject({ applied: true, replaced: 2 });
+    expect(book.get("Sheet1", "A2")).toBe("4pple");
+    expect(book.get("Sheet1", "B2")).toBe(3);
+  });
+
+  it("honours matchCase and wholeCell", async () => {
+    const miss = await call("find_replace", { find: "apple", replace: "x", matchCase: true });
+    expect(miss.ok && (miss.data as any).totalMatches).toBe(0);
+    const whole = await call("find_replace", { find: "App", replace: "x", wholeCell: true });
+    expect(whole.ok && (whole.data as any).totalMatches).toBe(0);
+  });
+
+  it("treats the replacement literally", async () => {
+    await call("find_replace", { find: "Apple", replace: "$&-$1", apply: true });
+    expect(book.get("Sheet1", "A2")).toBe("$&-$1");
+  });
+
+  it("keeps replaced text that starts with = as text", async () => {
+    await call("find_replace", { find: "Apple", replace: "=x", apply: true });
+    expect(book.get("Sheet1", "A2")).toBe("'=x");
+  });
+
+  it("edits formula text only when inFormulas is set", async () => {
+    await call("set_formula", { address: "D2", formula: "B2*C2" });
+    const untouched = await call("find_replace", { find: "B2", replace: "B3", apply: true });
+    expect(untouched.ok && (untouched.data as any).replaced).toBe(0);
+    const result = await call("find_replace", { find: "B2", replace: "B3", inFormulas: true, apply: true });
+    expect(result.ok && (result.data as any).replaced).toBe(1);
+    expect(book.get("Sheet1", "D2")).toBe("=B3*C2");
+  });
+
+  it("refuses to apply more than the cell limit", async () => {
+    book.fill("Sheet1", Array.from({ length: 2_001 }, () => ["x"]), "H1");
+    expectError(await call("find_replace", { find: "x", replace: "y", apply: true }), "size_limit_exceeded");
+    expect(book.get("Sheet1", "H1")).toBe("x");
+  });
+});
+
+describe("merge_range default", () => {
+  it("merges when operation is omitted", async () => {
+    const result = await call("merge_range", { address: "G1:H1" });
+    expect(result.ok && (result.data as any).operation).toBe("merge");
+  });
+});
+
+describe("get_sheets tables", () => {
+  it("includes an empty tables list per sheet", async () => {
+    const result = await call("get_sheets", {});
+    expect(result.ok && (result.data as any).sheets[0].tables).toEqual([]);
+  });
+});
+
 describe("format_range", () => {
   it("applies a number format to a multi-cell range", async () => {
     const result = await call("format_range", { address: "B2:C3", format: { numberFormat: "#,##0.00" } });

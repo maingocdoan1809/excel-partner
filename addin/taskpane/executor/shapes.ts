@@ -423,7 +423,12 @@ export async function addShape(input: AddShapeInput): Promise<unknown> {
     applyStyle(shape, input, input.type === "TextBox" ? undefined : input.text, warnings);
     await context.sync();
     await loadShape(context, shape);
-    return info(shape, input.text ?? null, warnings);
+    const created = info(shape, input.text ?? null, warnings);
+    // Some Excel builds report a shape from addTextBox as a plain Rectangle. Say what was created.
+    if (input.type === "TextBox" && created.type !== "TextBox") {
+      return { ...created, type: "TextBox", hostReportedType: created.type };
+    }
+    return created;
   });
 }
 

@@ -3,7 +3,8 @@ import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { SystemPromptStore } from "../bridge/src/system-prompt.js";
-import { SYSTEM_PROMPT } from "../providers/src/prompt.js";
+import { EXCEL_TOOL_NAMES, isExcelToolName } from "../protocol/src/index.js";
+import { RECOMMENDED_SYSTEM_PROMPT, SYSTEM_PROMPT } from "../providers/src/prompt.js";
 
 describe("system prompt settings", () => {
   it("persists a full override, detects conflicting edits and restores the shipped default", () => {
@@ -38,6 +39,22 @@ describe("system prompt settings", () => {
     const blank = store.update(" ", initial.revision);
     expect(blank.content).toBe(" ");
     expect(() => store.update("\0", blank.revision)).toThrow(/null characters/);
+  });
+
+  it("ships a recommended preset that fits the editor and names only real tools", () => {
+    expect(SYSTEM_PROMPT).toBe("");
+    expect(Buffer.byteLength(RECOMMENDED_SYSTEM_PROMPT, "utf8")).toBeLessThan(64 * 1024);
+    expect(RECOMMENDED_SYSTEM_PROMPT).not.toContain("\0");
+    const mentioned = new Set(RECOMMENDED_SYSTEM_PROMPT.match(/\b[a-z]+(?:_[a-z]+)+\b/g) ?? []);
+    const toolLike = [...mentioned].filter((word) => EXCEL_TOOL_NAMES.some((name) => name.split("_")[0] === word.split("_")[0]));
+    for (const word of toolLike) {
+      if (/^(would_overwrite|formula_results)$/.test(word)) continue;
+      expect(isExcelToolName(word), `${word} is not an Excel tool`).toBe(true);
+    }
+    for (const name of ["get_selection", "get_sheets", "read_range", "get_cell_ranges", "search_data", "read_range_image", "set_formula", "find_errors", "execute_office_js"]) {
+      expect(RECOMMENDED_SYSTEM_PROMPT).toContain(name);
+      expect(isExcelToolName(name)).toBe(true);
+    }
   });
 
 });

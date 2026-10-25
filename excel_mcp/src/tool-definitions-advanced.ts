@@ -56,6 +56,31 @@ const META: Partial<Record<ExcelToolName, Meta>> = {
       "identical formatting. Large reads are paged through `cellLimit` / `nextRanges`. Use read_range with format csv " +
       "when you only need values.",
   },
+  find_errors: {
+    title: "Find formula errors",
+    annotations: READ,
+    description:
+      "READ. Scan one sheet (or every visible sheet) for cells showing an Excel error (#REF!, #DIV/0!, #N/A, #NAME?, #VALUE!, ...). " +
+      "Returns each error cell with its formula, plus counts per error type. Run it after writing or filling formulas, " +
+      "inserting or deleting rows/columns, and before reporting a formula task as done.",
+  },
+  check_formula_consistency: {
+    title: "Check formula consistency",
+    annotations: READ,
+    description:
+      "READ. Find formulas that break the pattern of their column (or row) and hard-coded numbers sitting inside a run of formulas. " +
+      "Formulas are compared after making references relative, so `=B2*C2` and `=B3*C3` match. Each issue shows the formula and an " +
+      "example of the expected one. A total at either end of a line is not flagged. Results are leads to review, not proof of an error: " +
+      "overrides and inputs can be intentional. Run it after filling or editing a block of formulas.",
+  },
+  find_replace: {
+    title: "Find and replace",
+    annotations: WRITE,
+    description:
+      "WRITE. Replace text in cells. Call it first without `apply` to PREVIEW every change (cell, before, after), show or summarise the " +
+      "preview, then call again with apply=true. Only text constants change unless inFormulas is true; numbers are never touched. " +
+      "Applies at most 2,000 cells per call: narrow the range if it refuses.",
+  },
   read_range_image: {
     title: "Render range as image",
     annotations: READ,
@@ -127,6 +152,7 @@ const META: Partial<Record<ExcelToolName, Meta>> = {
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false },
     description:
       "EXECUTE. Write AI-generated Python as main.py in a temporary working folder and run it directly on the user's machine. " +
+      "`code` is Python source, not JSON: use None/True/False, never null/true/false. " +
       "Local user permissions, installed Python libraries, file access and network access apply. Execution is limited to 60 seconds and 512 KB of console output. " +
       "Supply selected attachment:// files through files to copy them into the working folder. Request outputFiles to receive attachment:// results " +
       "(10 MB combined). Returns stdout, stderr, exitCode and timeout/output-limit status. Check these before claiming success. " +

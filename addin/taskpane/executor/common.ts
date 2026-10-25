@@ -12,6 +12,13 @@ export class ToolFailure extends Error {
   }
 }
 
+const ERROR_VALUE = /^#(NULL!|DIV\/0!|VALUE!|REF!|NAME\?|NUM!|N\/A|SPILL!|CALC!|GETTING_DATA|CONNECT!|BLOCKED!|FIELD!|UNKNOWN!)$/;
+
+/** True for the text Excel shows in a cell whose formula failed (`#REF!`, `#N/A`, ...). */
+export function isErrorValue(value: unknown): value is string {
+  return typeof value === "string" && ERROR_VALUE.test(value);
+}
+
 export function resolveSheet(context: Excel.RequestContext, ref?: SheetRef): Excel.Worksheet {
   if (ref?.id) return context.workbook.worksheets.getItem(ref.id);
   if (ref?.name) return context.workbook.worksheets.getItem(ref.name);

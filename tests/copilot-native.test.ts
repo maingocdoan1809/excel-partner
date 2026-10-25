@@ -76,6 +76,33 @@ describe("Copilot native question transport", () => {
     expect(events.filter(e => e.type === "message_delta")).toHaveLength(1);
     expect(events.at(-1)).toMatchObject({ type: "turn_finished", reason: "completed" });
   });
+  it("does not repeat text that streams under one message id and completes under another", async () => {
+    const id = await manager.start(ctx, process.execPath, process.env);
+    sdk.run = async () => {
+      for (const chunk of ["Bước 0 — ", "Tool và model"]) sdk.handler({ type: "assistant.message_delta", data: { messageId: "reasoning", deltaContent: chunk } });
+      sdk.handler({ type: "assistant.message", data: { messageId: "reasoning", content: "", toolRequests: [] } });
+      sdk.handler({ type: "assistant.message", data: { messageId: "final", content: "Bước 0 — Tool và model" } });
+    };
+    const events = await turn(id);
+    const shown = events.filter(e => e.type === "message_delta").map(e => (e as { text: string }).text).join("");
+    expect(shown).toBe("Bước 0 — Tool và model");
+    expect(events.filter(e => e.type === "message_completed")).toEqual([{ type: "message_completed", requestId: "r", text: "Bước 0 — Tool và model" }]);
+  });
+  it("appends only the unstreamed remainder of a final message", async () => {
+    const id = await manager.start(ctx, process.execPath, process.env);
+    sdk.run = async () => {
+      sdk.handler({ type: "assistant.message_delta", data: { messageId: "a", deltaContent: "Hello " } });
+      sdk.handler({ type: "assistant.message", data: { messageId: "b", content: "Hello world" } });
+    };
+    const shown = (await turn(id)).filter(e => e.type === "message_delta").map(e => (e as { text: string }).text).join("");
+    expect(shown).toBe("Hello world");
+  });
+  it("shows a final message that was never streamed", async () => {
+    const id = await manager.start(ctx, process.execPath, process.env);
+    sdk.run = async () => { sdk.handler({ type: "assistant.message", data: { messageId: "x", content: "Short answer" } }); };
+    const events = await turn(id);
+    expect(events.filter(e => e.type === "message_delta")).toEqual([{ type: "message_delta", requestId: "r", text: "Short answer" }]);
+  });
   it("rejects skipped native questions without returning a fabricated answer", async () => {
     ctx.requestUserInput = async (): Promise<UserInputResponse> => ({ cancelled: true, answers: {} });
     const id = await manager.start(ctx, process.execPath, process.env);

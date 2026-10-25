@@ -539,3 +539,32 @@ describe("Anthropic-compatible CLI gateway", () => {
     expect(h.adapter.contexts).toHaveLength(1);
   });
 });
+
+describe("gateway text de-duplication", () => {
+  class GhostCompletionAdapter extends MockAdapter {
+    override async startSession(_ctx: StartSessionContext) { return "ghost"; }
+    override async *sendTurn(input: SendTurnInput): AsyncIterable<ProviderEvent> {
+      const requestId = input.requestId;
+      yield { type: "session_info", provider: this.id, providerSessionId: "native-ghost", requestId };
+      for (const chunk of ["Kết quả ", "kiểm thử"]) yield { type: "message_delta", requestId, text: chunk };
+      // A model that streams under one message id emits an empty message before the one carrying the text.
+      yield { type: "message_completed", requestId, text: "" };
+      yield { type: "message_completed", requestId, text: "Kết quả kiểm thử" };
+      yield { type: "turn_finished", requestId, reason: "completed" };
+    }
+    override async closeSession() {}
+  }
+  it("returns streamed text once when an empty completion precedes the final one", async () => {
+    const config = { ...ConfigSchema.parse({ warmupOnStart: false }), port: 0 };
+    const server = new GatewayServer({ config, token, tls: null, registry: new ProviderRegistry().register(new GhostCompletionAdapter({ id: "copilot" })) });
+    servers.push(server);
+    const url = await server.listen();
+    const body = { model: "copilot/default", max_tokens: 256, messages: [{ role: "user", content: "hi" }] };
+    const headers = { "x-api-key": token, "content-type": "application/json" };
+    const json = await (await fetch(`${url}/v1/messages`, { method: "POST", headers, body: JSON.stringify(body) })).json() as ApiMessage;
+    expect(json.content).toEqual([{ type: "text", text: "Kết quả kiểm thử" }]);
+    const sse = await (await fetch(`${url}/v1/messages`, { method: "POST", headers, body: JSON.stringify({ ...body, stream: true }) })).text();
+    const streamed = [...sse.matchAll(/^data: (.+)$/gm)].map(m => JSON.parse(m[1]!)).filter(e => e.type === "content_block_delta").map(e => e.delta.text).join("");
+    expect(streamed).toBe("Kết quả kiểm thử");
+  });
+});

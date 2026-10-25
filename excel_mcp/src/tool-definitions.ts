@@ -110,7 +110,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
   {
     name: "get_sheets",
     title: "List sheets",
-    description: "READ. Every worksheet with visibility and used range.",
+    description: "READ. Every worksheet with visibility, used range and its Excel Tables (name and range).",
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
     annotations: READ,
   },
@@ -118,7 +118,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
     name: "read_range",
     title: "Read range",
     description:
-      "READ. Values (and optionally formulas) of an A1 range. Use format `csv` for large ranges: " +
+      "READ. Values (and optionally formulas and displayed text) of an A1 range. Use format `csv` for large ranges: " +
       "it is much more compact than the default 2D array. Page big ranges with maxRows / offset.",
     inputSchema: {
       type: "object",
@@ -126,6 +126,11 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
         sheet: sheetRef,
         address: rangeAddress,
         includeFormulas: { type: "boolean", default: false },
+        includeText: {
+          type: "boolean",
+          default: false,
+          description: "Also return the text as displayed (dates, %, currency), parallel to `values`. Values alone show dates as serial numbers.",
+        },
         format: { type: "string", enum: ["grid", "csv"], default: "grid" },
         maxRows: { type: "integer", minimum: 1, maximum: 20000 },
         offset: { type: "integer", minimum: 0, default: 0 },
@@ -139,8 +144,9 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
     name: "search_data",
     title: "Search data",
     description:
-      "READ. Find cells containing text across all visible sheets (or one sheet/range). Returns cell " +
-      "addresses to follow up with read_range. Page with `offset` / `nextOffset`.",
+      "READ. Find cells containing text across all visible sheets (or one sheet/range), optionally as a regular expression " +
+      "and optionally inside formulas (matchFormulas). Returns cell addresses (and the formula of formula cells) to follow up " +
+      "with read_range. Page with `offset` / `nextOffset`.",
     inputSchema: {
       type: "object",
       properties: {
@@ -149,6 +155,12 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
         searchTerm: { type: "string" },
         matchCase: { type: "boolean", default: false },
         wholeCell: { type: "boolean", default: false },
+        matchFormulas: {
+          type: "boolean",
+          default: false,
+          description: "Search the formula text of formula cells (e.g. every cell referencing `Sales!`) instead of their values.",
+        },
+        useRegex: { type: "boolean", default: false, description: "Treat searchTerm as a JavaScript regular expression." },
         limit: { type: "integer", minimum: 1, maximum: 500, default: 50 },
         offset: { type: "integer", minimum: 0, default: 0 },
       },

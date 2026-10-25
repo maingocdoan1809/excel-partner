@@ -347,8 +347,9 @@ export class GatewayEngine {
         }
       }
       if (event.type === "message_delta") { streamed += event.text; job.segment.append(event.text); }
-      if (event.type === "message_completed") {
-        if (!streamed && event.text) job.segment.append(event.text);
+      if (event.type === "message_completed" && event.text) {
+        // An empty completion must not forget deltas that belong to the message that follows it.
+        if (!streamed) job.segment.append(event.text);
         streamed = "";
       }
       if (event.type === "tool_started") job.sideEffects = true;
