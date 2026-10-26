@@ -173,6 +173,32 @@ describe("Anthropic-compatible CLI gateway", () => {
     expect((await post({ ...probe, messages: [{ role: "user", content: "different" }] })).status).toBe(400);
     expect(adapter.calls).toBe(2);
   });
+  it("lets a slow login probe finish after the client gives up so the retry hits the cache", async () => {
+    class SlowAdapter extends MockAdapter {
+      calls = 0;
+      override async *sendTurn(input: SendTurnInput): AsyncIterable<ProviderEvent> {
+        this.calls++;
+        await new Promise(resolve => setTimeout(resolve, 300));
+        yield { type: "message_delta", requestId: input.requestId, text: "SLOW_BACKEND_RESPONSE" };
+        yield { type: "turn_finished", requestId: input.requestId, reason: "completed" };
+      }
+    }
+    const adapter = new SlowAdapter({ id: "copilot" });
+    const config = { ...ConfigSchema.parse({ warmupOnStart: false }), port: 0 };
+    const server = new GatewayServer({ config, token, tls: null, registry: new ProviderRegistry().register(adapter) });
+    servers.push(server); const url = await server.listen();
+    const body = JSON.stringify({ model: "copilot/some-model", max_tokens: 1, messages: [{ role: "user", content: "x" }] });
+    const post = (signal?: AbortSignal) => fetch(`${url}/v1/messages`, { method: "POST", signal, headers: { "x-api-key": token, "content-type": "application/json" }, body });
+    const controller = new AbortController();
+    const abandoned = post(controller.signal).catch(() => null);
+    await new Promise(resolve => setTimeout(resolve, 50));
+    controller.abort(); await abandoned;
+    const joined = await post(); // Retry while the first probe is still running: shares its turn.
+    expect((await joined.json()).content[0].text).toBe("SLOW_BACKEND_RESPONSE");
+    const cached = await post();
+    expect(cached.headers.get("x-agent-gateway-cache")).toBe("verification-probe");
+    expect(adapter.calls).toBe(1);
+  });
   it("round-trips client tools through one runtime and reports final usage once", async () => {
     const h = await start();
     const first = await (await h.post()).json() as ApiMessage;
