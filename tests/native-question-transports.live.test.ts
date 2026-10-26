@@ -19,7 +19,7 @@ describe("native question transports (real CLIs, no model)", () => {
     const directory = fs.mkdtempSync(path.join(os.tmpdir(), "copilot-question-handshake-"));
     const client = new CopilotClient({ connection: RuntimeConnection.forStdio({
       path: resolveCopilotPath(process.env.COPILOT_BIN ?? "copilot", process.env),
-      args: ["--no-custom-instructions", "--no-remote", "--disable-builtin-mcps"],
+      args: ["--no-custom-instructions", "--disable-builtin-mcps"],
     }), env: { ...process.env, COPILOT_HOME: directory }, workingDirectory: directory, useLoggedInUser: false, logLevel: "error" });
     try {
       await client.start();
