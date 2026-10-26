@@ -61,7 +61,7 @@ export class CopilotAdapter extends BaseCliAdapter {
   async listModels(): Promise<ProviderModelCatalog> {
     const peer = new JsonRpcPeer({
       command: this.command,
-      args: ["--acp", "--no-auto-update", "--no-ask-user", "--no-custom-instructions", "--no-remote", "--disable-builtin-mcps"],
+      args: ["--acp", "--no-auto-update", "--no-ask-user", "--no-custom-instructions", "--disable-builtin-mcps"],
       cwd: ensureWorkspaceDir(),
       env: this.env,
       versionField: true,
@@ -180,7 +180,6 @@ export class CopilotAdapter extends BaseCliAdapter {
         "--no-auto-update",
         "--no-ask-user",
         "--no-custom-instructions",
-        "--no-remote",
         ...(webSearch ? [] : ["--disable-builtin-mcps"]),
         // Expose Excel MCP and, when selected, only the provider-native web tools.
         "--available-tools",

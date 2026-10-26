@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 import { createDefaultRegistry, type ProviderRegistry } from "../../providers/src/registry.js";
 import { GatewayEngine } from "./engine.js";
 import { ConversationStore } from "./conversations.js";
-import { ApiError, parseRequest, stable, type ApiMessage } from "./protocol.js";
+import { ApiError, parseRequest, stable, type ApiMessage, type MessagesRequest } from "./protocol.js";
 import { publicModelId, routeModel, type GatewayConfig, type Route } from "./config.js";
 
 function matches(value: string | undefined, secret: string) {
@@ -30,6 +30,7 @@ export class GatewayServer {
   private stopping = false;
   private ready = false;
   private readonly probes = new Map<string, { message: ApiMessage; expires: number }>();
+  private readonly probing = new Map<string, Promise<ApiMessage>>();
   private catalog?: { value: Awaited<ReturnType<GatewayServer["computeModels"]>>; expires: number };
   private catalogLoading?: Promise<Awaited<ReturnType<GatewayServer["computeModels"]>>>;
   constructor(readonly options: ServerOptions) {
@@ -163,13 +164,10 @@ export class GatewayServer {
         usage: { input_tokens: 0, output_tokens: 0 } });
     }
     const owner = createHash("sha256").update(this.options.token).digest("hex");
+    if (isProbe) return this.json(res, 200, { ...await this.probe(target, request, owner), model: request.model });
     const running = this.engine.open(request, target, owner);
     res.once("close", () => { if (!res.writableFinished) running.cancel(); });
-    if (!request.stream) {
-      const message = await running.segment.result;
-      if (isProbe) this.cacheProbe(target, message);
-      return this.json(res, 200, message);
-    }
+    if (!request.stream) return this.json(res, 200, await running.segment.result);
     res.writeHead(200, { "content-type": "text/event-stream; charset=utf-8", "x-accel-buffering": "no" });
     const send = (type: string, data: object) => { if (!res.destroyed) res.write(`event: ${type}\ndata: ${JSON.stringify(data)}\n\n`); };
     send("message_start", { type: "message_start", message: { id: `msg_agw_${randomUUID().replaceAll("-", "")}`, type: "message", role: "assistant", model: request.model, content: [], stop_reason: null, stop_sequence: null, usage: { input_tokens: 0, output_tokens: 0 } } });
@@ -232,14 +230,29 @@ export class GatewayServer {
     if (this.probes.size >= 64) this.probes.delete(this.probes.keys().next().value!);
     this.probes.set(stable(target), { message, expires: Date.now() + this.options.config.probeCacheTtlMs });
   }
+  /**
+   * Runs one verification probe per route. It is deliberately not tied to the
+   * HTTP request: Office abandons the check after five seconds, and a cold CLI
+   * start can take longer. Letting it finish fills the cache so Office's retry
+   * succeeds, and concurrent probes for the same route share a single turn.
+   */
+  private probe(target: Route, request: MessagesRequest, owner: string) {
+    const key = stable(target);
+    let pending = this.probing.get(key);
+    if (!pending) {
+      pending = this.engine.open(request, target, owner).segment.result.then(message => { this.cacheProbe(target, message); return message; })
+        .finally(() => this.probing.delete(key));
+      this.probing.set(key, pending);
+      void pending.catch(() => {});
+    }
+    return pending;
+  }
   private async warmup() {
     const request = parseRequest({ model: `${this.options.config.defaultRoute.provider}/default`, max_tokens: 1, messages: [{ role: "user", content: "x" }] });
     const target = routeModel(request.model, this.options.config);
     try {
       const owner = createHash("sha256").update(this.options.token).digest("hex");
-      const running = this.engine.open(request, target, owner);
-      const message = await running.segment.result;
-      this.cacheProbe(target, message);
+      await this.probe(target, request, owner);
       this.options.log?.({ event: "warmup_ready", provider: target.provider, model: target.model });
       return true;
     } catch (error) {

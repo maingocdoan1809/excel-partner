@@ -33,7 +33,7 @@ export class CopilotNativeSessions {
   async listModels(command: string, env: NodeJS.ProcessEnv) {
     const { CopilotClient, RuntimeConnection } = await import("@github/copilot-sdk");
     const client = new CopilotClient({ connection: RuntimeConnection.forStdio({ path: resolveCopilotPath(command, env),
-      args: ["--no-custom-instructions", "--no-remote", "--disable-builtin-mcps"] }), workingDirectory: ensureWorkspaceDir(), env, logLevel: "error" });
+      args: ["--no-custom-instructions", "--disable-builtin-mcps"] }), workingDirectory: ensureWorkspaceDir(), env, logLevel: "error" });
     try {
       await client.start();
       return { models: (await client.listModels()).map(model => ({ id: model.id, name: model.name })), defaultModelId: null };
@@ -45,7 +45,7 @@ export class CopilotNativeSessions {
     if (current) return normalizeCommands((await current.session.rpc.commands.list()).commands);
     const { CopilotClient, RuntimeConnection } = await import("@github/copilot-sdk");
     const client = new CopilotClient({ connection: RuntimeConnection.forStdio({ path: resolveCopilotPath(command, env),
-      args: ["--no-custom-instructions", "--no-remote", "--disable-builtin-mcps"] }),
+      args: ["--no-custom-instructions", "--disable-builtin-mcps"] }),
       workingDirectory: ensureWorkspaceDir(), env, logLevel: "error" });
     try {
       await client.start();
@@ -66,7 +66,7 @@ export class CopilotNativeSessions {
     if (web) tools.addBuiltIn(["web_search", "web_fetch"]);
     const cliPath = resolveCopilotPath(command, env);
     const client = new CopilotClient({
-      connection: RuntimeConnection.forStdio({ path: cliPath, args: ["--no-custom-instructions", "--no-remote",
+      connection: RuntimeConnection.forStdio({ path: cliPath, args: ["--no-custom-instructions",
         ...(web ? [] : ["--disable-builtin-mcps"])] }),
       workingDirectory: ensureWorkspaceDir(), env, logLevel: "error",
     });
