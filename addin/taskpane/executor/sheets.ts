@@ -115,16 +115,35 @@ export async function insertSheetsFromFile(input: InsertSheetsFromFileInput & { 
     }
 
     const positionType = { end: "End", beginning: "Beginning", after: "After" }[input.position] as Excel.WorksheetPositionType;
-    context.workbook.insertWorksheetsFromBase64(input.fileBase64!, {
-      positionType,
-      ...(input.position === "after" ? { relativeTo: input.afterSheet } : {}),
-      ...(input.sheets ? { sheetNamesToInsert: input.sheets } : {}),
-    });
-    await context.sync();
-
-    sheets.load("items/name");
-    await context.sync();
-    const inserted = sheets.items.map((s) => s.name).filter((name) => !before.has(name));
+    // Importing a whole workbook in one call has crashed Excel, so go one sheet at a time (the bridge lists every
+    // sheet when the caller names none). Each later sheet goes after the previous one to keep the file's order.
+    const names = input.sheets ?? [undefined];
+    const inserted: string[] = [];
+    let known = new Set(before);
+    let anchor: string | undefined;
+    for (const [index, name] of names.entries()) {
+      const placeAfter = index > 0 && anchor !== undefined;
+      try {
+        context.workbook.insertWorksheetsFromBase64(input.fileBase64!, {
+          positionType: placeAfter ? "After" as Excel.WorksheetPositionType : positionType,
+          ...(placeAfter ? { relativeTo: anchor } : input.position === "after" ? { relativeTo: input.afterSheet } : {}),
+          ...(name === undefined ? {} : { sheetNamesToInsert: [name] }),
+        });
+        await context.sync();
+        sheets.load("items/name");
+        await context.sync();
+      } catch (err) {
+        if (inserted.length === 0) throw err;
+        const reason = err instanceof Error ? err.message : String(err);
+        throw new ToolFailure("office_error", `inserted ${inserted.length} of ${names.length} sheets, then '${name}' failed: ${reason}`, { inserted, failedSheet: name });
+      }
+      const added = sheets.items.map((s) => s.name).filter((sheetName) => !known.has(sheetName));
+      inserted.push(...added);
+      known = new Set([...known, ...added]);
+      anchor = added.at(-1) ?? anchor;
+      // Let Excel repaint between sheets so the window does not freeze for the whole import.
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
     return { inserted, count: inserted.length };
   });
 }
