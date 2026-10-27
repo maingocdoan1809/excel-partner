@@ -346,7 +346,8 @@ export class ToolGateway {
       if (missing.length > 0) {
         return error("invalid_arguments", `sheet(s) not found in the file: ${missing.join(", ")}`, { available });
       }
-      return { ...args, path, fileBase64: Buffer.from(bytes).toString("base64") };
+      // Name every sheet so the pane imports them one by one instead of in a single call.
+      return { ...args, path, sheets: args.sheets ?? available, fileBase64: Buffer.from(bytes).toString("base64") };
     } catch (err) {
       if (err instanceof ReferenceError_ || err instanceof XlsxError || err instanceof SkillError) return error("invalid_arguments", err.message);
       throw err;

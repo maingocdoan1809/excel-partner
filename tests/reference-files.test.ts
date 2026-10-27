@@ -239,6 +239,10 @@ describe("gateway file tools", () => {
     expect(forwarded.args.sheets).toEqual(["Main"]);
 
     forwarded = null;
+    await gateway.invoke({ sessionId: session.id, tool: "insert_sheets_from_file", args: { path: file() } });
+    expect(forwarded.args.sheets).toEqual(["Main", "Hidden"]); // omitted sheets are expanded so the pane imports one by one
+
+    forwarded = null;
     const bad = await gateway.invoke({ sessionId: session.id, tool: "insert_sheets_from_file", args: { path: file(), sheets: ["Nope"] } });
     expect(bad).toMatchObject({ ok: false, error: { code: "invalid_arguments", detail: { available: ["Main", "Hidden"] } } });
     expect(forwarded).toBeNull();
@@ -288,7 +292,18 @@ describe("pane: insert_sheets_from_file", () => {
   it("inserts the requested sheets and reports their names", async () => {
     const result = await call({ path: "x", sheets: ["表紙", "改版履歴_History"] });
     expect(result).toMatchObject({ ok: true, data: { inserted: ["表紙", "改版履歴_History"], count: 2 } });
-    expect(book.inserted[0]).toMatchObject({ options: { positionType: "End", sheetNamesToInsert: ["表紙", "改版履歴_History"] } });
+    expect(book.inserted).toHaveLength(2);
+    expect(book.inserted[0]).toMatchObject({ options: { positionType: "End", sheetNamesToInsert: ["表紙"] } });
+    expect(book.inserted[1]).toMatchObject({ options: { positionType: "After", relativeTo: "表紙", sheetNamesToInsert: ["改版履歴_History"] } });
+  });
+
+  it("imports one sheet per call, each after the previous one, whatever the starting position", async () => {
+    await call({ path: "x", sheets: ["A", "B", "C"], position: "beginning" });
+    expect(book.inserted.map((i) => i.options)).toEqual([
+      { positionType: "Beginning", sheetNamesToInsert: ["A"] },
+      { positionType: "After", relativeTo: "A", sheetNamesToInsert: ["B"] },
+      { positionType: "After", relativeTo: "B", sheetNamesToInsert: ["C"] },
+    ]);
   });
 
   it("supports inserting after a sheet and validates the anchor", async () => {
