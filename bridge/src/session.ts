@@ -31,6 +31,12 @@ export interface WorkbookSessionState {
   lastActivityAt: number;
 }
 
+/** Shown to the model when the pane drops mid-call, which usually means Excel itself crashed on that call. */
+export const DISCONNECTED_MID_CALL =
+  "Excel/task pane disconnected while this tool call was running; Excel may have crashed on it. " +
+  "Do NOT repeat the same call with the same arguments. Tell the user, wait until the workbook is reopened, " +
+  "then retry only a smaller step (for example one sheet or a smaller range) or a different approach.";
+
 /**
  * One workbook <-> one chat session <-> one provider at a time.
  *
@@ -183,7 +189,7 @@ export class WorkbookSession implements ProviderSessionState {
     }
     this.rejectAllPending({
       code: "disconnected",
-      message: "workbook/task pane disconnected before the tool call completed",
+      message: DISCONNECTED_MID_CALL,
     });
     this.activeRequestId = null;
   }

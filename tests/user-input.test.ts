@@ -56,6 +56,16 @@ describe("native provider questions", () => {
     expect(session.pendingToolCount).toBe(0);
     expect(messages.at(-1)).toEqual({ type: "user_input_closed", callId: message.callId });
   });
+  it("tells the model not to repeat a tool call that was cut off by a dropped pane", async () => {
+    const { session, socket } = connected();
+    const pending = session.requestTool("insert_sheets_from_file", { path: "x" }, 60_000);
+    await new Promise((resolve) => setTimeout(resolve, 0)); // let the call reach the pane before it drops
+    expect(session.pendingToolCount).toBe(1);
+    session.detachSocket(socket);
+    const result = await pending;
+    expect(result).toMatchObject({ ok: false, error: { code: "disconnected" } });
+    expect(result.ok ? "" : result.error.message).toContain("Do NOT repeat the same call");
+  });
   it.each(["stop", "disconnect", "end", "provider"])("closes pending questions on %s and ignores late replies", async action => {
     const { session, messages, socket } = connected();
     const controller = new AbortController();
