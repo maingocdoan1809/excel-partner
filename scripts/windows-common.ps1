@@ -115,19 +115,22 @@ function Trust-Cert([string]$Root) {
   else { Write-Info "certificate trusted (CurrentUser\Root)" }
 }
 
-function Write-Config([string]$Root, [string]$ref) {
-  if ([string]::IsNullOrWhiteSpace($ref)) { return }
+function Write-Config([string]$Root, [string]$ref, [string[]]$allowedHosts = @()) {
+  $allowedHosts = @($allowedHosts | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | ForEach-Object { $_.Trim().ToLower() })
+  if ([string]::IsNullOrWhiteSpace($ref) -and $allowedHosts.Count -eq 0) { return }
   $path = Join-Path $Root 'excel-partner.config.json'
   $obj = [ordered]@{}
   if (Test-Path $path) {
     $existing = Get-Content -Raw $path | ConvertFrom-Json
     foreach ($p in $existing.PSObject.Properties) { $obj[$p.Name] = $p.Value }
   }
-  $obj['referenceDirs'] = @($ref)
+  if (-not [string]::IsNullOrWhiteSpace($ref)) { $obj['referenceDirs'] = @($ref) }
+  if ($allowedHosts.Count -gt 0) { $obj['allowedHosts'] = @(@($obj['allowedHosts']) + $allowedHosts | Where-Object { $_ } | Select-Object -Unique) }
   $json = $obj | ConvertTo-Json -Depth 5
   # UTF-8 without BOM: the bridge uses JSON.parse, which rejects a leading BOM.
   [System.IO.File]::WriteAllText($path, $json, (New-Object System.Text.UTF8Encoding($false)))
-  Write-Info "wrote excel-partner.config.json (referenceDirs = $ref)"
+  if (-not [string]::IsNullOrWhiteSpace($ref)) { Write-Info "wrote excel-partner.config.json (referenceDirs = $ref)" }
+  if ($allowedHosts.Count -gt 0) { Write-Info "wrote excel-partner.config.json (allowedHosts = $($obj['allowedHosts'] -join ', '))" }
 }
 
 function Stop-Bridge([string]$Root) {

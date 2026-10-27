@@ -15,6 +15,17 @@ The pane refuses to load over `https://localhost:8765`.
 - Check the log: `run/bridge.log`.
 - Windows must reach WSL `localhost`. If it does not, set
   `BRIDGE_HOST=0.0.0.0` before starting and use the WSL IP instead.
+- The bridge only answers requests whose `Host` is `localhost`, `127.0.0.1`,
+  `::1` or its configured host, and refuses other web origins with `403`
+  (`rejected request from untrusted origin or host` in the log). To reach it
+  by another name such as a WSL IP, allow that name and restart:
+  - npm install: `excel-partner allow-host 172.20.0.5`, then `excel-partner restart`
+    (`excel-partner allow-host` alone lists them; `--remove` removes one)
+  - source install: re-run the installer with `-AllowedHost 172.20.0.5`
+    (`scripts/install.ps1`) or `--allowed-host 172.20.0.5`
+    (`scripts/install-windows.sh`), or add `"allowedHosts": ["172.20.0.5"]` to
+    `excel-partner.config.json`
+  - one-off: `BRIDGE_ALLOWED_HOSTS=172.20.0.5,other-name` (comma separated)
 
 ## Provider shows `not_installed` / `login_required`
 

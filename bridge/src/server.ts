@@ -192,7 +192,33 @@ export class Bridge {
   /* HTTP                                                                    */
   /* ----------------------------------------------------------------------- */
 
+  /**
+   * The task pane is served by this bridge, so its requests are same-origin and its Host is a name we expect.
+   * A web page the user happens to visit sends a foreign Origin (or, after DNS rebinding, a foreign Host), and
+   * must never obtain a session token: tool approvals travel over the session's own socket.
+   * Clients that are not browsers (the MCP process, CLIs) send no Origin and are allowed.
+   */
+  private isTrustedRequest(req: http.IncomingMessage): boolean {
+    const host = req.headers.host;
+    if (!host) return false;
+    let hostname: string;
+    try { hostname = new URL(`http://${host}`).hostname.toLowerCase().replace(/^\[(.*)\]$/, "$1"); }
+    catch { return false; }
+    if (!this.config.allowedHosts.includes(hostname)) return false;
+    const origin = req.headers.origin;
+    if (origin === undefined) return true;
+    try { return new URL(origin).host.toLowerCase() === host.toLowerCase(); }
+    catch { return false; }
+  }
+
   private async handleRequest(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+    if (!this.isTrustedRequest(req)) {
+      this.logger.warn("rejected request from untrusted origin or host", { origin: req.headers.origin, host: req.headers.host,
+        hint: "to reach the bridge by another hostname, run: excel-partner allow-host <name>" });
+      res.writeHead(403, { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" });
+      res.end(JSON.stringify({ error: "forbidden_origin" }));
+      return;
+    }
     const url = new URL(req.url ?? "/", "http://localhost");
 
     if (req.method === "GET" && url.pathname === "/health") {
@@ -692,7 +718,6 @@ export class Bridge {
     res.writeHead(status, {
       "content-type": "application/json; charset=utf-8",
       "content-length": Buffer.byteLength(body),
-      "access-control-allow-origin": "*",
       "cache-control": "no-store",
     });
     res.end(body);
@@ -703,6 +728,12 @@ export class Bridge {
   /* ----------------------------------------------------------------------- */
 
   private handleUpgrade(req: http.IncomingMessage, socket: Duplex, head: Buffer): void {
+    if (!this.isTrustedRequest(req)) {
+      this.logger.warn("rejected websocket from untrusted origin or host", { origin: req.headers.origin, host: req.headers.host,
+        hint: "to reach the bridge by another hostname, run: excel-partner allow-host <name>" });
+      socket.end("HTTP/1.1 403 Forbidden\r\nConnection: close\r\nContent-Length: 0\r\n\r\n");
+      return;
+    }
     const url = new URL(req.url ?? "/", "http://localhost");
     if (url.pathname !== "/ws") {
       socket.destroy();

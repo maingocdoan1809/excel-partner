@@ -21,6 +21,11 @@
   Optional folder the assistant may read .xlsx templates from. Written to
   excel-partner.config.json (read-only access, only that folder).
 
+.PARAMETER AllowedHost
+  Extra hostname or IP the bridge should answer to (for example a WSL IP when
+  BRIDGE_HOST=0.0.0.0). Requests whose Host header is not localhost, 127.0.0.1,
+  ::1 or listed here are refused. Written to excel-partner.config.json.
+
 .PARAMETER Open
   Start Excel when the install finishes.
 
@@ -38,6 +43,7 @@ param(
   [ValidateSet('auto', 'native', 'wsl')] [string]$Mode = 'auto',
   [string]$Providers = '',
   [string]$ReferenceDir = '',
+  [string[]]$AllowedHost = @(),
   [switch]$Open,
   [switch]$SkipProviders
 )
@@ -67,6 +73,7 @@ if ($Mode -eq 'wsl') {
   $parts = @("cd '$wslRoot'", "bash scripts/install-windows.sh")
   if (-not $SkipProviders -and -not [string]::IsNullOrWhiteSpace($Providers)) { $parts += "--providers '$Providers'" }
   if (-not [string]::IsNullOrWhiteSpace($ReferenceDir)) { $parts += "--reference-dir '$ReferenceDir'" }
+  foreach ($h in $AllowedHost) { if (-not [string]::IsNullOrWhiteSpace($h)) { $parts += "--allowed-host '$h'" } }
   if ($Open) { $parts += "--open" }
   $cmd = $parts -join ' '
 
@@ -100,7 +107,7 @@ Ensure-Cert $Root
 Trust-Cert $Root
 
 Write-Step "writing local config"
-Write-Config $Root $ReferenceDir
+Write-Config $Root $ReferenceDir $AllowedHost
 
 Write-Step "starting the bridge"
 Stop-Bridge $Root
