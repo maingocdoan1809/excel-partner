@@ -42,13 +42,15 @@ export interface LocalConfig {
   /** Extra folders searched for skills. */
   skillDirs?: string[];
   allowOfficeJs?: boolean;
+  /** Extra hostnames the bridge answers to (e.g. a WSL IP); `excel-partner allow-host` edits this. */
+  allowedHosts?: string[];
 }
 
 function readLocalConfig(): LocalConfig {
   try {
     const raw = JSON.parse(fs.readFileSync(process.env.BRIDGE_CONFIG ?? path.join(PROJECT_ROOT, "excel-partner.config.json"), "utf8")) as LocalConfig;
     const strings = (v: unknown) => (Array.isArray(v) ? v.filter((x): x is string => typeof x === "string" && x.trim() !== "") : []);
-    return { referenceDirs: strings(raw.referenceDirs), skillDirs: strings(raw.skillDirs),
+    return { referenceDirs: strings(raw.referenceDirs), skillDirs: strings(raw.skillDirs), allowedHosts: strings(raw.allowedHosts),
       allowOfficeJs: typeof raw.allowOfficeJs === "boolean" ? raw.allowOfficeJs : undefined };
   } catch {
     return {};
@@ -64,6 +66,8 @@ export interface BridgeConfig {
   tls: { certPath: string; keyPath: string } | null;
   /** Base URL the task pane and MCP processes should use to reach the bridge. */
   publicBaseUrl: string;
+  /** Lower-case hostnames a request's Host header may carry; anything else (DNS rebinding) is refused. */
+  allowedHosts: string[];
   sessionTtlMs: number;
   toolTimeoutMs: number;
   heartbeatMs: number;
@@ -89,6 +93,15 @@ export interface BridgeConfig {
   };
 }
 
+/** Loopback names, the host the bridge is configured for, and extras from the config file or BRIDGE_ALLOWED_HOSTS (e.g. a WSL IP). */
+function defaultAllowedHosts(config: Pick<BridgeConfig, "host" | "publicBaseUrl">, extra: string[]): string[] {
+  const names = ["localhost", "127.0.0.1", "::1", config.host];
+  try { names.push(new URL(config.publicBaseUrl).hostname); } catch { /* a malformed public URL adds nothing */ }
+  names.push(...extra, ...(process.env.BRIDGE_ALLOWED_HOSTS ?? "").split(",").map((name) => name.trim()));
+  // 0.0.0.0 / :: are bind addresses, not names a browser sends in Host.
+  return [...new Set(names.map((name) => name.toLowerCase().replace(/^\[(.*)\]$/, "$1")).filter((name) => name && name !== "0.0.0.0" && name !== "::"))];
+}
+
 export function loadConfig(overrides: Partial<BridgeConfig> = {}): BridgeConfig {
   const local = readLocalConfig();
   const host = process.env.BRIDGE_HOST ?? "127.0.0.1";
@@ -103,6 +116,7 @@ export function loadConfig(overrides: Partial<BridgeConfig> = {}): BridgeConfig 
     port,
     tls: useTls ? { certPath, keyPath } : null,
     publicBaseUrl: process.env.BRIDGE_PUBLIC_URL ?? `${scheme}://${host}:${port}`,
+    allowedHosts: [],
     sessionTtlMs: envInt("BRIDGE_SESSION_TTL_MS", 6 * 60 * 60 * 1000),
     toolTimeoutMs: envInt("BRIDGE_TOOL_TIMEOUT_MS", 120_000),
     heartbeatMs: envInt("BRIDGE_HEARTBEAT_MS", 20_000),
@@ -130,6 +144,7 @@ export function loadConfig(overrides: Partial<BridgeConfig> = {}): BridgeConfig 
   if (overrides.tls === undefined && overrides.publicBaseUrl === undefined && !useTls) {
     config.publicBaseUrl = `http://${host}:${port}`;
   }
+  if (overrides.allowedHosts === undefined) config.allowedHosts = defaultAllowedHosts(config, local.allowedHosts ?? []);
 
   return config;
 }

@@ -5,6 +5,7 @@
 #   bash scripts/install-windows.sh                     # install / upgrade (default: copilot)
 #   bash scripts/install-windows.sh --providers copilot,codex,opencode
 #   bash scripts/install-windows.sh --reference-dir "/mnt/c/Users/me/Templates"
+#   bash scripts/install-windows.sh --allowed-host 172.20.0.5   # extra hostname the bridge answers to (repeatable)
 #   bash scripts/install-windows.sh --open              # ...and start a new Excel instance
 #   bash scripts/install-windows.sh --no-providers      # skip provider install/login hints
 set -euo pipefail
@@ -14,10 +15,11 @@ cd "$ROOT"
 
 PROVIDERS=""
 REFERENCE_DIR=""
+ALLOWED_HOSTS=()
 OPEN=0
 
 usage() {
-  sed -n '2,10p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+  sed -n '2,11p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
 }
 
 while [[ $# -gt 0 ]]; do
@@ -26,6 +28,8 @@ while [[ $# -gt 0 ]]; do
     --providers=*) PROVIDERS="${1#*=}"; shift ;;
     --reference-dir) REFERENCE_DIR="${2:-}"; shift 2 ;;
     --reference-dir=*) REFERENCE_DIR="${1#*=}"; shift ;;
+    --allowed-host) ALLOWED_HOSTS+=("${2:-}"); shift 2 ;;
+    --allowed-host=*) ALLOWED_HOSTS+=("${1#*=}"); shift ;;
     --open) OPEN=1; shift ;;
     --no-providers) PROVIDERS="none"; shift ;;
     -h|--help) usage; exit 0 ;;
@@ -58,17 +62,22 @@ install_providers() {
   done
 }
 
+# Merge into the existing file with node (always present here) so other keys survive and no jq is needed.
 write_config() {
-  local ref="$1" file
-  [[ -z "$ref" ]] && return 0
-  file="$ROOT/excel-partner.config.json"
-  if command -v jq >/dev/null 2>&1 && [[ -f "$file" ]]; then
-    local tmp; tmp="$(mktemp)"
-    jq --arg d "$ref" '.referenceDirs = [$d]' "$file" > "$tmp" && mv "$tmp" "$file"
-  else
-    printf '{\n  "referenceDirs": ["%s"]\n}\n' "$ref" > "$file"
-  fi
-  echo "    wrote excel-partner.config.json (referenceDirs = $ref)"
+  local ref="$1" file="$ROOT/excel-partner.config.json"
+  [[ -z "$ref" && ${#ALLOWED_HOSTS[@]} -eq 0 ]] && return 0
+  REF="$ref" HOSTS="${ALLOWED_HOSTS[*]:-}" CONFIG_FILE="$file" node -e '
+    const fs = require("fs");
+    let config = {};
+    try { config = JSON.parse(fs.readFileSync(process.env.CONFIG_FILE, "utf8")); } catch {}
+    if (process.env.REF) config.referenceDirs = [process.env.REF];
+    const hosts = process.env.HOSTS.split(/\s+/).map(h => h.trim().toLowerCase()).filter(Boolean);
+    if (hosts.length) config.allowedHosts = [...new Set([...(Array.isArray(config.allowedHosts) ? config.allowedHosts : []), ...hosts])];
+    fs.writeFileSync(process.env.CONFIG_FILE, JSON.stringify(config, null, 2) + "\n");
+  '
+  [[ -n "$ref" ]] && echo "    wrote excel-partner.config.json (referenceDirs = $ref)"
+  [[ ${#ALLOWED_HOSTS[@]} -gt 0 ]] && echo "    wrote excel-partner.config.json (allowedHosts += ${ALLOWED_HOSTS[*]})"
+  return 0
 }
 
 if [[ -n "$PROVIDERS" ]]; then
@@ -92,7 +101,7 @@ else
   powershell.exe -NoProfile -Command 'certutil -addstore -user Root "'"$SHARE_WIN"'\localhost.crt"' | tail -1
 fi
 
-if [[ -n "$REFERENCE_DIR" ]]; then
+if [[ -n "$REFERENCE_DIR" || ${#ALLOWED_HOSTS[@]} -gt 0 ]]; then
   echo "==> local config"
   write_config "$REFERENCE_DIR"
 fi

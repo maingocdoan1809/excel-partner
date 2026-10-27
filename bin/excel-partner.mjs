@@ -137,6 +137,24 @@ function logsAddin() {
     console.log(tail(path.join(dataDir, name)).join("\n") || "(empty)");
   }
 }
+function readConfig() {
+  try { return JSON.parse(readFileSync(configFile, "utf8")); } catch { return {}; }
+}
+/** Hostnames the bridge answers to besides localhost/127.0.0.1/::1; stored in config.json (env vars do not reach the sign-in startup entry). */
+function allowHost(names, remove) {
+  const config = readConfig();
+  const current = Array.isArray(config.allowedHosts) ? config.allowedHosts.filter(name => typeof name === "string") : [];
+  if (!names.length) {
+    console.log(current.length ? `Extra allowed hostnames: ${current.join(", ")}` : "No extra hostnames allowed. The bridge answers to localhost, 127.0.0.1 and ::1.");
+    return;
+  }
+  const clean = names.map(name => name.trim().toLowerCase().replace(/^\[(.*)\]$/, "$1"));
+  for (const name of clean) if (!/^[a-z0-9.:_-]+$/.test(name) || name.length > 253) fail(`'${name}' is not a hostname or IP address (leave out http:// and the port).`);
+  const next = remove ? current.filter(name => !clean.includes(name)) : [...new Set([...current, ...clean])];
+  mkdirSync(dataDir, { recursive: true });
+  writeFileSync(configFile, JSON.stringify({ ...config, allowedHosts: next }, null, 2) + "\n", { mode: 0o600 });
+  console.log(`${remove ? "Removed" : "Allowed"}: ${clean.join(", ")}. Restart the bridge to apply: excel-partner restart`);
+}
 async function doctorAddin() {
   const line = (ok, text) => console.log(`${ok === true ? "[ ok ]" : ok === false ? "[fail]" : "[warn]"} ${text}`);
   line(Number(process.versions.node.split(".")[0]) >= 20, `Node.js ${process.versions.node} (20 or later required)`);
@@ -150,6 +168,8 @@ async function doctorAddin() {
   line(run.status === 0, run.status === 0 ? "Starts automatically at Windows sign-in" : "No sign-in startup entry. Run: excel-partner setup");
   const healthy = await health();
   line(healthy, healthy ? "Bridge running at https://localhost:8765" : "Bridge not running. Run: excel-partner start");
+  const extra = readConfig().allowedHosts;
+  line(true, Array.isArray(extra) && extra.length ? `Also answers to: ${extra.join(", ")}` : "Answers to localhost only. To reach it by another name (WSL IP): excel-partner allow-host <name>");
 }
 
 const TARGETS = { addin: "addin", app: "addin", gateway: "gateway", all: "all" };
@@ -163,6 +183,7 @@ const HELP = `Usage: excel-partner <command> [addin|gateway|all]
   info       Show the gateway URL and token (add --copy to copy the token).
   logs       Show recent log lines.
   doctor     Check the installation and explain what to fix (default: both).
+  allow-host Let the bridge answer to another hostname/IP (e.g. a WSL IP): allow-host <name> [--remove]; no name lists them.
   update     Install the latest release and refresh both (always the whole package).
   uninstall  Stop and remove registration and startup entries.
 
@@ -175,6 +196,7 @@ async function main() {
   const command = args[0] || "help";
   if (command === "help" || process.argv.includes("--help")) { console.log(HELP); return; }
   if (command === "gateway") { gateway(args.slice(1)); return; }
+  if (command === "allow-host") { allowHost(args.slice(1).filter(arg => !arg.startsWith("--")), args.includes("--remove")); return; }
   const flags = args.filter(arg => arg.startsWith("--"));
   const positional = args.filter(arg => !arg.startsWith("--"));
   const given = TARGETS[positional[1]];
