@@ -22,6 +22,7 @@
     "bridge/**/*.ts",
     "gateway/**/*.ts",
     "providers/**/*.ts",
+    "qa/**/*.ts",
     "excel_mcp/**/*.ts",
     "tests/**/*.ts",
     "scripts/**/*.ts",

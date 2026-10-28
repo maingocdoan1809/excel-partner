@@ -5,7 +5,7 @@ import { copyFileSync, existsSync, mkdirSync, openSync, readFileSync, rmSync, wr
 import https from "node:https";
 import os from "node:os";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import selfsigned from "selfsigned";
 import { updatePackage } from "./update.mjs";
 
@@ -183,6 +183,7 @@ const HELP = `Usage: excel-partner <command> [addin|gateway|all]
   info       Show the gateway URL and token (add --copy to copy the token).
   logs       Show recent log lines.
   doctor     Check the installation and explain what to fix (default: both).
+  qa         Test automation harness (Playwright): run 'excel-partner qa help'.
   allow-host Let the bridge answer to another hostname/IP (e.g. a WSL IP): allow-host <name> [--remove]; no name lists them.
   update     Install the latest release and refresh both (always the whole package).
   uninstall  Stop and remove registration and startup entries.
@@ -196,6 +197,13 @@ async function main() {
   const command = args[0] || "help";
   if (command === "help" || process.argv.includes("--help")) { console.log(HELP); return; }
   if (command === "gateway") { gateway(args.slice(1)); return; }
+  if (command === "qa") {
+    const qaCli = path.join(root, "dist", "qa", "src", "cli.js");
+    if (!existsSync(qaCli)) fail("This installation is missing the QA harness. Reinstall excel-partner.");
+    const { runQaCli, defaultContext } = await import(pathToFileURL(qaCli).href);
+    process.exitCode = await runQaCli(process.argv.slice(3).filter(arg => arg !== "--help"), defaultContext(configFile));
+    return;
+  }
   if (command === "allow-host") { allowHost(args.slice(1).filter(arg => !arg.startsWith("--")), args.includes("--remove")); return; }
   const flags = args.filter(arg => arg.startsWith("--"));
   const positional = args.filter(arg => !arg.startsWith("--"));

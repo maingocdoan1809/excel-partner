@@ -56,6 +56,38 @@ excel-partner status
 
 Type `/` in the chat to browse commands and skills of the selected provider.
 
+## Test automation (QA)
+
+Keep a test plan in Excel, let the assistant write Playwright scripts for it, run them against your **staging** system and get the results back in the workbook. Built for Odoo (form sign-in); other web apps work with `--preset generic`.
+
+```powershell
+excel-partner qa init C:qamy-project --url https://staging.example.com
+cd C:qamy-project
+excel-partner qa login admin           # you sign in once in a visible browser
+excel-partner restart                  # the bridge picks up the project
+```
+
+Open `TestPlan.xlsx` in Excel, then in the chat use the skills installed by `qa init`:
+
+| Skill | What it does |
+| --- | --- |
+| `/qa-testcases` | Turns the Requirements sheet into test cases (positive, negative, boundary, permission) with Req_ID links |
+| `/qa-automate` | Looks at the real pages with your signed-in session, writes a script per test case, saves it as a **draft** and tries it while you watch |
+| `/qa-heal` | Repairs scripts broken by UI changes or an unexpected extra dialog. Reports an application bug instead of weakening an assertion. `/qa-automate` and `/qa-report` run this repair themselves when a test fails (up to 2 rounds per test), so you do not have to call it |
+| `/qa-report` | Runs the approved tests, writes Last_Run / Last_Result / Duration_s / evidence into the sheet by TC_ID, summarises failures |
+
+RTM and Dashboard sheets in the template update themselves from the TestCases and Requirements sheets.
+
+**You approve what runs.** A script is a draft until you read it and run `excel-partner qa approve TC_001`. Approval is tied to a hash of the script and the page objects it uses; any later change, by the assistant or by hand, withdraws it. Only approved scripts run unattended. The assistant has no tool to approve.
+
+A repaired script becomes a draft again, so you read it and approve it once more. In Auto mode the assistant asks before each run of a draft; set `"run": { "healWithoutPrompt": true }` in `qa.config.json` to let it re-run a script it has just repaired (one that had been approved) without asking.
+
+**Credentials never reach the assistant.** You type the password in the sign-in browser; only the resulting browser session is saved (`auth/`, git-ignored). `excel-partner qa secret set admin` can store the password encrypted for your Windows user (DPAPI) so expired sessions refresh by themselves. Passwords are never written to the workbook, the config or the chat.
+
+**Guardrails.** Scripts are checked on every save and again before every run (no `fs`, `child_process`, `fetch`, `eval`, `page.route`, new browser contexts, cookies, absolute URLs or secrets in code). Runs use a scrubbed environment (no provider tokens), a fresh browser profile, and a browser that can reach **only** the origins in `qa.config.json`; everything else, IP addresses included, is refused. Screenshots are kept only for failures, traces only when asked, and results are pruned after 14 days. The checks are a safety net, not a sandbox: scripts still run with your Windows user permissions, so read a script before approving it. Approval does not protect against an assistant you have allowed to run its own Python in **Auto** mode; keep `run_python` on **Ask** for QA projects.
+
+Commands: `qa init | use | doctor | upgrade | login | secret | status | list | validate | approve | revoke | run | clean | skills install | template`. Run `excel-partner qa help` for details, or see [docs/design/qa-harness.md](docs/design/qa-harness.md).
+
 ## Safety and permissions
 
 - **Ask / Auto** (next to the prompt): *Ask* approves each change, *Auto* approves automatically, including overwriting non-empty cells. In *Ask* mode, overwriting existing data needs your OK.
@@ -77,6 +109,7 @@ Type `/` in the chat to browse commands and skills of the selected provider.
 | `excel-partner status` | Show what is running |
 | `excel-partner doctor` | Check the installation and say what to fix |
 | `excel-partner logs` | Show recent log lines |
+| `excel-partner qa <command>` | Test automation harness (see Test automation above) |
 | `excel-partner update` | Install the latest release (close Excel first) |
 | `excel-partner uninstall` | Stop, unregister and remove start-up and certificate trust |
 | `excel-partner help` | Full CLI usage |
@@ -102,6 +135,7 @@ Model IDs look like `claude/default`, `codex/default` or `provider/native-model`
 | Location | Contents |
 | --- | --- |
 | `%LOCALAPPDATA%\Excel Partner` | Config (`config.json`), certificate, manifest, logs, `usage.jsonl` |
+| `%LOCALAPPDATA%\Excel Partner\qa-secrets` | Stored QA passwords, encrypted with Windows DPAPI for your user (only if you ran `qa secret set`) |
 | `%USERPROFILE%\.excel-partner\skills` | Your skills |
 | `%USERPROFILE%\.excel-partner\templates` | Templates used by skills |
 | `%LOCALAPPDATA%\Agent Gateway` | Gateway config, certificate and token |
