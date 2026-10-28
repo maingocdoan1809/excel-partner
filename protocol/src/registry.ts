@@ -20,6 +20,7 @@ import {
 import {
   AddLineInputSchema,
   CheckFormulaConsistencyInputSchema,
+  CreateArtifactInputSchema,
   FindReplaceInputSchema,
   ConditionalFormatInputSchema,
   CopyToInputSchema,
@@ -104,6 +105,8 @@ export const ToolInputSchemas = {
   read_skill: ReadSkillInputSchema,
   run_skill_script: RunSkillScriptInputSchema,
   run_python: RunPythonInputSchema,
+  // shown to the user as a preview card in the task pane
+  create_artifact: CreateArtifactInputSchema,
   // reference files: read-only, inside folders the user configured
   list_reference_files: ListReferenceFilesInputSchema,
   read_workbook_file: ReadWorkbookFileInputSchema,

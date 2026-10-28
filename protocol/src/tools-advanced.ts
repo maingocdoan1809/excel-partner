@@ -628,3 +628,18 @@ export const InsertSheetsFromFileInputSchema = z.object({
   afterSheet: z.string().min(1).max(255).optional().describe("For position `after`: the open workbook's sheet to insert after."),
 });
 export type InsertSheetsFromFileInput = z.infer<typeof InsertSheetsFromFileInputSchema>;
+
+/* -------------------------------------------------------------------------- */
+/* Artifacts (files the user previews in the task pane)                        */
+/* -------------------------------------------------------------------------- */
+
+export const ARTIFACT_EXTENSIONS = ["html", "htm", "svg", "md", "markdown", "txt", "csv", "json"] as const;
+export const MAX_ARTIFACT_CHARS = 300_000;
+
+export const CreateArtifactInputSchema = z.object({
+  filename: z.string().min(1).max(100)
+    .regex(/^[\w][\w .-]*\.(html?|svg|md|markdown|txt|csv|json)$/i, `A plain file name ending in ${ARTIFACT_EXTENSIONS.map(e => "." + e).join(", ")}; no folders.`)
+    .describe("File name with extension, e.g. report.html or notes.md."),
+  content: z.string().min(1).max(MAX_ARTIFACT_CHARS).describe("Complete file text. Not a diff: to change a file, send the whole file again."),
+}).strict();
+export type CreateArtifactInput = z.infer<typeof CreateArtifactInputSchema>;

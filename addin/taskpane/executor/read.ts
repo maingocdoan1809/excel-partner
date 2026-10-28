@@ -26,6 +26,15 @@ export const OBJECT_SELECTED_NOTE =
 export async function getSelectionLabel(): Promise<{ label: string; title: string }> {
   return Excel.run(async context => {
     if (Office.context.requirements.isSetSupported("ExcelApi", "1.19")) {
+      // Charts are identified through the chart API; see readActiveShape for why they must not be read as shapes.
+      const chart = context.workbook.getActiveChartOrNullObject();
+      chart.load("isNullObject");
+      await context.sync();
+      if (!chart.isNullObject) {
+        chart.load("name");
+        await context.sync();
+        return { label: chart.name, title: `Selected chart: ${chart.name}` };
+      }
       const shape = context.workbook.getActiveShapeOrNullObject();
       // A null active-shape proxy must be checked before asking for identity.
       // Reading name/type on it can trigger Excel's "Reference isn't valid" dialog.

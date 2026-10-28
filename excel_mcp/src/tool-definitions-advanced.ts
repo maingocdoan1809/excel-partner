@@ -267,6 +267,15 @@ const META: Partial<Record<ExcelToolName, Meta>> = {
     annotations: WRITE,
     description: "WRITE. create / update / delete an Excel Table (named, filterable, banded). delete keeps the data unless deleteData=true.",
   },
+  create_artifact: {
+    title: "Create previewable file",
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true },
+    description:
+      "DISPLAY. Show the user a file they can open in a preview next to the chat: .html (runs in a sandbox with no network and no access to the workbook), " +
+      ".svg, .md, .csv, .json or .txt. Use it for reports, dashboards, diagrams and drafts the user asked to see, not for edits to the workbook. " +
+      "Send the complete file each time; a changed version appears as a new card in the chat. HTML must be self-contained: inline CSS/JS and data: URIs; " +
+      "scripts may load only from cdnjs.cloudflare.com or cdn.jsdelivr.net. Nothing is written to disk.",
+  },
   execute_office_js: {
     title: "Run Office.js (advanced)",
     annotations: WRITE,

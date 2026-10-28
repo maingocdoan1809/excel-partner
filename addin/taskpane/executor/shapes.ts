@@ -298,10 +298,26 @@ export async function describeShapes(context: Excel.RequestContext, shapes: Exce
 
 export async function readActiveShape(context: Excel.RequestContext): Promise<{ activeShape?: ShapeInfo; shapeSelectionStatus: "active" | "none" | "unavailable" }> {
   if (!Office.context.requirements.isSetSupported("ExcelApi", "1.19")) return { shapeSelectionStatus: "unavailable" };
+  // A selected chart also shows up as an active shape (type "Unsupported"). Reading shape-only properties such as
+  // rotation off it crashed Excel (EXCEL.EXE access violation), so identify charts through the chart API and stop there.
+  const chart = context.workbook.getActiveChartOrNullObject();
+  chart.load("isNullObject");
+  await context.sync();
+  if (!chart.isNullObject) {
+    chart.load("name,left,top,width,height");
+    await context.sync();
+    return {
+      activeShape: { name: chart.name, type: "Chart", text: null, textReadStatus: "not_applicable", left: round(chart.left), top: round(chart.top), width: round(chart.width), height: round(chart.height) },
+      shapeSelectionStatus: "active",
+    };
+  }
   const shape = context.workbook.getActiveShapeOrNullObject();
   shape.load("isNullObject");
   await context.sync();
   if (shape.isNullObject) return { shapeSelectionStatus: "none" };
+  shape.load("type");
+  await context.sync();
+  if ((shape.type as string) === "Unsupported") return { shapeSelectionStatus: "unavailable" };
   await loadShape(context, shape);
   return { activeShape: (await describeShapes(context, [shape]))[0]!, shapeSelectionStatus: "active" };
 }

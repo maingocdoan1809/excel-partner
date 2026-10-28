@@ -727,6 +727,8 @@ export class MockWorkbook {
   invalidSelection = false;
   supportsActiveShape = true;
   activeShape: MockShape | null = null;
+  /** A selected chart: Excel also reports it as an active shape of type "Unsupported". */
+  activeChart: { name: string; left: number; top: number; width: number; height: number } | null = null;
   readonly inserted: Array<{ base64: string; options: { sheetNamesToInsert?: string[]; positionType: string; relativeTo?: string } }> = [];
 
   addSheet(name: string): MockSheet {
@@ -775,6 +777,14 @@ export function installOfficeMock(book: MockWorkbook): void {
       insertWorksheetsFromBase64: (base64: string, options: { sheetNamesToInsert?: string[]; positionType: string; relativeTo?: string }) => {
         book.inserted.push({ base64, options });
         for (const name of options.sheetNamesToInsert ?? ["Template Sheet"]) book.addSheet(name);
+      },
+      getActiveChartOrNullObject: () => {
+        const chart = book.activeChart;
+        return {
+          isNullObject: !chart,
+          ...(chart ?? {}),
+          load: () => undefined,
+        };
       },
       getActiveShapeOrNullObject: () => book.activeShape ? wrapShape(book.activeShape) : {
         isNullObject: true,

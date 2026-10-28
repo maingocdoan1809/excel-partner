@@ -4,6 +4,7 @@ import type {
   AddShapeInput,
   CheckFormulaConsistencyInput,
   ClearRangeInput,
+  CreateArtifactInput,
   ConditionalFormatInput,
   CopyToInput,
   DataValidationInput,
@@ -184,6 +185,11 @@ function run(tool: string, args: unknown): Promise<unknown> {
       return updateShape(args as UpdateShapeInput);
     case "delete_shapes":
       return deleteShapes(args as DeleteShapesInput);
+    case "create_artifact": {
+      // The task pane draws the preview card from the call itself; the tool only acknowledges it.
+      const { filename, content } = args as CreateArtifactInput;
+      return Promise.resolve({ filename, characters: content.length, shown: true });
+    }
     case "execute_office_js":
       return executeOfficeJs(args as ExecuteOfficeJsInput);
     default:

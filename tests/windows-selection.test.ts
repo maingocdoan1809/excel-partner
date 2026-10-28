@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { SelectionSnapshotSchema } from "../protocol/src/index.js";
-import { mergeWindowsSelection } from "../bridge/src/windows-selection.js";
+import { mergeWindowsSelection, needsNativeRead } from "../bridge/src/windows-selection.js";
 import { buildTurnPrompt } from "../providers/src/prompt.js";
 
 const cells = SelectionSnapshotSchema.parse({ workbookName: "Flow.xlsx", sheet: "Flow", sheetId: "sheet-1",
@@ -48,5 +48,21 @@ describe("Windows multi-selection", () => {
 
   it("retains regular cell data when COM confirms there are no shapes", () => {
     expect(mergeWindowsSelection(cells, { status: "not_shapes" })).toEqual(cells);
+  });
+});
+
+describe("when the Windows COM read runs", () => {
+  // Reading a selected chart through COM (Selection.ShapeRange) crashed Excel, and the chart is already identified by Office.js.
+  const active = (type: string) => SelectionSnapshotSchema.parse({ ...cells, address: "", rowCount: 0, columnCount: 0, values: [], headers: null,
+    activeShape: { name: "MsgPerDay", type, text: null, left: 15, top: 230, width: 354, height: 240 }, shapeSelectionStatus: "active" });
+
+  it("skips plain cell selections and selected charts", () => {
+    expect(needsNativeRead(cells)).toBe(false);
+    expect(needsNativeRead(active("Chart"))).toBe(false);
+  });
+
+  it("still reads selected shapes and connectors", () => {
+    expect(needsNativeRead(active("Rectangle"))).toBe(true);
+    expect(needsNativeRead(active("Line"))).toBe(true);
   });
 });

@@ -863,6 +863,29 @@ describe("editing grouped shapes", () => {
   });
 });
 
+describe("a selected chart", () => {
+  // Reading shape-only properties (rotation, geometry) off a selected chart crashed Excel, so charts go through the chart API.
+  it("is labelled and described through the chart API", async () => {
+    book.activeChart = { name: "MsgPerDay", left: 15, top: 230.25, width: 354, height: 240 };
+    expect(await getSelectionLabel()).toEqual({ label: "MsgPerDay", title: "Selected chart: MsgPerDay" });
+    expect(await call("get_selection", {})).toMatchObject({
+      ok: true,
+      data: { shapeSelectionStatus: "active", activeShape: { name: "MsgPerDay", type: "Chart", left: 15, top: 230.25, width: 354, height: 240 } },
+    });
+  });
+
+  it("leaves other unsupported active objects unidentified instead of reading their geometry", async () => {
+    await call("add_shape", { name: "odd object", type: "Rectangle", anchor: "A5:B6" });
+    const odd = sheet.shapeList[0]!;
+    (odd as { type: string }).type = "Unsupported";
+    book.activeShape = odd;
+    book.invalidSelection = true; // Excel refuses getSelectedRange while an object is selected
+    const result = await call("get_selection", {});
+    expect(result).toMatchObject({ ok: true, data: { shapeSelectionStatus: "unavailable" } });
+    expect((result as { data: Record<string, unknown> }).data.activeShape).toBeUndefined();
+  });
+});
+
 describe("lightweight selection labels", () => {
   it("reads connector names without accessing their text or connection metadata", async () => {
     await call("add_line", { name: "Connector_A", from: "A5", to: "C5" });

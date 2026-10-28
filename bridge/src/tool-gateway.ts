@@ -25,6 +25,8 @@ import pathModule from "node:path";
 import type { SessionManager } from "./session-manager.js";
 import type { Logger } from "./logger.js";
 import { ExternalTools } from "./external-tools.js";
+import { CrashGuard, crashBlockedMessage } from "./crash-guard.js";
+import { DISCONNECTED_MID_CALL } from "./session.js";
 import { enrichWindowsSelection, type SelectionEnricher } from "./windows-selection.js";
 
 export interface GatewayLimits {
@@ -54,6 +56,7 @@ export interface InternalToolRequest {
  */
 export class ToolGateway {
   readonly externalTools = new ExternalTools();
+  readonly crashGuard = new CrashGuard();
   constructor(
     private readonly sessions: SessionManager,
     private readonly limits: GatewayLimits,
@@ -158,10 +161,19 @@ export class ToolGateway {
     const limitError = this.enforceLimits(request.tool, parsed);
     if (limitError) return limitError;
 
+    const blockedFor = this.crashGuard.blockedMinutes(request.tool, request.args);
+    if (blockedFor > 0) {
+      this.log?.warn("tool blocked after crash", { tool: request.tool, minutes: blockedFor, args: summariseArgs(request.args) });
+      return error("cancelled", crashBlockedMessage(request.tool, blockedFor));
+    }
+
     session.touch();
     this.log?.debug("tool -> pane", { sessionId: session.id, tool: request.tool });
     const started = Date.now();
     let result = await session.requestTool(request.tool, parsed, this.timeoutMs);
+    if (!result.ok && result.error.code === "disconnected" && result.error.message === DISCONNECTED_MID_CALL) {
+      this.crashGuard.record(request.tool, request.args);
+    }
     if (request.tool === "get_selection" && result.ok) {
       const snapshot = SelectionSnapshotSchema.safeParse(result.data);
       if (snapshot.success) result = { ok: true, data: await this.enrichSelection(snapshot.data, session.turnController?.signal) };

@@ -10,6 +10,7 @@ import { setupUsagePopover } from "./ui/usage-popover.js";
 import { describeChange } from "./ui/changes.js";
 import { setupInputResizer } from "./ui/input-resizer.js";
 import { renderMarkdown } from "./ui/markdown.js";
+import { buildPreviewDocument, renderArtifactCard, type StoredArtifact } from "./ui/artifact.js";
 import { createSelfUpdater } from "./ui/self-update.js";
 import { setupProviderLogin } from "./ui/provider-login.js";
 import { setupToolSettings } from "./ui/tool-settings.js";
@@ -66,6 +67,7 @@ const els = {
     references: byId<HTMLElement>("panel-references"),
     templates: byId<HTMLElement>("panel-templates"),
     session: byId<HTMLElement>("panel-session"),
+    preview: byId<HTMLElement>("panel-preview"),
   },
   changesList: byId<HTMLElement>("changes-list"),
   historyList: byId<HTMLElement>("history-list"),
@@ -161,6 +163,11 @@ let autoQueueAllowed = true;
 let live: { element: HTMLElement; message: StoredMessage } | null = null;
 const liveTools = new Map<string, { card: HTMLElement; tool: StoredTool }>();
 const workbookToolNames = new Set<string>(exposedToolNames(true, { playwright: true, webSearch: true }));
+const previewFrame = byId<HTMLIFrameElement>("preview-frame");
+const previewSource = byId<HTMLElement>("preview-source");
+const previewToggle = byId<HTMLButtonElement>("preview-toggle");
+const previewCopy = byId<HTMLButtonElement>("preview-copy");
+let previewing: StoredArtifact | null = null;
 let liveToolGroup: { element: HTMLDetailsElement; message: StoredMessage } | null = null;
 let thinking: HTMLElement | null = null;
 const pendingAttachments: Array<{ reference: UploadedAttachment; name: string }> = [];
@@ -276,6 +283,16 @@ Office.onReady((info) => {
     onProviderEvent: handleEvent,
     onError: (message) => append({ kind: "error", text: message }),
     onToolExecuted: (tool, args, result, context) => {
+      if (tool === "create_artifact") {
+        // The card is the visible result; a second raw tool entry would only repeat the file contents.
+        const file = args as { filename?: unknown; content?: unknown };
+        if (result.ok && context.requestId === currentRequestId && session === requestSession && typeof file.filename === "string" && typeof file.content === "string") {
+          liveToolGroup = null;
+          append({ kind: "artifact", text: "", artifact: { name: file.filename, content: file.content } });
+          scrollToEnd();
+        }
+        return;
+      }
       if (context.requestId === currentRequestId && session === requestSession) appendTurnTool({ name: tool, args: summarize(args), input: formatToolValue(args),
         result: formatToolValue(result), state: result.ok ? "ok" : "error", error: result.ok ? null : result.error.message });
       recordChange(tool, args, result);
@@ -504,6 +521,9 @@ function renderMessage(container: HTMLElement, message: StoredMessage): HTMLElem
       break;
     case "tool":
       element = renderToolCard(message.tool!);
+      break;
+    case "artifact":
+      element = renderArtifactCard(message.artifact!, openArtifact);
       break;
     case "tool_group": {
       const group = document.createElement("details");
@@ -1588,6 +1608,32 @@ function saveModelChoice(): void {
 /* Panels: changes, history, past chat                                         */
 /* -------------------------------------------------------------------------- */
 
+
+function showSource(on: boolean): void {
+  previewToggle.setAttribute("aria-pressed", String(on));
+  previewToggle.textContent = on ? "Preview" : "Source";
+  previewFrame.hidden = on;
+  previewSource.hidden = !on;
+}
+
+function openArtifact(artifact: StoredArtifact): void {
+  previewing = artifact;
+  byId("preview-title").textContent = artifact.name;
+  previewSource.textContent = artifact.content;
+  previewFrame.srcdoc = buildPreviewDocument(artifact);
+  showSource(false);
+  showPanel("preview");
+}
+
+previewToggle.addEventListener("click", () => showSource(previewToggle.getAttribute("aria-pressed") !== "true"));
+previewCopy.addEventListener("click", () => {
+  if (!previewing) return;
+  navigator.clipboard.writeText(previewing.content).then(
+    () => { previewCopy.textContent = "Copied"; },
+    () => { previewCopy.textContent = "Copy failed"; },
+  ).finally(() => window.setTimeout(() => { previewCopy.textContent = "Copy"; }, 1500));
+});
+
 type PanelName = keyof typeof els.panels;
 function openPanel(): PanelName | null {
   for (const name of Object.keys(els.panels) as PanelName[]) if (!els.panels[name].hidden) return name;
@@ -1599,6 +1645,7 @@ function showPanel(name: PanelName | null): void {
   for (const key of Object.keys(els.panels) as PanelName[]) els.panels[key].hidden = key !== name;
   document.body.classList.toggle("settings-active", name === "settings");
   if (name === "settings") { persistNow(); void settings.open(); }
+  if (name !== "preview") { previewFrame.srcdoc = ""; previewing = null; }
   if (name === "references") void savedReferences.refresh();
   if (name === "skills") void userSkills.refresh();
   document.body.classList.toggle("login-active", name === "login");
