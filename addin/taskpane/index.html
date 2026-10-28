@@ -134,6 +134,20 @@
         <pre id="preview-source" class="preview-source" hidden></pre>
       </section>
 
+      <section id="panel-browser" class="panel browser-panel" hidden aria-label="The assistant's browser">
+        <header class="panel-head">
+          <button type="button" class="back" data-close="browser" aria-label="Back to chat">←</button>
+          <h2>Assistant's browser</h2>
+          <button id="browser-prev" type="button" class="ghost" aria-label="Previous step" title="Previous step">‹</button>
+          <span id="browser-panel-step" class="browser-dock-step"></span>
+          <button id="browser-next" type="button" class="ghost" aria-label="Next step" title="Next step">›</button>
+        </header>
+        <p id="browser-panel-label" class="browser-panel-label" role="status" aria-live="polite"></p>
+        <p id="browser-panel-url" class="browser-dock-url"></p>
+        <div class="browser-panel-view"><img id="browser-panel-image" alt="" /></div>
+        <p class="template-help">Pictures stay in memory while this chat is open. They are not saved in history and are not sent to the AI.</p>
+      </section>
+
       <section id="panel-changes" class="panel" hidden aria-label="Changes">
         <header class="panel-head">
           <button type="button" class="back" data-close="changes" aria-label="Back to chat">←</button>
@@ -207,6 +221,17 @@
     </main>
 
     <footer class="composer">
+      <section id="browser-dock" class="browser-dock" hidden aria-label="The assistant's browser">
+        <header class="browser-dock-head">
+          <span class="browser-dock-dot" aria-hidden="true"></span>
+          <span id="browser-dock-label" class="browser-dock-label" role="status" aria-live="polite">Browser</span>
+          <span id="browser-dock-step" class="browser-dock-step"></span>
+          <button id="browser-dock-expand" type="button" class="ghost" title="Open the larger view" aria-label="Open the larger browser view">⤢</button>
+          <button id="browser-dock-close" type="button" class="ghost" title="Hide" aria-label="Hide the browser view">×</button>
+        </header>
+        <button id="browser-dock-open" type="button" class="browser-dock-shot" aria-label="Open the larger browser view"><img id="browser-dock-image" alt="" /></button>
+        <p id="browser-dock-url" class="browser-dock-url"></p>
+      </section>
       <div id="question-dock" hidden aria-label="Assistant question"></div>
       <div id="composer-resizer" class="resizer" role="separator" aria-orientation="horizontal" tabindex="0" title="Drag to resize the input">
         <span></span>

@@ -24,7 +24,8 @@ import fs from "node:fs";
 import pathModule from "node:path";
 import type { SessionManager } from "./session-manager.js";
 import type { Logger } from "./logger.js";
-import { ExternalTools } from "./external-tools.js";
+import { ExternalTools, type FrameSink } from "./external-tools.js";
+import { QaTools } from "./qa-tools.js";
 import { CrashGuard, crashBlockedMessage } from "./crash-guard.js";
 import { DISCONNECTED_MID_CALL } from "./session.js";
 import { enrichWindowsSelection, type SelectionEnricher } from "./windows-selection.js";
@@ -67,7 +68,12 @@ export class ToolGateway {
     private readonly references: ReferenceFiles | null = null,
     private readonly userSkills: UserSkills | null = null,
     private readonly enrichSelection: SelectionEnricher = enrichWindowsSelection,
-  ) {}
+    qaProject: (() => string | null) | null = null,
+  ) {
+    this.qa = qaProject ? new QaTools(qaProject, this.externalTools) : null;
+  }
+
+  private readonly qa: QaTools | null;
 
   async invoke(request: InternalToolRequest): Promise<ToolResult> {
     const session = this.sessions.get(request.sessionId);
@@ -87,12 +93,14 @@ export class ToolGateway {
       return error("unknown_tool", `unknown tool '${request.tool}'`);
     }
 
-    if (!exposedToolNames(this.allowOptInTools, session.capabilities).includes(request.tool)) {
+    if (!exposedToolNames(this.allowOptInTools, { ...session.capabilities, qa: this.qa?.enabled() ?? false }).includes(request.tool)) {
       return error(
         "unsupported",
         request.tool === "execute_office_js"
           ? `tool '${request.tool}' is disabled; start the bridge with BRIDGE_ALLOW_OFFICE_JS=1 to enable it`
-          : `tool '${request.tool}' is disabled. Enable it in Tools beside the prompt input.`,
+          : request.tool.startsWith("qa_")
+            ? `tool '${request.tool}' needs a QA project. In a terminal run: excel-partner qa init <folder> --url <staging url>`
+            : `tool '${request.tool}' is disabled. Enable it in Tools beside the prompt input.`,
       );
     }
 
@@ -106,6 +114,13 @@ export class ToolGateway {
       return error("invalid_arguments", String(err));
     }
 
+    if (request.tool.startsWith("qa_") && this.qa) {
+      const started = Date.now();
+      const result = await this.qa.handle(session, request.tool, parsed);
+      this.logOutcome(request.tool, request.tool === "qa_save_script" ? { tcId: (parsed as { tcId?: string }).tcId } : parsed, result, Date.now() - started);
+      return result;
+    }
+
     if (request.tool === "playwright_browser") {
       const signal = session.turnController?.signal;
       const requestId = session.activeRequestId;
@@ -117,7 +132,12 @@ export class ToolGateway {
         if ((approval.data as { approved?: boolean })?.approved !== true) return error("cancelled", "The user declined this browser action.");
         if (!session.isConnected) return error("disconnected", "Task pane disconnected before browser execution.");
         if (signal?.aborted || session.activeRequestId !== requestId) return error("cancelled", "The request ended before browser execution.");
-        const data = await this.externalTools.browser(session.id, args.tool, args.arguments, signal);
+        // The picture goes to the task pane only, and only while this request is still the active one.
+        const showFrame: FrameSink = (frame) => {
+          if (session.activeRequestId !== requestId || session.turnController?.signal.aborted) return;
+          session.send({ type: "browser_frame", requestId: requestId ?? "no-turn", ...frame });
+        };
+        const data = await this.externalTools.browser(session.id, args.tool, args.arguments, signal, showFrame, requestId ?? undefined);
         return { ok: true, data: data && typeof data === "object" && "content" in data ? { mcpResult: data } : data };
       } catch (err) {
         return error(signal?.aborted ? "cancelled" : "internal_error", `${request.tool}: ${err instanceof Error ? err.message : String(err)}`);

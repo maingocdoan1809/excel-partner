@@ -6,6 +6,7 @@ import {
   type ProviderEvent,
   type ProviderId,
   type ToolCapabilities,
+  type BrowserFrameMessage,
   type ProviderStatusMessage,
   type SelectionSnapshot,
   type ServerMessage,
@@ -18,7 +19,7 @@ import {
   type UserInputResponse,
 } from "../../protocol/src/index.js";
 import { executeTool } from "./executor/index.js";
-import { authorizeSkillScript, executeWithPermission, type PermissionMode } from "./permissions.js";
+import { authorizeSkillScript, describeQaApproval, executeWithPermission, type PermissionMode, type QaApproval } from "./permissions.js";
 import type { ProviderLoginStatus } from "../../protocol/src/provider-login.js";
 
 export type BridgeState = "idle" | "connecting" | "open" | "closed";
@@ -39,6 +40,8 @@ export interface BridgeClientHandlers {
   onHello(info: { sessionToken: string; serverTime: string; addinBuildId?: string }): void;
   onProviderStatus(message: ProviderStatusMessage): void;
   onProviderEvent(event: ProviderEvent): void;
+  /** A picture of the assistant's browser; shown to the person only. */
+  onBrowserFrame?(frame: BrowserFrameMessage): void;
   onError(message: string): void;
   /** A tool request from the bridge finished running in this workbook. */
   onToolExecuted?(tool: string, args: unknown, result: ToolResult, context: { callId: string; requestId: string }): void;
@@ -306,6 +309,9 @@ export class BridgeClient {
       case "ping":
         this.send({ type: "pong", nonce: message.nonce });
         return;
+      case "browser_frame":
+        this.handlers.onBrowserFrame?.(message);
+        return;
       default:
         if (message.type === "turn_finished") this.closeQuestions(message.requestId);
         this.handlers.onProviderEvent(message);
@@ -351,6 +357,10 @@ export class BridgeClient {
       : message.tool === "__authorize_skill_script"
       ? await authorizeSkillScript(this.permissionMode, message.args as RunSkillScriptInput,
         (detail, target) => this.askPermission("Allow skill script?", detail, "Run script", message.timeoutMs, target))
+      : message.tool === "__authorize_qa"
+      ? await this.authorizeQa(message.args as QaApproval, message.timeoutMs)
+      : message.tool === "__qa_apply_results"
+      ? await this.applyQaResults(message.args as { sheet: string; rows: unknown[] }, message)
       : message.tool === "__authorize_reference_path"
       ? this.permissionMode === "auto"
         ? { ok: true as const, data: { approved: true } }
@@ -370,6 +380,23 @@ export class BridgeClient {
     for (const question of this.questions.values()) {
       if (!requestId || question.requestId === requestId) question.controller.abort();
     }
+  }
+
+  /** Save/run/open-browser requests from the QA harness. Draft runs always ask, even in Auto mode. */
+  private async authorizeQa(args: QaApproval, timeoutMs: number): Promise<ToolResult> {
+    if (this.permissionMode === "auto" && !args.forceAsk) return { ok: true, data: { approved: true } };
+    const { title, detail, confirm, target } = describeQaApproval(args);
+    return { ok: true, data: { approved: await this.askPermission(title, detail, confirm, timeoutMs, target) } };
+  }
+
+  private async applyQaResults(args: { sheet: string; rows: unknown[] }, message: ToolRequestMessage): Promise<ToolResult> {
+    if (this.permissionMode !== "auto") {
+      const approved = await this.askPermission("Write QA results to the workbook?",
+        `The assistant will update ${args.rows.length} test case row(s) in sheet '${args.sheet}': automation status, script path and last run result. Other cells are not touched.`,
+        "Write results", message.timeoutMs);
+      if (!approved) return { ok: false, error: { code: "cancelled", message: "The user declined writing QA results." } };
+    }
+    return executeTool("__qa_apply_results", args);
   }
 
   private askReferencePermission(args: { path: string; resolvedPath?: string }, timeoutMs: number): Promise<ToolResult> {

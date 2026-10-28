@@ -59,7 +59,7 @@ export class CopilotNativeSessions {
     if (ctx.resumeSessionId && !validNativeId(ctx.resumeSessionId)) throw new Error("Invalid Copilot resume session ID");
     const { CopilotClient, RuntimeConnection, ToolSet } = await import("@github/copilot-sdk");
     const web = ctx.mcp.env.EXCEL_WEB_SEARCH === "1";
-    const names = ctx.mcp.toolNames ?? exposedToolNames(ctx.mcp.env.EXCEL_ALLOW_OFFICE_JS === "1", { playwright: ctx.mcp.env.EXCEL_PLAYWRIGHT === "1" });
+    const names = ctx.mcp.toolNames ?? exposedToolNames(ctx.mcp.env.EXCEL_ALLOW_OFFICE_JS === "1", { playwright: ctx.mcp.env.EXCEL_PLAYWRIGHT === "1", qa: ctx.mcp.env.EXCEL_QA === "1" });
     const tools = new ToolSet();
     if (!ctx.mcp.toolNames) tools.addBuiltIn("ask_user");
     for (const name of names) tools.addMcp(`excel-${name}`);

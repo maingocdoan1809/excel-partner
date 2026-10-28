@@ -55,6 +55,8 @@ import { addConnector, addLine, addShape, deleteShapes, listShapes, updateShape 
 import { insertSheetsFromFile, manageSheet } from "./sheets.js";
 import { insertRows, modifyStructure } from "./structure.js";
 import { clearRange, setFormula, writeRange } from "./write.js";
+import { applyQaResults } from "./qa.js";
+import { QaApplyResultsInputSchema } from "../../../protocol/src/index.js";
 
 /** Tools that change the workbook; the task pane lists their results as changes. */
 export const WRITE_TOOLS: ReadonlySet<string> = new Set([
@@ -86,6 +88,7 @@ export const WRITE_TOOLS: ReadonlySet<string> = new Set([
   "modify_pivot_table",
   "modify_table",
   "execute_office_js",
+  "__qa_apply_results",
 ]);
 
 /**
@@ -109,6 +112,8 @@ class UnknownTool extends Error {}
 
 function run(tool: string, args: unknown): Promise<unknown> {
   switch (tool) {
+    case "__qa_apply_results":
+      return applyQaResults(QaApplyResultsInputSchema.parse(args));
     case "get_selection":
       return getSelection();
     case "get_sheets":
