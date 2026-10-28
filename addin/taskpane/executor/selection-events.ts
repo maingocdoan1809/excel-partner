@@ -39,6 +39,7 @@ export function watchShapeSelectionEvents(options: { onSelection(): void; onActi
       async function visit(items: Excel.Shape[], depth = 0): Promise<void> {
         if (depth > 32) throw new Error("Shape groups exceed the supported nesting depth (32).");
         for (const shape of items) {
+          if ((shape.type as string) === "Unsupported") continue; // charts: no native shape handlers
           const key = `${sheet.id}/${shape.id}`;
           current.set(key, shape);
           labels.set(key, { label: shape.name, title: `Selected ${shape.type === "Line" ? "line / connector" : "shape"}: ${shape.name} (${shape.id})` });

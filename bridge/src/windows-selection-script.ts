@@ -69,7 +69,9 @@ try {
     if ($range.Count -gt 1000) { throw 'Selection exceeds 1000 shapes.' }
     $shapes = @(for ($i = 1; $i -le $range.Count; $i++) {
       $shape = Keep ($range.Item($i))
-      @{ name = [string]$shape.Name; nativeId = [string]$shape.ID; nativeType = [int]$shape.Type; connector = ($shape.Connector -eq -1) }
+      $nativeType = [int]$shape.Type
+      # msoChart (3): charts are not connectors, and reading Connector on one is not worth the risk.
+      @{ name = [string]$shape.Name; nativeId = [string]$shape.ID; nativeType = $nativeType; connector = ($nativeType -ne 3 -and $shape.Connector -eq -1) }
     })
     @{ status = 'ok'; workbookName = [string]$book.Name; sheet = [string]$sheet.Name; shapes = $shapes } | ConvertTo-Json -Depth 4 -Compress
   }

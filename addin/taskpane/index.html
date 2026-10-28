@@ -123,6 +123,17 @@
         </div>
       </section>
 
+      <section id="panel-preview" class="panel preview-panel" hidden aria-label="File preview">
+        <header class="panel-head">
+          <button type="button" class="back" data-close="preview" aria-label="Back to chat">←</button>
+          <h2 id="preview-title">Preview</h2>
+          <button id="preview-toggle" type="button" class="ghost" aria-pressed="false" title="Switch between the rendered file and its source">Source</button>
+          <button id="preview-copy" type="button" class="ghost" title="Copy the file contents">Copy</button>
+        </header>
+        <iframe id="preview-frame" class="preview-frame" title="File preview" sandbox="allow-scripts" referrerpolicy="no-referrer"></iframe>
+        <pre id="preview-source" class="preview-source" hidden></pre>
+      </section>
+
       <section id="panel-changes" class="panel" hidden aria-label="Changes">
         <header class="panel-head">
           <button type="button" class="back" data-close="changes" aria-label="Back to chat">←</button>
@@ -226,7 +237,7 @@
             </div>
             <div class="composer-picker permission-picker">
             <select id="permission-mode" hidden aria-label="Permissions" title="Ask: request approval before overwriting or deleting. Auto: approve these operations."><option value="ask">Ask</option><option value="auto">Auto</option></select>
-            <button id="permission-button" type="button" class="picker-button" aria-haspopup="listbox" aria-expanded="false" aria-controls="permission-menu" aria-label="Permissions"><span class="picker-label">Ask</span><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m5 6.5 3 3 3-3"/></svg></button>
+            <button id="permission-button" type="button" class="picker-button" aria-haspopup="listbox" aria-expanded="false" aria-controls="permission-menu" aria-label="Permissions" data-value="ask"><svg class="perm-icon" data-mode="ask" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.8 3 3.6v3.7c0 3 2.1 5.2 5 6.4 2.9-1.2 5-3.4 5-6.4V3.6z"/></svg><svg class="perm-icon" data-mode="auto" viewBox="0 0 16 16" aria-hidden="true"><path d="M9 1.8 3.8 9H8l-1 5.2L12.2 7H8z"/></svg><span class="picker-label">Ask</span><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m5 6.5 3 3 3-3"/></svg></button>
             <div id="permission-menu" class="picker-menu" role="listbox" aria-label="Permissions" hidden></div>
           </div>
           <div class="composer-picker tools-picker">

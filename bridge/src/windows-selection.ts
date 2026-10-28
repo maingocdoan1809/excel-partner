@@ -57,9 +57,18 @@ export function mergeWindowsSelection(selection: SelectionSnapshot, reply: Nativ
     note: "Selected shape identities read from Excel Windows. Use names with list_shapes for text, geometry and connections; nativeId is a COM ID and may differ from an Office.js ID." };
 }
 
+/**
+ * Whether the COM read adds anything. A selected cell range needs none, and a selected chart is already identified
+ * through the chart API: reading a chart through COM (Selection.ShapeRange) crashed Excel with an access violation.
+ */
+export function needsNativeRead(selection: SelectionSnapshot): boolean {
+  if (selection.address && !selection.activeShape) return false;
+  return selection.activeShape?.type !== "Chart";
+}
+
 export const enrichWindowsSelection: SelectionEnricher = async (selection, signal) => {
   if (process.platform !== "win32" || signal?.aborted) return selection;
-  if (selection.address && !selection.activeShape) return selection;
+  if (!needsNativeRead(selection)) return selection;
   try { return mergeWindowsSelection(selection, await readWindowsSelection(selection, signal)); }
   catch { return mergeWindowsSelection(selection, { status: "unavailable", reason: "Native multi-selection is unavailable (Excel busy, closed, or read timed out). Active-shape information may be incomplete." }); }
 };

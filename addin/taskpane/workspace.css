@@ -186,3 +186,22 @@ body.question-active .composer-card, body.question-active .composer-hint, body.q
   .model-picker { max-width: calc(100% - 160px); }
 }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
+
+/* Artifact cards in the chat and the preview panel */
+.artifact-card { display: flex; align-items: center; gap: 10px; align-self: stretch; min-width: 0; padding: 10px 12px; text-align: left; color: var(--text); background: var(--assistant-bg); border: 1px solid var(--assistant-border); border-radius: 10px; cursor: pointer; }
+.artifact-card:hover, .artifact-card:focus-visible { border-color: var(--accent); }
+.artifact-card-icon { display: grid; place-items: center; flex: 0 0 34px; height: 34px; font: 600 12px Consolas, monospace; color: var(--accent); background: var(--subtle-bg); border-radius: 8px; }
+.artifact-card-text { display: flex; flex-direction: column; min-width: 0; gap: 2px; }
+.artifact-card-text strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
+.artifact-card-text span { font-size: 11px; color: var(--muted); }
+.preview-panel { padding-bottom: 10px; }
+.preview-frame { flex: 1; min-height: 0; width: 100%; border: 1px solid var(--border); border-radius: 8px; background: #fff; }
+.preview-source { flex: 1; min-height: 0; margin: 0; padding: 10px; overflow: auto; white-space: pre-wrap; word-break: break-word; font: 12px/1.5 Consolas, monospace; color: var(--code-text); background: var(--code-bg); border: 1px solid var(--code-border); border-radius: 8px; }
+.preview-source[hidden], .preview-frame[hidden] { display: none; }
+
+/* Permission picker: a shield for Ask, a bolt for Auto */
+.permission-picker .picker-button svg:not(.perm-icon) { display: none; }
+.permission-picker .perm-icon { display: none; width: 16px; height: 16px; }
+.permission-picker .picker-button[data-value="ask"] .perm-icon[data-mode="ask"],
+.permission-picker .picker-button[data-value="auto"] .perm-icon[data-mode="auto"] { display: block; }
+.permission-picker .picker-button[data-value="auto"] { color: var(--warning-text); }

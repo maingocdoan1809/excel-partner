@@ -9,6 +9,7 @@ export function setupComposerMenu(select: HTMLSelectElement, button: HTMLButtonE
     const selected = select.selectedOptions[0];
     button.querySelector(".picker-label")!.textContent = label(selected?.textContent ?? "Default");
     button.title = select.title;
+    button.dataset.value = select.value;
     menu.replaceChildren(...Array.from(select.options).map((option) => {
       const item = document.createElement("button");
       item.type = "button";

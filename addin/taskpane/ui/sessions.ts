@@ -1,3 +1,4 @@
+import type { StoredArtifact } from "./artifact.js";
 import { cleanSessionTitle } from "../../../protocol/src/session-title.js";
 
 /**
@@ -15,13 +16,14 @@ export interface StoredTool {
 }
 
 export interface StoredMessage {
-  kind: "user" | "assistant" | "error" | "note" | "tool" | "tool_group";
+  kind: "user" | "assistant" | "error" | "note" | "tool" | "tool_group" | "artifact";
   text: string;
   delivery?: "pending" | "held";
   queueId?: string;
   attachments?: Array<{ name: string }>;
   tool?: StoredTool;
   tools?: StoredTool[];
+  artifact?: StoredArtifact;
 }
 
 export interface StoredChange {
