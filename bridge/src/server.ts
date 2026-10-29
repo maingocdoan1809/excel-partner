@@ -1,4 +1,6 @@
 import { cleanSessionTitle } from "../../protocol/src/session-title.js";
+import { TestSessions } from "./test-sessions.js";
+import { SiteKnowledge } from "./site-knowledge.js";
 import { parseNativeCommand, type NativeCommand, type ProviderCommand } from "../../protocol/src/commands.js";
 import { normalizeCommands } from "../../providers/src/commands.js";
 import { supportsNativeWebSearch, type ToolCapabilities } from "../../protocol/src/index.js";
@@ -32,8 +34,6 @@ import { ProviderSessionManager } from "./provider-session-manager.js";
 import { SystemPromptStore, PromptSettingsError, PromptSettingsConflict } from "./system-prompt.js";
 import { WorkbookSession } from "./session.js";
 import { ToolGateway } from "./tool-gateway.js";
-import { readActiveProject } from "../../qa/src/active.js";
-import { CONFIG_FILE as QA_CONFIG_FILE } from "../../qa/src/config.js";
 import { enrichWindowsSelection, type SelectionEnricher } from "./windows-selection.js";
 import { activeWorkbookPath, pickWorkspaceFolder } from "./windows-workspace.js";
 import { MockAdapter, ProviderRegistry, createDefaultRegistry } from "../../providers/src/index.js";
@@ -122,7 +122,8 @@ export class Bridge {
       this.references,
       this.userSkills,
       this.enrichSelection,
-      () => this.activeQaProject(),
+      new TestSessions(path.join(path.dirname(config.configFile), "sessions")),
+      new SiteKnowledge(path.join(path.dirname(config.configFile), "knowledge")),
     );
 
     const runtime = {
@@ -1136,14 +1137,6 @@ export class Bridge {
     await this.providerSessions.close(session, reason);
   }
 
-  /** The QA project the user selected with `excel-partner qa use`, if it still exists. Re-read each time so changes apply without a restart. */
-  private activeQaProject(): string | null {
-    try {
-      const dir = readActiveProject(this.config.configFile);
-      return dir && statSync(path.join(dir, QA_CONFIG_FILE)).isFile() ? dir : null;
-    } catch { return null; }
-  }
-
   private mcpEndpointFor(session: WorkbookSession): McpEndpoint {
     return {
       bridgeUrl: this.config.publicBaseUrl,
@@ -1158,7 +1151,6 @@ export class Bridge {
         ...(session.capabilities.webSearch ? { EXCEL_WEB_SEARCH: "1" } : {}),
         ...(session.capabilities.playwright ? { EXCEL_PLAYWRIGHT: "1" } : {}),
         ...(this.config.allowOfficeJs ? { EXCEL_ALLOW_OFFICE_JS: "1" } : {}),
-        ...(this.activeQaProject() ? { EXCEL_QA: "1" } : {}),
         ...(this.config.tls ? { NODE_EXTRA_CA_CERTS: this.config.tls.certPath } : {}),
       },
     };

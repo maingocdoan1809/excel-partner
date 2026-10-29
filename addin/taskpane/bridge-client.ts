@@ -19,7 +19,7 @@ import {
   type UserInputResponse,
 } from "../../protocol/src/index.js";
 import { executeTool } from "./executor/index.js";
-import { authorizeSkillScript, describeQaApproval, executeWithPermission, type PermissionMode, type QaApproval } from "./permissions.js";
+import { authorizeSkillScript, describeSiteKnowledgeApproval, describeTestBrowserApproval, executeWithPermission, type PermissionMode, type SiteKnowledgeApproval, type TestBrowserApproval } from "./permissions.js";
 import type { ProviderLoginStatus } from "../../protocol/src/provider-login.js";
 
 export type BridgeState = "idle" | "connecting" | "open" | "closed";
@@ -357,10 +357,10 @@ export class BridgeClient {
       : message.tool === "__authorize_skill_script"
       ? await authorizeSkillScript(this.permissionMode, message.args as RunSkillScriptInput,
         (detail, target) => this.askPermission("Allow skill script?", detail, "Run script", message.timeoutMs, target))
-      : message.tool === "__authorize_qa"
-      ? await this.authorizeQa(message.args as QaApproval, message.timeoutMs)
-      : message.tool === "__qa_apply_results"
-      ? await this.applyQaResults(message.args as { sheet: string; rows: unknown[] }, message)
+      : message.tool === "__authorize_site_knowledge"
+      ? await this.authorizeSiteKnowledge(message.args as SiteKnowledgeApproval, message.timeoutMs)
+      : message.tool === "__authorize_test_browser"
+      ? await this.authorizeTestBrowser(message.args as TestBrowserApproval, message.timeoutMs)
       : message.tool === "__authorize_reference_path"
       ? this.permissionMode === "auto"
         ? { ok: true as const, data: { approved: true } }
@@ -382,21 +382,17 @@ export class BridgeClient {
     }
   }
 
-  /** Save/run/open-browser requests from the QA harness. Draft runs always ask, even in Auto mode. */
-  private async authorizeQa(args: QaApproval, timeoutMs: number): Promise<ToolResult> {
-    if (this.permissionMode === "auto" && !args.forceAsk) return { ok: true, data: { approved: true } };
-    const { title, detail, confirm, target } = describeQaApproval(args);
+  /** Notes about a system steer later sessions, so Ask mode shows the text; Auto mode saves without asking. */
+  private async authorizeSiteKnowledge(args: SiteKnowledgeApproval, timeoutMs: number): Promise<ToolResult> {
+    if (this.permissionMode === "auto") return { ok: true, data: { approved: true } };
+    const { title, detail, confirm, target } = describeSiteKnowledgeApproval(args);
     return { ok: true, data: { approved: await this.askPermission(title, detail, confirm, timeoutMs, target) } };
   }
 
-  private async applyQaResults(args: { sheet: string; rows: unknown[] }, message: ToolRequestMessage): Promise<ToolResult> {
-    if (this.permissionMode !== "auto") {
-      const approved = await this.askPermission("Write QA results to the workbook?",
-        `The assistant will update ${args.rows.length} test case row(s) in sheet '${args.sheet}': automation status, script path and last run result. Other cells are not touched.`,
-        "Write results", message.timeoutMs);
-      if (!approved) return { ok: false, error: { code: "cancelled", message: "The user declined writing QA results." } };
-    }
-    return executeTool("__qa_apply_results", args);
+  /** Which sites the test browser may reach. Asked every time, even in Auto mode: this list is the only fence around it. */
+  private async authorizeTestBrowser(args: TestBrowserApproval, timeoutMs: number): Promise<ToolResult> {
+    const { title, detail, confirm, target } = describeTestBrowserApproval(args);
+    return { ok: true, data: { approved: await this.askPermission(title, detail, confirm, timeoutMs, target) } };
   }
 
   private askReferencePermission(args: { path: string; resolvedPath?: string }, timeoutMs: number): Promise<ToolResult> {

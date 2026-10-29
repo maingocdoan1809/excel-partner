@@ -3,7 +3,7 @@ export * from "./address.js";
 export * from "./providers.js";
 export * from "./tools.js";
 export * from "./tools-advanced.js";
-export * from "./tools-qa.js";
+export * from "./tools-testing.js";
 export * from "./registry.js";
 export * from "./tool-results.js";
 export * from "./events.js";

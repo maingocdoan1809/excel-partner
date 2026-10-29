@@ -33,12 +33,13 @@ export class BrowserView {
   /** True while the large view shows the newest picture; stepping back pauses following. */
   private following = true;
 
-  constructor(private readonly els: BrowserViewElements, private readonly openLarge: () => void) {
+  constructor(private readonly els: BrowserViewElements, private readonly openLarge: () => void, private readonly onCount?: (count: number) => void) {
     els.dockOpen.addEventListener("click", openLarge);
     els.dockExpand.addEventListener("click", openLarge);
     els.dockClose.addEventListener("click", () => { els.dock.hidden = true; });
     els.panelPrev.addEventListener("click", () => this.step(-1));
     els.panelNext.addEventListener("click", () => this.step(1));
+    els.panelImage.addEventListener("click", () => els.panelImage.parentElement?.classList.toggle("actual"));
     this.reset();
   }
 
@@ -101,5 +102,6 @@ export class BrowserView {
     }
     els.panelPrev.disabled = this.index <= 0;
     els.panelNext.disabled = this.index < 0 || this.index >= this.frames.length - 1;
+    this.onCount?.(this.frames.length);
   }
 }

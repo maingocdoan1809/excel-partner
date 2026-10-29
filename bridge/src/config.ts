@@ -86,7 +86,7 @@ export interface BridgeConfig {
   /** Expose execute_office_js (arbitrary Office.js). On by default; can be disabled explicitly. */
   allowOfficeJs: boolean;
   logLevel: "debug" | "info" | "warn" | "error";
-  /** Local settings file (config.json); the active QA project is recorded in it and re-read on every use. */
+  /** Local settings file (config.json), re-read on every use. */
   configFile: string;
   /** Command used to launch the Excel MCP stdio server. */
   mcp: {

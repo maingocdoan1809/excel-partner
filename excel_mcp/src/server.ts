@@ -35,7 +35,7 @@ function ok(data: unknown): CallToolResult {
 export interface ExcelMcpOptions {
   /** Expose opt-in tools such as execute_office_js. */
   allowOptInTools?: boolean;
-  capabilities?: { webSearch?: boolean; playwright?: boolean; qa?: boolean };
+  capabilities?: { webSearch?: boolean; playwright?: boolean };
 }
 
 function fail(error: ToolError): CallToolResult {

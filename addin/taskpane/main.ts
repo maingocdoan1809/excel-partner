@@ -171,7 +171,12 @@ const browserView = new BrowserView({
   dockExpand: byId<HTMLButtonElement>("browser-dock-expand"), dockClose: byId<HTMLButtonElement>("browser-dock-close"),
   panelLabel: byId("browser-panel-label"), panelStep: byId("browser-panel-step"), panelUrl: byId("browser-panel-url"),
   panelImage: byId<HTMLImageElement>("browser-panel-image"), panelPrev: byId<HTMLButtonElement>("browser-prev"), panelNext: byId<HTMLButtonElement>("browser-next"),
-}, () => showPanel("browser"));
+}, () => showPanel("browser"), (count) => {
+  // Closing the small view must not lose the pictures: the menu keeps a way back while there are any.
+  byId("menu-browser").hidden = count === 0;
+  byId("browser-count").textContent = String(count);
+});
+byId("menu-browser").addEventListener("click", () => { showPanel("browser"); });
 const previewFrame = byId<HTMLIFrameElement>("preview-frame");
 const previewSource = byId<HTMLElement>("preview-source");
 const previewToggle = byId<HTMLButtonElement>("preview-toggle");
@@ -1657,6 +1662,8 @@ function showPanel(name: PanelName | null): void {
   closeMenu();
   for (const key of Object.keys(els.panels) as PanelName[]) els.panels[key].hidden = key !== name;
   document.body.classList.toggle("settings-active", name === "settings");
+  // The small view repeats the large one and takes its height, so it steps aside while the large one is open.
+  document.body.classList.toggle("browser-active", name === "browser");
   if (name === "settings") { persistNow(); void settings.open(); }
   if (name !== "preview") { previewFrame.srcdoc = ""; previewing = null; }
   if (name === "references") void savedReferences.refresh();

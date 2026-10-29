@@ -16,8 +16,8 @@ export type FrameSink = (frame: BrowserFrame) => void;
 
 interface FrameState { seq: number; token: number; shown: boolean; url?: string; title?: string }
 
-/** A signed-in, origin-restricted browser for QA exploration. The saved session is copied, never modified. */
-export interface BrowserProfile { storageState: string; allowedOrigins: string[] }
+/** A browser limited to the sites the user approved. It starts signed out, or with a session the user saved with `excel-partner login` (the file is copied, never modified). */
+export interface BrowserProfile { allowedOrigins: string[]; visible?: boolean; storageState?: string }
 
 function bypassEntry(origin: string): string | null {
   try {
@@ -36,7 +36,7 @@ export class ExternalTools {
   private readonly frames = new Map<string, FrameState>();
   private readonly guard = new BrowserGuard();
 
-  /** Next browser for this session starts signed in and limited to these origins; any running one is closed. */
+  /** Next browser for this session is limited to these origins; any running one is closed. */
   async useProfile(sessionId: string, profile: BrowserProfile | null): Promise<void> {
     if (profile) this.profiles.set(sessionId, profile); else this.profiles.delete(sessionId);
     await this.closeSession(sessionId, "browser");
@@ -59,11 +59,14 @@ export class ExternalTools {
     const profile = this.profiles.get(sessionId);
     const profileArgs: string[] = [];
     if (profile) {
-      const copy = path.join(outputDir, "state.json");
-      fs.copyFileSync(profile.storageState, copy);
-      try { fs.chmodSync(copy, 0o600); } catch { /* best effort */ }
+      if (profile.storageState) {
+        const copy = path.join(outputDir, "state.json");
+        fs.copyFileSync(profile.storageState, copy);
+        try { fs.chmodSync(copy, 0o600); } catch { /* best effort */ }
+        profileArgs.push("--storage-state", copy);
+      }
       // Allowed origins at the page level, plus a dead proxy for everything else so IP addresses are blocked too.
-      profileArgs.push("--storage-state", copy, "--allowed-origins", profile.allowedOrigins.join(";"),
+      profileArgs.push("--allowed-origins", profile.allowedOrigins.join(";"),
         "--proxy-server", "http://127.0.0.1:9", "--proxy-bypass", profile.allowedOrigins.map(bypassEntry).filter(Boolean).join(","));
     }
     const client = new Client({ name: "excel-partner", version: "0.1.0" });
@@ -71,7 +74,7 @@ export class ExternalTools {
       try {
         const transport = new StdioClientTransport({
           command: "npx",
-          args: ["--yes", "@playwright/mcp@latest", "--headless", "--isolated",
+          args: ["--yes", "@playwright/mcp@latest", ...(profile?.visible ? [] : ["--headless"]), "--isolated",
             "--output-dir", outputDir, ...profileArgs,
             ...(process.env.BRIDGE_PLAYWRIGHT_EXECUTABLE ? ["--executable-path", process.env.BRIDGE_PLAYWRIGHT_EXECUTABLE] : []),
           ],

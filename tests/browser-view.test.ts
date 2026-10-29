@@ -37,6 +37,35 @@ describe("the assistant's browser view", () => {
     expect(ctx.el<HTMLImageElement>("browser-dock-image").alt).toBe("Browser after: Opening a.test/web");
   });
 
+  it("switches the large picture between fit-to-view and actual size by clicking it", () => {
+    ctx.view.push(frame(0));
+    const holder = ctx.el("browser-panel-image").parentElement!;
+    expect(holder.classList.contains("actual")).toBe(false);
+    ctx.el("browser-panel-image").click();
+    expect(holder.classList.contains("actual")).toBe(true);
+    ctx.el("browser-panel-image").click();
+    expect(holder.classList.contains("actual")).toBe(false);
+  });
+
+  it("reports how many pictures there are so the menu can offer a way back after the small view is closed", () => {
+    const counts: number[] = [];
+    const again = new BrowserView({
+      dock: ctx.el("browser-dock"), dockLabel: ctx.el("browser-dock-label"), dockStep: ctx.el("browser-dock-step"), dockUrl: ctx.el("browser-dock-url"),
+      dockImage: ctx.el<HTMLImageElement>("browser-dock-image"), dockOpen: ctx.el<HTMLButtonElement>("browser-dock-open"),
+      dockExpand: ctx.el<HTMLButtonElement>("browser-dock-expand"), dockClose: ctx.el<HTMLButtonElement>("browser-dock-close"),
+      panelLabel: ctx.el("browser-panel-label"), panelStep: ctx.el("browser-panel-step"), panelUrl: ctx.el("browser-panel-url"),
+      panelImage: ctx.el<HTMLImageElement>("browser-panel-image"), panelPrev: ctx.el<HTMLButtonElement>("browser-prev"), panelNext: ctx.el<HTMLButtonElement>("browser-next"),
+    }, () => undefined, count => counts.push(count));
+    again.push(frame(0));
+    again.push(frame(1));
+    ctx.el("browser-dock-close").click();
+    expect(again.count).toBe(2);
+    again.reset();
+    expect(counts.at(-1)).toBe(0);
+    expect(counts).toContain(2);
+    expect(ctx.el("menu-browser")).not.toBeNull();
+  });
+
   it("opens the larger view from the picture and from the expand button", () => {
     ctx.view.push(frame(0));
     ctx.el("browser-dock-open").click();

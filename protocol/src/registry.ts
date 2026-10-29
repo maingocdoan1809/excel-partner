@@ -54,17 +54,13 @@ import {
   SortRangeInputSchema,
 } from "./tools-advanced.js";
 import {
-  QA_TOOL_NAMES,
-  QaFailureInputSchema,
-  QaListScriptsInputSchema,
-  QaOpenSessionInputSchema,
-  QaReadScriptInputSchema,
-  QaResultsInputSchema,
-  QaRunInputSchema,
-  QaSaveScriptInputSchema,
-  QaStatusInputSchema,
-  QaSyncResultsInputSchema,
-} from "./tools-qa.js";
+  DeleteSiteKnowledgeInputSchema,
+  ListTestSessionsInputSchema,
+  OpenTestBrowserInputSchema,
+  ReadSiteKnowledgeInputSchema,
+  RecordTestResultsInputSchema,
+  SaveSiteKnowledgeInputSchema,
+} from "./tools-testing.js";
 
 /** Every tool the Excel MCP server can expose, with its input schema. */
 export const ToolInputSchemas = {
@@ -126,16 +122,13 @@ export const ToolInputSchemas = {
   read_attached_file: ReadAttachedFileInputSchema,
   insert_sheets_from_file: InsertSheetsFromFileInputSchema,
   playwright_browser: z.object({ tool: z.string().regex(/^(list_tools|browser_[a-z_]+)$/), arguments: z.record(z.unknown()).default({}) }),
-  // QA harness (answered by the bridge; exposed only while a QA project is configured)
-  qa_status: QaStatusInputSchema,
-  qa_list_scripts: QaListScriptsInputSchema,
-  qa_read_script: QaReadScriptInputSchema,
-  qa_save_script: QaSaveScriptInputSchema,
-  qa_open_session: QaOpenSessionInputSchema,
-  qa_run: QaRunInputSchema,
-  qa_results: QaResultsInputSchema,
-  qa_failure: QaFailureInputSchema,
-  qa_sync_results: QaSyncResultsInputSchema,
+  // testing from a sheet: the browser is opened by the bridge, results are written by the task pane
+  list_test_sessions: ListTestSessionsInputSchema,
+  read_site_knowledge: ReadSiteKnowledgeInputSchema,
+  save_site_knowledge: SaveSiteKnowledgeInputSchema,
+  delete_site_knowledge: DeleteSiteKnowledgeInputSchema,
+  open_test_browser: OpenTestBrowserInputSchema,
+  record_test_results: RecordTestResultsInputSchema,
   // opt-in escape hatch
   execute_office_js: ExecuteOfficeJsInputSchema,
 } as const satisfies Record<string, z.ZodTypeAny>;
@@ -144,19 +137,18 @@ export type ExcelToolName = keyof typeof ToolInputSchemas;
 export const EXCEL_TOOL_NAMES = Object.keys(ToolInputSchemas) as ExcelToolName[];
 
 /** Tools the bridge answers itself instead of forwarding to the task pane. */
-export const SERVER_TOOLS: readonly ExcelToolName[] = ["playwright_browser", "list_skills", "read_skill", "save_skill", "update_skill", "run_skill_script", "run_python", "list_reference_files", "read_workbook_file", "read_attached_image", "read_attached_file", ...QA_TOOL_NAMES];
+export const SERVER_TOOLS: readonly ExcelToolName[] = ["playwright_browser", "list_skills", "read_skill", "save_skill", "update_skill", "run_skill_script", "run_python", "list_reference_files", "read_workbook_file", "read_attached_image", "read_attached_file", "list_test_sessions", "open_test_browser", "read_site_knowledge", "save_site_knowledge", "delete_site_knowledge"];
 
-/** Tools that exist only while a QA project is configured (EXCEL_QA=1 for the MCP process). */
-export const QA_TOOLS: readonly ExcelToolName[] = QA_TOOL_NAMES;
+/** Tools that need the user to have switched on the browser (Playwright) in Tools. */
+export const BROWSER_TOOLS: readonly ExcelToolName[] = ["playwright_browser", "list_test_sessions", "open_test_browser"];
 
 /** Tools controlled by allowOfficeJs (enabled by default; BRIDGE_ALLOW_OFFICE_JS=0 disables them). */
 export const OPT_IN_TOOLS: readonly ExcelToolName[] = ["execute_office_js"];
 
 /** Tool names a session exposes, given whether the opt-in tools are enabled. */
-export function exposedToolNames(allowOptIn: boolean, capabilities: { webSearch?: boolean; playwright?: boolean; qa?: boolean } = {}): ExcelToolName[] {
+export function exposedToolNames(allowOptIn: boolean, capabilities: { webSearch?: boolean; playwright?: boolean } = {}): ExcelToolName[] {
   return EXCEL_TOOL_NAMES.filter((name) => (allowOptIn || !OPT_IN_TOOLS.includes(name))
-    && (name !== "playwright_browser" || capabilities.playwright)
-    && (!QA_TOOLS.includes(name) || capabilities.qa));
+    && (!BROWSER_TOOLS.includes(name) || capabilities.playwright));
 }
 
 export function isExcelToolName(name: string): name is ExcelToolName {

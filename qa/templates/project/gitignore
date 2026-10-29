@@ -1,7 +1,0 @@
-# Saved browser sessions are as sensitive as passwords.
-auth/
-.env
-.env.*
-results/
-node_modules/
-*.log

@@ -215,9 +215,13 @@ body.question-active .composer-card, body.question-active .composer-hint, body.q
 .browser-dock-step { font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .browser-dock-head .ghost { padding: 0 6px; line-height: 20px; }
 .browser-dock-shot { display: block; width: 100%; margin: 6px 0 4px; padding: 0; border: 1px solid var(--border); border-radius: 6px; background: #fff; overflow: hidden; cursor: zoom-in; }
-.browser-dock-shot img { display: block; width: 100%; max-height: 150px; object-fit: cover; object-position: top left; }
+.browser-dock-shot img { display: block; width: 100%; max-height: 160px; object-fit: contain; }
+body.browser-active .browser-dock { display: none; }
 .browser-dock-url { margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; color: var(--muted); }
 .browser-panel { padding-bottom: 10px; }
 .browser-panel-label { margin: 0 0 2px; font-size: 13px; font-weight: 600; color: var(--text); }
-.browser-panel-view { flex: 1; min-height: 0; margin: 8px 0; overflow: auto; border: 1px solid var(--border); border-radius: 8px; background: #fff; }
-.browser-panel-view img { display: block; width: 100%; height: auto; }
+/* The whole picture is always visible (scaled to fit); click it for actual size and scroll. */
+.browser-panel-view { flex: 1; min-height: 120px; margin: 8px 0; display: flex; align-items: center; justify-content: center; overflow: hidden; border: 1px solid var(--border); border-radius: 8px; background: #fff; }
+.browser-panel-view img { display: block; max-width: 100%; max-height: 100%; width: auto; height: auto; object-fit: contain; cursor: zoom-in; }
+.browser-panel-view.actual { display: block; overflow: auto; }
+.browser-panel-view.actual img { max-width: none; max-height: none; cursor: zoom-out; }

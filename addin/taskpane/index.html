@@ -28,6 +28,7 @@
         <button id="menu-settings" type="button" class="menu-item" role="menuitem">Settings</button>
         <div class="menu-sep"></div>
         <button id="menu-changes" type="button" class="menu-item" role="menuitem">Changes <span id="changes-count" class="badge" hidden>0</span></button>
+        <button id="menu-browser" type="button" class="menu-item" role="menuitem" hidden>Assistant's browser <span id="browser-count" class="badge">0</span></button>
         <button id="menu-history" type="button" class="menu-item" role="menuitem">History</button>
         <button id="menu-new" type="button" class="menu-item" role="menuitem">New chat</button>
       </div>
@@ -144,8 +145,8 @@
         </header>
         <p id="browser-panel-label" class="browser-panel-label" role="status" aria-live="polite"></p>
         <p id="browser-panel-url" class="browser-dock-url"></p>
-        <div class="browser-panel-view"><img id="browser-panel-image" alt="" /></div>
-        <p class="template-help">Pictures stay in memory while this chat is open. They are not saved in history and are not sent to the AI.</p>
+        <div class="browser-panel-view"><img id="browser-panel-image" alt="" title="Click for actual size" /></div>
+        <p class="template-help">Click the picture for actual size, click again to fit. Pictures stay in memory while this chat is open. They are not saved in history and are not sent to the AI.</p>
       </section>
 
       <section id="panel-changes" class="panel" hidden aria-label="Changes">

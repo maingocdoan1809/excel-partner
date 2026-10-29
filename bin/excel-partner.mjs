@@ -155,6 +155,60 @@ function allowHost(names, remove) {
   writeFileSync(configFile, JSON.stringify({ ...config, allowedHosts: next }, null, 2) + "\n", { mode: 0o600 });
   console.log(`${remove ? "Removed" : "Allowed"}: ${clean.join(", ")}. Restart the bridge to apply: excel-partner restart`);
 }
+async function testSessions(command, rest) {
+  const { TestSessions } = await import(pathToFileURL(path.join(root, "dist", "bridge", "src", "test-sessions.js")).href);
+  const store = new TestSessions(path.join(dataDir, "sessions"));
+  if (command === "sessions") {
+    const list = store.list();
+    if (!list.length) { console.log("No saved sign-ins. Create one: excel-partner login <name> <url>"); return; }
+    for (const item of list) console.log(`${item.name.padEnd(16)} saved ${item.savedAt.slice(0, 16).replace("T", " ")}  sites: ${item.origins.join(", ")}`);
+    return;
+  }
+  const name = rest.find(arg => !arg.startsWith("--"));
+  if (!name || !/^[a-z0-9][a-z0-9_-]{0,31}$/.test(name)) fail(`Usage: excel-partner ${command} <name>${command === "login" ? " <url>" : ""}  (name: lowercase letters, digits, - and _)`);
+  if (command === "logout") { console.log(store.remove(name) ? `Removed the saved sign-in '${name}'.` : `No saved sign-in named '${name}'.`); return; }
+  const positional = rest.filter(arg => !arg.startsWith("--"));
+  const url = positional[1];
+  if (!url) fail("Usage: excel-partner login <name> <url> [--origin <url>]...   e.g. excel-partner login admin https://staging.example.com");
+  const extra = rest.flatMap((arg, index) => arg === "--origin" && rest[index + 1] ? [rest[index + 1]] : []);
+  const { loginSession } = await import(pathToFileURL(path.join(root, "dist", "bridge", "src", "test-login.js")).href);
+  const { createInterface } = await import("node:readline");
+  const waitForPerson = () => new Promise(resolve => {
+    const rl = createInterface({ input: process.stdin, output: process.stdout });
+    rl.question("When you are signed in and can see the home page, press Enter here to save the session... ", () => { rl.close(); resolve(); });
+  });
+  try {
+    const { origins } = await loginSession({ name, url, extraOrigins: extra, store, waitForPerson, out: line => console.log(line) });
+    console.log(`Saved sign-in '${name}'. The assistant can use it on: ${origins.join(", ")}`);
+    console.log("Next: in Excel, open the chat and type /qa. A saved sign-in expires like any login; if the assistant lands on a sign-in page, run this command again.");
+  } catch (error) { fail(error instanceof Error ? error.message : String(error)); }
+}
+async function siteKnowledge(rest) {
+  const { SiteKnowledge, siteKey } = await import(pathToFileURL(path.join(root, "dist", "bridge", "src", "site-knowledge.js")).href);
+  const store = new SiteKnowledge(path.join(dataDir, "knowledge"));
+  const [first, second, third] = rest;
+  if (first === "path") { console.log(store.dir); return; }
+  const check = url => { if (!siteKey(url)) fail(`'${url}' is not a web address (use https://host, with the port if any).`); return url; };
+  if (first === "show" || first === "delete") {
+    if (!second || !third) fail(`Usage: excel-partner knowledge ${first} <url> <note>`);
+    try {
+      if (first === "delete") { console.log(store.delete(check(second), third) ? `Deleted '${third}'.` : `No note '${third}'.`); return; }
+      const { entry, content } = store.read(check(second), third);
+      console.log(`${entry.name} [${entry.kind}] verified ${entry.updated}\n${entry.summary}\n\n${content}`);
+    } catch (error) { fail(error instanceof Error ? error.message : String(error)); }
+    return;
+  }
+  if (first) {
+    const list = store.list(check(first));
+    if (!list.length) { console.log(`No notes yet for ${first}.`); return; }
+    for (const item of list) console.log(`${item.name.padEnd(24)} ${item.kind.padEnd(11)} ${item.updated}  ${item.summary}`);
+    return;
+  }
+  console.log(`Notes folder: ${store.dir}`);
+  const sites = store.sites();
+  if (!sites.length) console.log("No notes yet. The assistant saves them after it has learned something about a system.");
+  for (const site of sites) console.log(`  ${site}`);
+}
 async function doctorAddin() {
   const line = (ok, text) => console.log(`${ok === true ? "[ ok ]" : ok === false ? "[fail]" : "[warn]"} ${text}`);
   line(Number(process.versions.node.split(".")[0]) >= 20, `Node.js ${process.versions.node} (20 or later required)`);
@@ -183,7 +237,8 @@ const HELP = `Usage: excel-partner <command> [addin|gateway|all]
   info       Show the gateway URL and token (add --copy to copy the token).
   logs       Show recent log lines.
   doctor     Check the installation and explain what to fix (default: both).
-  qa         Test automation harness (Playwright): run 'excel-partner qa help'.
+  login      Sign in once for the QA assistant: login <name> <url> [--origin <url>]. Also: sessions, logout <name>.
+  knowledge  What the assistant has learned about each system: knowledge [<url>] | show <url> <note> | delete <url> <note> | path.
   allow-host Let the bridge answer to another hostname/IP (e.g. a WSL IP): allow-host <name> [--remove]; no name lists them.
   update     Install the latest release and refresh both (always the whole package).
   uninstall  Stop and remove registration and startup entries.
@@ -197,13 +252,8 @@ async function main() {
   const command = args[0] || "help";
   if (command === "help" || process.argv.includes("--help")) { console.log(HELP); return; }
   if (command === "gateway") { gateway(args.slice(1)); return; }
-  if (command === "qa") {
-    const qaCli = path.join(root, "dist", "qa", "src", "cli.js");
-    if (!existsSync(qaCli)) fail("This installation is missing the QA harness. Reinstall excel-partner.");
-    const { runQaCli, defaultContext } = await import(pathToFileURL(qaCli).href);
-    process.exitCode = await runQaCli(process.argv.slice(3).filter(arg => arg !== "--help"), defaultContext(configFile));
-    return;
-  }
+  if (command === "login" || command === "sessions" || command === "logout") { await testSessions(command, args.slice(1)); return; }
+  if (command === "knowledge") { await siteKnowledge(args.slice(1)); return; }
   if (command === "allow-host") { allowHost(args.slice(1).filter(arg => !arg.startsWith("--")), args.includes("--remove")); return; }
   const flags = args.filter(arg => arg.startsWith("--"));
   const positional = args.filter(arg => !arg.startsWith("--"));
