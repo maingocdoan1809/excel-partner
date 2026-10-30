@@ -33,6 +33,14 @@ export function siteKey(origin: string): string | null {
   return `${url.hostname.replace(/[^a-z0-9.-]/gi, "-").toLowerCase()}${url.port ? `_${url.port}` : ""}`;
 }
 
+/** The reverse of siteKey, for screens that list sites by their folder name: `localhost_8081` -> `http://localhost:8081`. */
+export function originOfKey(key: string): string | null {
+  const match = /^([a-z0-9][a-z0-9.-]*?)(?:_(\d{1,5}))?$/.exec(key);
+  if (!match || key.includes("..")) return null;
+  const origin = `http://${match[1]}${match[2] ? `:${match[2]}` : ""}`;
+  return siteKey(origin) === key ? origin : null;
+}
+
 const FRONT = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/;
 
 function parse(text: string): { meta: Record<string, string>; body: string } {

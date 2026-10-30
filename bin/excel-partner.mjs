@@ -209,6 +209,33 @@ async function siteKnowledge(rest) {
   if (!sites.length) console.log("No notes yet. The assistant saves them after it has learned something about a system.");
   for (const site of sites) console.log(`  ${site}`);
 }
+async function testScripts(rest) {
+  const { TestScripts } = await import(pathToFileURL(path.join(root, "dist", "bridge", "src", "test-scripts.js")).href);
+  const { siteKey } = await import(pathToFileURL(path.join(root, "dist", "bridge", "src", "site-knowledge.js")).href);
+  const store = new TestScripts(path.join(dataDir, "scripts"));
+  const [first, second, third] = rest;
+  if (first === "path") { console.log(store.dir); return; }
+  const check = url => { if (!siteKey(url)) fail(`'${url}' is not a web address (use https://host, with the port if any).`); return url; };
+  if (first === "show" || first === "delete") {
+    if (!second || !third) fail(`Usage: excel-partner scripts ${first} <url> <case id>`);
+    try {
+      if (first === "delete") { console.log(store.delete(check(second), third) ? `Deleted '${third}'.` : `No script for '${third}'.`); return; }
+      console.log(store.read(check(second), third));
+    } catch (error) { fail(error instanceof Error ? error.message : String(error)); }
+    return;
+  }
+  if (first) {
+    const list = store.list(check(first));
+    if (!list.length) { console.log(`No scripts yet for ${first}.`); return; }
+    for (const item of list) console.log(`${item.caseId.padEnd(20)} ${item.outcome.padEnd(16)} ${item.tested}  ${item.title}`);
+    console.log(`\nFiles: ${path.join(store.dir, siteKey(first))}`);
+    return;
+  }
+  console.log(`Scripts folder: ${store.dir}`);
+  const sites = store.sites();
+  if (!sites.length) console.log("No scripts yet. The assistant saves one for each test case that passes or fails because of the application.");
+  for (const site of sites) console.log(`  ${site}`);
+}
 async function doctorAddin() {
   const line = (ok, text) => console.log(`${ok === true ? "[ ok ]" : ok === false ? "[fail]" : "[warn]"} ${text}`);
   line(Number(process.versions.node.split(".")[0]) >= 20, `Node.js ${process.versions.node} (20 or later required)`);
@@ -239,6 +266,7 @@ const HELP = `Usage: excel-partner <command> [addin|gateway|all]
   doctor     Check the installation and explain what to fix (default: both).
   login      Sign in once for the QA assistant: login <name> <url> [--origin <url>]. Also: sessions, logout <name>.
   knowledge  What the assistant has learned about each system: knowledge [<url>] | show <url> <note> | delete <url> <note> | path.
+  scripts    Playwright regression scripts saved per test case: scripts [<url>] | show <url> <case id> | delete <url> <case id> | path.
   allow-host Let the bridge answer to another hostname/IP (e.g. a WSL IP): allow-host <name> [--remove]; no name lists them.
   update     Install the latest release and refresh both (always the whole package).
   uninstall  Stop and remove registration and startup entries.
@@ -254,6 +282,7 @@ async function main() {
   if (command === "gateway") { gateway(args.slice(1)); return; }
   if (command === "login" || command === "sessions" || command === "logout") { await testSessions(command, args.slice(1)); return; }
   if (command === "knowledge") { await siteKnowledge(args.slice(1)); return; }
+  if (command === "scripts") { await testScripts(args.slice(1)); return; }
   if (command === "allow-host") { allowHost(args.slice(1).filter(arg => !arg.startsWith("--")), args.includes("--remove")); return; }
   const flags = args.filter(arg => arg.startsWith("--"));
   const positional = args.filter(arg => !arg.startsWith("--"));

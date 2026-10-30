@@ -70,6 +70,14 @@ export class WorkbookSession implements ProviderSessionState {
   readonly referenceGrants = new Set<string>();
   /** Folder containing the workbook currently open in this pane, when its local path is available. */
   defaultWorkspace: string | null = null;
+  /**
+   * What the current test run has done so far, keyed "sheet|row": results written to the sheet (with the columns they went
+   * to) and regression scripts saved. finish_test_run checks the two against each other before the run may be called done.
+   */
+  readonly testRun = {
+    recorded: new Map<string, { values: Record<string, string>; columns: Record<string, string> }>(),
+    scripts: new Map<string, { caseId: string; outcome: "pass" | "fail_app_defect" }>(),
+  };
   /** File bytes explicitly selected in the pane; never written to disk. */
   readonly attachments = new Map<string, SessionAttachment>();
   private readonly followups = new Map<string, { requestId: string; text: string }>();

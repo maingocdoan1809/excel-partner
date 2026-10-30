@@ -32,6 +32,16 @@ export interface AvailableSkill { name: string; description: string }
 export interface InstalledSkill extends AvailableSkill { removable: boolean; enabled: boolean }
 export interface SkillTextFile { file: string; content: string; revision: string }
 export interface SavedReference { id: string; name: string; path: string; description: string; available: boolean }
+export interface TestingSignIn { name: string; origins: string[]; savedAt: string; url: string }
+export interface TestingNote { name: string; kind: string; summary: string; updated: string }
+export interface TestingScript { caseId: string; title: string; outcome: "pass" | "fail_app_defect"; tested: string }
+export interface TestingOverview {
+  signIns: TestingSignIn[];
+  notes: Array<{ site: string; notes: TestingNote[] }>;
+  scripts: Array<{ site: string; scripts: TestingScript[] }>;
+  pendingSignIn: { name: string; url: string } | null;
+  folders: { sessions: string; knowledge: string; scripts: string };
+}
 export interface ModelCatalog { models: Array<{ id: string; name: string }>; defaultModelId: string | null }
 
 export interface BridgeClientHandlers {
@@ -168,6 +178,19 @@ export class BridgeClient {
 
   async attachWorkspaceFile(path: string): Promise<UploadedAttachment> {
     return this.sessionFetch("/session/workspaces/attach", { method: "POST", body: JSON.stringify({ path }) });
+  }
+
+  testingOverview(): Promise<TestingOverview> { return this.sessionFetch<TestingOverview>("/session/testing"); }
+  async testingView(kind: "note" | "script", site: string, id: string): Promise<string> {
+    const query = new URLSearchParams({ view: kind, site, ...(kind === "note" ? { name: id } : { caseId: id }) });
+    const data = await this.sessionFetch<{ content: string }>(`/session/testing?${query}`);
+    return data.content;
+  }
+  async testingAction(body: Record<string, unknown>): Promise<Record<string, unknown>> {
+    return this.sessionFetch<Record<string, unknown>>("/session/testing", { method: "POST", body: JSON.stringify(body) });
+  }
+  async testingDelete(body: Record<string, unknown>): Promise<void> {
+    await this.sessionFetch("/session/testing", { method: "DELETE", body: JSON.stringify(body) });
   }
 
   async listSavedReferences(): Promise<SavedReference[]> {

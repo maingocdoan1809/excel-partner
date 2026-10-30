@@ -17,7 +17,7 @@ import type { RunSkillScriptInput } from "../../protocol/src/index.js";
 import { resolveSkillScript, runSkillScript, skillFile } from "./skill-runner.js";
 import { runPython, PythonError, PYTHON_FILE_BYTES } from "./python-runner.js";
 import type { RunPythonInput } from "../../protocol/src/index.js";
-import { normalizeOrigin, type OpenTestBrowserInput } from "../../protocol/src/index.js";
+import { columnToNumber, normalizeOrigin, type FinishTestRunInput, type OpenTestBrowserInput, type RecordTestResultsInput, type SaveTestScriptInput } from "../../protocol/src/index.js";
 import { XlsxError, listSheetNames, readSheetDetails, readWorkbookOverview } from "./xlsx-reader.js";
 import { AttachmentError, attachmentId, attachmentPath, createAttachment, MAX_ATTACHMENT_BYTES } from "./attachments.js";
 import { inspectAttachment } from "./inspect-attachment.js";
@@ -28,6 +28,7 @@ import type { Logger } from "./logger.js";
 import { ExternalTools, type FrameSink } from "./external-tools.js";
 import type { TestSessions } from "./test-sessions.js";
 import { KnowledgeError, siteKey, type SiteKnowledge } from "./site-knowledge.js";
+import { TestScriptError, type TestScripts } from "./test-scripts.js";
 import { CrashGuard, crashBlockedMessage } from "./crash-guard.js";
 import { DISCONNECTED_MID_CALL, type WorkbookSession } from "./session.js";
 import { enrichWindowsSelection, type SelectionEnricher } from "./windows-selection.js";
@@ -72,6 +73,7 @@ export class ToolGateway {
     private readonly enrichSelection: SelectionEnricher = enrichWindowsSelection,
     private readonly testSessions: TestSessions | null = null,
     private readonly knowledge: SiteKnowledge | null = null,
+    private readonly scripts: TestScripts | null = null,
   ) {}
 
   async invoke(request: InternalToolRequest): Promise<ToolResult> {
@@ -118,6 +120,8 @@ export class ToolGateway {
       return this.answerKnowledgeTool(session, request.tool, parsed);
     }
     if (request.tool === "open_test_browser") return this.openTestBrowser(session, parsed as OpenTestBrowserInput);
+    if (request.tool === "save_test_script") return this.saveTestScript(session, parsed as SaveTestScriptInput);
+    if (request.tool === "finish_test_run") return this.finishTestRun(session, parsed as FinishTestRunInput);
 
     if (request.tool === "playwright_browser") {
       const signal = session.turnController?.signal;
@@ -196,6 +200,7 @@ export class ToolGateway {
       const snapshot = SelectionSnapshotSchema.safeParse(result.data);
       if (snapshot.success) result = { ok: true, data: await this.enrichSelection(snapshot.data, session.turnController?.signal) };
     }
+    if (request.tool === "record_test_results" && result.ok) this.trackRecorded(session, parsed as RecordTestResultsInput, result.data);
     this.logOutcome(request.tool, parsed, result, Date.now() - started);
     return result;
   }
@@ -241,6 +246,82 @@ export class ToolGateway {
     }
   }
 
+  /** Remember what was written into the sheet, so finish_test_run can read it back and compare. */
+  private trackRecorded(session: WorkbookSession, input: RecordTestResultsInput, data: unknown): void {
+    const letters = (data as { columns?: Record<string, string> } | null)?.columns ?? {};
+    const norm = (text: string) => text.trim().toLowerCase().replace(/\s+/g, " ");
+    const letterOf = new Map(Object.entries(letters).map(([header, letter]) => [norm(header), letter]));
+    for (const item of input.results) {
+      const key = `${input.sheet}|${item.row}`;
+      const entry = session.testRun.recorded.get(key) ?? { values: {}, columns: {} };
+      for (const [header, value] of Object.entries(item.values)) {
+        const letter = letterOf.get(norm(header));
+        if (!letter) continue;
+        entry.values[letter] = value === null ? "" : String(value);
+        entry.columns[letter] = header;
+      }
+      session.testRun.recorded.set(key, entry);
+    }
+  }
+
+  private scriptsFor(origins: string[]): unknown {
+    if (!this.scripts) return undefined;
+    const sites = origins.map(origin => ({ origin, scripts: this.scripts!.list(origin) })).filter(site => site.scripts.length > 0);
+    return sites.length ? {
+      note: "Regression scripts saved by earlier runs (one per test case, kept only for cases that passed or failed because of the application). If the sheet's case already has one, the user probably wants a regression run: you cannot execute them, but they show the exact steps that worked before.",
+      sites,
+    } : undefined;
+  }
+
+  private saveTestScript(session: WorkbookSession, input: SaveTestScriptInput): ToolResult {
+    if (!this.scripts) return error("unsupported", "Saving test scripts is not available in this setup.");
+    try {
+      const saved = this.scripts.save(input.origin, input);
+      session.testRun.scripts.set(`${input.sheet}|${input.row}`, { caseId: input.caseId, outcome: input.outcome });
+      return { ok: true, data: { saved, next: "Now record the result of this case in the sheet with record_test_results, and call finish_test_run for all cases before you tell the user the run is done." } };
+    } catch (err) {
+      if (err instanceof TestScriptError) return error("invalid_arguments", err.message);
+      throw err;
+    }
+  }
+
+  /**
+   * The run is only done when every case has its result in the sheet (checked by reading the cells back) and every case that
+   * passed or failed because of the application has its script. Anything missing is listed so it can be fixed first.
+   */
+  private async finishTestRun(session: WorkbookSession, input: FinishTestRunInput): Promise<ToolResult> {
+    const problems: string[] = [];
+    const seen = new Set<number>();
+    for (const item of input.cases) {
+      const label = `row ${item.row} (${item.caseId})`;
+      if (seen.has(item.row)) { problems.push(`${label}: listed twice.`); continue; }
+      seen.add(item.row);
+      const key = `${input.sheet}|${item.row}`;
+      const recorded = session.testRun.recorded.get(key);
+      const script = session.testRun.scripts.get(key);
+      const wantsScript = item.outcome === "pass" || item.outcome === "fail_app_defect";
+      if (!recorded) problems.push(`${label}: no result has been recorded in the sheet yet. Use record_test_results.`);
+      if (wantsScript && !script) problems.push(`${label}: ${item.outcome} needs a regression script. Use save_test_script (outcome ${item.outcome}).`);
+      else if (wantsScript && script && (script.outcome !== item.outcome || script.caseId !== item.caseId)) problems.push(`${label}: the saved script says ${script.caseId} / ${script.outcome}, not ${item.caseId} / ${item.outcome}. Save it again with the right values.`);
+      if (!wantsScript && script) problems.push(`${label}: a script was saved although the outcome is ${item.outcome}. Cases blocked by a technical problem or not understood get no script: tell the user to delete it with excel-partner scripts delete, or correct the outcome if the application really is at fault.`);
+      if (!recorded) continue;
+      const letters = Object.keys(recorded.values);
+      if (letters.length === 0) continue;
+      const last = letters.reduce((a, b) => (columnToNumber(a) >= columnToNumber(b) ? a : b));
+      const read = await session.requestTool("read_range", { sheet: { name: input.sheet }, address: `A${item.row}:${last}${item.row}`, includeFormulas: false, includeText: false, format: "grid", offset: 0 }, this.timeoutMs);
+      const cells = read.ok ? (read.data as { values?: unknown[][] }).values?.[0] : undefined;
+      if (!cells) { problems.push(`${label}: could not read the row back${read.ok ? "" : ` (${read.error.message})`}.`); continue; }
+      for (const [letter, expected] of Object.entries(recorded.values)) {
+        const wanted = expected.replace(/^'/, "").trim();
+        const found = String(cells[columnToNumber(letter) - 1] ?? "").trim();
+        if (wanted !== found) problems.push(`${label}: ${recorded.columns[letter]} (${letter}${item.row}) should hold '${wanted.slice(0, 60)}' but holds '${found.slice(0, 60)}'. Someone changed it, or the write did not land: record it again.`);
+      }
+    }
+    if (problems.length) return error("invalid_arguments", `The test run is not finished: ${problems.length} problem${problems.length === 1 ? "" : "s"}. Fix them, then call finish_test_run again. Do not tell the user it is done yet.`, { problems: problems.slice(0, 30) });
+    const count = (outcome: string) => input.cases.filter(item => item.outcome === outcome).length;
+    return { ok: true, data: { done: true, cases: input.cases.length, pass: count("pass"), failAppDefect: count("fail_app_defect"), failOther: count("fail_other"), blocked: count("blocked"), needsReview: count("needs_review"), scriptsSaved: input.cases.filter(item => item.outcome === "pass" || item.outcome === "fail_app_defect").length, next: "Every result is in the sheet and every kept case has its script. Now give the user the summary; scripts are listed with `excel-partner scripts`." } };
+  }
+
   private async openTestBrowser(session: WorkbookSession, input: OpenTestBrowserInput): Promise<ToolResult> {
     const saved = input.session ? this.testSessions?.get(input.session) ?? null : null;
     if (input.session && !saved) {
@@ -258,7 +339,7 @@ export class ToolGateway {
     return {
       ok: true,
       data: {
-        ready: true, browserMayReachOnly: origins, visible, signedInAs: saved?.info.name ?? null, knowledge: this.knowledgeFor(origins),
+        ready: true, browserMayReachOnly: origins, visible, signedInAs: saved?.info.name ?? null, knowledge: this.knowledgeFor(origins), regressionScripts: this.scriptsFor(origins),
         next: !ready ? "Ask the user to switch on Playwright in Tools beside the prompt, then use playwright_browser."
           : saved ? `Use playwright_browser (browser_navigate, browser_snapshot). The browser starts signed in with the session saved ${saved.info.savedAt}; if you land on a sign-in page it has expired and the user must run excel-partner login ${saved.info.name} <url> again.`
           : visible ? "A browser window opens on the first playwright_browser call. Navigate to the site and ask the user to sign in there, then wait for them to say they are done. Never ask for the password."

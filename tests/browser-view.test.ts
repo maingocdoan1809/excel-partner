@@ -81,6 +81,17 @@ describe("the assistant's browser view", () => {
     expect(ctx.el("browser-dock").hidden).toBe(false);
   });
 
+  it("brings the small view back above the message box on request, and only when there is a picture", () => {
+    ctx.view.showDock();
+    expect(ctx.el("browser-dock").hidden).toBe(true);
+    ctx.view.push(frame(0));
+    ctx.el("browser-dock-close").click();
+    expect(ctx.el("browser-dock").hidden).toBe(true);
+    ctx.view.showDock();
+    expect(ctx.el("browser-dock").hidden).toBe(false);
+    expect(ctx.el<HTMLImageElement>("browser-dock-image").src).toBe("data:image/jpeg;base64,IMG0");
+  });
+
   it("follows the newest picture until the person steps back, then stays where they are", () => {
     for (let n = 0; n < 3; n++) ctx.view.push(frame(n));
     expect(ctx.el("browser-panel-step").textContent).toBe("3 / 3");

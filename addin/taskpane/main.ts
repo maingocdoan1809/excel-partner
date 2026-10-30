@@ -12,6 +12,7 @@ import { setupInputResizer } from "./ui/input-resizer.js";
 import { renderMarkdown } from "./ui/markdown.js";
 import { buildPreviewDocument, renderArtifactCard, type StoredArtifact } from "./ui/artifact.js";
 import { BrowserView } from "./ui/browser-view.js";
+import { setupTestingPanel } from "./ui/testing-panel.js";
 import { createSelfUpdater } from "./ui/self-update.js";
 import { setupProviderLogin } from "./ui/provider-login.js";
 import { setupToolSettings } from "./ui/tool-settings.js";
@@ -70,6 +71,7 @@ const els = {
     session: byId<HTMLElement>("panel-session"),
     preview: byId<HTMLElement>("panel-preview"),
     browser: byId<HTMLElement>("panel-browser"),
+    testing: byId<HTMLElement>("panel-testing"),
   },
   changesList: byId<HTMLElement>("changes-list"),
   historyList: byId<HTMLElement>("history-list"),
@@ -176,7 +178,8 @@ const browserView = new BrowserView({
   byId("menu-browser").hidden = count === 0;
   byId("browser-count").textContent = String(count);
 });
-byId("menu-browser").addEventListener("click", () => { showPanel("browser"); });
+// Back to the chat with the small view above the message box, as it first appeared; its expand button opens the large one.
+byId("menu-browser").addEventListener("click", () => { showPanel(null); browserView.showDock(); });
 const previewFrame = byId<HTMLIFrameElement>("preview-frame");
 const previewSource = byId<HTMLElement>("preview-source");
 const previewToggle = byId<HTMLButtonElement>("preview-toggle");
@@ -237,6 +240,7 @@ const slash = createSlashMenu({
 });
 const savedReferences = setupSavedReferences(() => client);
 const userSkills = setupUserSkills(() => client, () => slash.reload());
+const testingPanel = setupTestingPanel(() => client);
 const toolSettings = setupToolSettings(() => provider);
 const settings = setupSettings({
   loadInstructions: () => client.systemPrompt(),
@@ -382,6 +386,7 @@ Office.onReady((info) => {
   els.menuReferences.addEventListener("click", () => showPanel("references"));
   els.menuTemplates.addEventListener("click", () => showPanel("templates"));
   byId("menu-skills").addEventListener("click", () => showPanel("skills"));
+  byId("menu-testing").addEventListener("click", () => showPanel("testing"));
   byId("tools-button").addEventListener("click", () => {
     showPanel("settings");
     byId("settings-tools-section").scrollIntoView({ block: "nearest" });
@@ -1668,6 +1673,7 @@ function showPanel(name: PanelName | null): void {
   if (name !== "preview") { previewFrame.srcdoc = ""; previewing = null; }
   if (name === "references") void savedReferences.refresh();
   if (name === "skills") void userSkills.refresh();
+  if (name === "testing") void testingPanel.refresh();
   document.body.classList.toggle("login-active", name === "login");
   if (name === "login") {
     byId("login-heading").textContent = `Sign in to ${PROVIDER_NAMES[provider]}`;

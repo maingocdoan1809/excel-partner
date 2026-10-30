@@ -56,6 +56,11 @@ export class BrowserView {
     this.els.dock.hidden = false;
   }
 
+  /** Bring the small view back above the message box after the person closed it. */
+  showDock(): void {
+    if (this.frames.length) this.els.dock.hidden = false;
+  }
+
   /** New turn or new chat: drop every picture. */
   reset(): void {
     this.frames = [];
