@@ -326,7 +326,7 @@ export class ToolGateway {
     const saved = input.session ? this.testSessions?.get(input.session) ?? null : null;
     if (input.session && !saved) {
       const names = this.testSessions?.list().map(item => item.name) ?? [];
-      return error("invalid_arguments", `No saved session named '${input.session}'. ${names.length ? `Saved: ${names.join(", ")}.` : "None saved yet."} The user creates one in a terminal: excel-partner login <name> <url>`);
+      return error("invalid_arguments", `No saved session named '${input.session}'. ${names.length ? `Saved: ${names.join(", ")}.` : "None saved yet."} The user creates one in Excel Partner: Settings > Testing: sign-ins, notes, scripts > Open browser to sign in (or in a terminal: excel-partner login <name> <url>).`);
     }
     const origins = [...new Set([...(saved?.info.origins ?? []), ...(input.origins ?? []).map(item => normalizeOrigin(item)!)])];
     const visible = input.visible ?? !saved;
@@ -341,7 +341,7 @@ export class ToolGateway {
       data: {
         ready: true, browserMayReachOnly: origins, visible, signedInAs: saved?.info.name ?? null, knowledge: this.knowledgeFor(origins), regressionScripts: this.scriptsFor(origins),
         next: !ready ? "Ask the user to switch on Playwright in Tools beside the prompt, then use playwright_browser."
-          : saved ? `Use playwright_browser (browser_navigate, browser_snapshot). The browser starts signed in with the session saved ${saved.info.savedAt}; if you land on a sign-in page it has expired and the user must run excel-partner login ${saved.info.name} <url> again.`
+          : saved ? `Use playwright_browser (browser_navigate, browser_snapshot). The browser starts signed in with the session saved ${saved.info.savedAt}; if you land on a sign-in page it has expired and the user must sign in again: Settings > Testing > Sign in again beside '${saved.info.name}' (or excel-partner login ${saved.info.name} <url>).`
           : visible ? "A browser window opens on the first playwright_browser call. Navigate to the site and ask the user to sign in there, then wait for them to say they are done. Never ask for the password."
           : "The browser is hidden; the user sees it in the live view. Navigate to the site; if a sign-in is needed, ask the user how to proceed. Never ask for a password in chat.",
       },

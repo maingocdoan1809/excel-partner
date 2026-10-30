@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import fs from "node:fs";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { setupTestingPanel } from "../addin/taskpane/ui/testing-panel.js";
+import { describeSavedAge, setupTestingPanel } from "../addin/taskpane/ui/testing-panel.js";
 import type { TestingOverview } from "../addin/taskpane/bridge-client.js";
 
 const overview = (extra: Partial<TestingOverview> = {}): TestingOverview => ({
@@ -28,6 +28,19 @@ function setup(data = overview()) {
   return { client, panel, el, buttons, clickText };
 }
 const flush = () => new Promise(resolve => setTimeout(resolve, 0));
+
+describe("describeSavedAge", () => {
+  const now = Date.parse("2026-10-30T12:00:00.000Z");
+  it("says how old a sign-in is", () => {
+    expect(describeSavedAge("2026-10-30T01:00:00.000Z", now)).toBe("saved today");
+    expect(describeSavedAge("2026-10-29T01:00:00.000Z", now)).toBe("saved yesterday");
+    expect(describeSavedAge("2026-10-20T12:00:00.000Z", now)).toBe("saved 10 days ago");
+  });
+  it("warns from 14 days on, and copes with a bad date", () => {
+    expect(describeSavedAge("2026-10-16T12:00:00.000Z", now)).toBe("saved 14 days ago, may have expired");
+    expect(describeSavedAge("not a date", now)).toBe("saved at an unknown time");
+  });
+});
 
 describe("the testing panel", () => {
   let ctx: ReturnType<typeof setup>;

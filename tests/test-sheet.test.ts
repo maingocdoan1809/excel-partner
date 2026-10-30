@@ -183,6 +183,7 @@ describe("open_test_browser", () => {
       const result = await call({ session: "nobody" });
       expect(result).toMatchObject({ ok: false, error: { code: "invalid_arguments" } });
       expect((result as any).error.message).toContain("admin");
+      expect((result as any).error.message).toContain("Settings > Testing");
       expect((result as any).error.message).toContain("excel-partner login");
       expect(ask).not.toHaveBeenCalled();
       expect(use).not.toHaveBeenCalled();

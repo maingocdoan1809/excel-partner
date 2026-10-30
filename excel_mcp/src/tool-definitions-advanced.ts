@@ -289,7 +289,7 @@ const META: Partial<Record<ExcelToolName, Meta>> = {
     description:
       "WRITE. Start (or restart) the Playwright browser used by playwright_browser so that it can reach ONLY the allowed sites; every other address, including IP addresses, is blocked. " +
       "Prefer session=<name> (see list_test_sessions): the browser starts already signed in and you never see the credentials. Without a session pass origins; a real window opens and the user signs in themselves: never ask for or type a password, wait until they say they are signed in. " +
-      "The user is always asked to approve the sites, even in Auto mode. If a page shows the sign-in form although a session was used, the session has expired: tell the user to run `excel-partner login <name> <url>` again. " +
+      "The user is always asked to approve the sites, even in Auto mode. If a page shows the sign-in form although a session was used, the session has expired: tell the user to sign in again from Settings > Testing (Sign in again), or with `excel-partner login <name> <url>`. " +
       "Requires the Playwright tool to be switched on in Tools beside the prompt. Used for testing a web system from a test-case sheet; see record_test_results for the whole workflow.",
   },
   read_site_knowledge: {

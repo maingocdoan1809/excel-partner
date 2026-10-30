@@ -1,5 +1,17 @@
 import type { BridgeClient, TestingOverview } from "../bridge-client.js";
 
+/** A saved login is a browser session, and sessions expire; past this age the list suggests signing in again. */
+export const STALE_SIGN_IN_DAYS = 14;
+
+/** "saved today", "saved 3 days ago", and a hint once it is old. */
+export function describeSavedAge(savedAt: string, now = Date.now()): string {
+  const then = Date.parse(savedAt);
+  if (Number.isNaN(then)) return "saved at an unknown time";
+  const days = Math.max(0, Math.floor((now - then) / 86_400_000));
+  const age = days === 0 ? "saved today" : days === 1 ? "saved yesterday" : `saved ${days} days ago`;
+  return days >= STALE_SIGN_IN_DAYS ? `${age}, may have expired` : age;
+}
+
 /** Sign-ins, notes and regression scripts for the testing workflow: the `excel-partner login/knowledge/scripts` commands as buttons. */
 export function setupTestingPanel(client: () => BridgeClient): { refresh(): Promise<void> } {
   const get = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -93,7 +105,7 @@ export function setupTestingPanel(client: () => BridgeClient): { refresh(): Prom
     signIns.replaceChildren();
     if (!data.signIns.length) signIns.textContent = "No saved sign-ins yet.";
     for (const item of data.signIns) {
-      const { row: element, actions } = row(item.name, `saved ${item.savedAt.slice(0, 16).replace("T", " ")}`, `Sites: ${item.origins.join(", ")}`);
+      const { row: element, actions } = row(item.name, describeSavedAge(item.savedAt), `Sites: ${item.origins.join(", ")}`);
       actions.append(
         button("Sign in again", () => begin(item.name, item.url)),
         deleteButton("Delete", () => client().testingDelete({ kind: "signin", name: item.name })),
