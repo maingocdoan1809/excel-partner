@@ -6,6 +6,7 @@ import {
   type ProviderEvent,
   type ProviderId,
   type ToolCapabilities,
+  type BrowserFrameMessage,
   type ProviderStatusMessage,
   type SelectionSnapshot,
   type ServerMessage,
@@ -18,7 +19,7 @@ import {
   type UserInputResponse,
 } from "../../protocol/src/index.js";
 import { executeTool } from "./executor/index.js";
-import { authorizeSkillScript, executeWithPermission, type PermissionMode } from "./permissions.js";
+import { authorizeSkillScript, describeSiteKnowledgeApproval, describeTestBrowserApproval, executeWithPermission, type PermissionMode, type SiteKnowledgeApproval, type TestBrowserApproval } from "./permissions.js";
 import type { ProviderLoginStatus } from "../../protocol/src/provider-login.js";
 
 export type BridgeState = "idle" | "connecting" | "open" | "closed";
@@ -31,6 +32,16 @@ export interface AvailableSkill { name: string; description: string }
 export interface InstalledSkill extends AvailableSkill { removable: boolean; enabled: boolean }
 export interface SkillTextFile { file: string; content: string; revision: string }
 export interface SavedReference { id: string; name: string; path: string; description: string; available: boolean }
+export interface TestingSignIn { name: string; origins: string[]; savedAt: string; url: string }
+export interface TestingNote { name: string; kind: string; summary: string; updated: string }
+export interface TestingScript { caseId: string; title: string; outcome: "pass" | "fail_app_defect"; tested: string }
+export interface TestingOverview {
+  signIns: TestingSignIn[];
+  notes: Array<{ site: string; notes: TestingNote[] }>;
+  scripts: Array<{ site: string; scripts: TestingScript[] }>;
+  pendingSignIn: { name: string; url: string } | null;
+  folders: { sessions: string; knowledge: string; scripts: string };
+}
 export interface ModelCatalog { models: Array<{ id: string; name: string }>; defaultModelId: string | null }
 
 export interface BridgeClientHandlers {
@@ -39,6 +50,8 @@ export interface BridgeClientHandlers {
   onHello(info: { sessionToken: string; serverTime: string; addinBuildId?: string }): void;
   onProviderStatus(message: ProviderStatusMessage): void;
   onProviderEvent(event: ProviderEvent): void;
+  /** A picture of the assistant's browser; shown to the person only. */
+  onBrowserFrame?(frame: BrowserFrameMessage): void;
   onError(message: string): void;
   /** A tool request from the bridge finished running in this workbook. */
   onToolExecuted?(tool: string, args: unknown, result: ToolResult, context: { callId: string; requestId: string }): void;
@@ -165,6 +178,19 @@ export class BridgeClient {
 
   async attachWorkspaceFile(path: string): Promise<UploadedAttachment> {
     return this.sessionFetch("/session/workspaces/attach", { method: "POST", body: JSON.stringify({ path }) });
+  }
+
+  testingOverview(): Promise<TestingOverview> { return this.sessionFetch<TestingOverview>("/session/testing"); }
+  async testingView(kind: "note" | "script", site: string, id: string): Promise<string> {
+    const query = new URLSearchParams({ view: kind, site, ...(kind === "note" ? { name: id } : { caseId: id }) });
+    const data = await this.sessionFetch<{ content: string }>(`/session/testing?${query}`);
+    return data.content;
+  }
+  async testingAction(body: Record<string, unknown>): Promise<Record<string, unknown>> {
+    return this.sessionFetch<Record<string, unknown>>("/session/testing", { method: "POST", body: JSON.stringify(body) });
+  }
+  async testingDelete(body: Record<string, unknown>): Promise<void> {
+    await this.sessionFetch("/session/testing", { method: "DELETE", body: JSON.stringify(body) });
   }
 
   async listSavedReferences(): Promise<SavedReference[]> {
@@ -306,6 +332,9 @@ export class BridgeClient {
       case "ping":
         this.send({ type: "pong", nonce: message.nonce });
         return;
+      case "browser_frame":
+        this.handlers.onBrowserFrame?.(message);
+        return;
       default:
         if (message.type === "turn_finished") this.closeQuestions(message.requestId);
         this.handlers.onProviderEvent(message);
@@ -351,6 +380,10 @@ export class BridgeClient {
       : message.tool === "__authorize_skill_script"
       ? await authorizeSkillScript(this.permissionMode, message.args as RunSkillScriptInput,
         (detail, target) => this.askPermission("Allow skill script?", detail, "Run script", message.timeoutMs, target))
+      : message.tool === "__authorize_site_knowledge"
+      ? await this.authorizeSiteKnowledge(message.args as SiteKnowledgeApproval, message.timeoutMs)
+      : message.tool === "__authorize_test_browser"
+      ? await this.authorizeTestBrowser(message.args as TestBrowserApproval, message.timeoutMs)
       : message.tool === "__authorize_reference_path"
       ? this.permissionMode === "auto"
         ? { ok: true as const, data: { approved: true } }
@@ -370,6 +403,19 @@ export class BridgeClient {
     for (const question of this.questions.values()) {
       if (!requestId || question.requestId === requestId) question.controller.abort();
     }
+  }
+
+  /** Notes about a system steer later sessions, so Ask mode shows the text; Auto mode saves without asking. */
+  private async authorizeSiteKnowledge(args: SiteKnowledgeApproval, timeoutMs: number): Promise<ToolResult> {
+    if (this.permissionMode === "auto") return { ok: true, data: { approved: true } };
+    const { title, detail, confirm, target } = describeSiteKnowledgeApproval(args);
+    return { ok: true, data: { approved: await this.askPermission(title, detail, confirm, timeoutMs, target) } };
+  }
+
+  /** Which sites the test browser may reach. Asked every time, even in Auto mode: this list is the only fence around it. */
+  private async authorizeTestBrowser(args: TestBrowserApproval, timeoutMs: number): Promise<ToolResult> {
+    const { title, detail, confirm, target } = describeTestBrowserApproval(args);
+    return { ok: true, data: { approved: await this.askPermission(title, detail, confirm, timeoutMs, target) } };
   }
 
   private askReferencePermission(args: { path: string; resolvedPath?: string }, timeoutMs: number): Promise<ToolResult> {

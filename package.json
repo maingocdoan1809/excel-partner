@@ -4,8 +4,13 @@
   "description": "Excel Partner: local Excel desktop AI add-in with Claude Code, GitHub Copilot CLI, Codex CLI and OpenCode CLI providers.",
   "type": "module",
   "license": "MIT",
-  "repository": { "type": "git", "url": "git+https://github.com/maingocdoan1809/excel-partner.git" },
-  "publishConfig": { "access": "public" },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/maingocdoan1809/excel-partner.git"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "bin": {
     "excel-partner": "bin/excel-partner.mjs",
     "agent-gateway": "gateway/bin/agent-gateway.mjs"
@@ -60,6 +65,7 @@
     "fast-xml-parser": "^5.11.2",
     "fflate": "^0.8.3",
     "marked": "^18.1.1",
+    "playwright-core": "1.64.1",
     "selfsigned": "^5.5.0",
     "ws": "^8.18.0",
     "yaml": "^2.9.1",

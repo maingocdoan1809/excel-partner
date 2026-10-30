@@ -48,3 +48,46 @@ export async function executeWithPermission(
   if (!approved) return { ok: false, error: { code: "cancelled", message: "The user declined this workbook change." } };
   return execute(tool, { ...(prepared as Record<string, unknown>), [flag]: true });
 }
+
+export interface TestBrowserApproval {
+  origins: string[];
+  visible: boolean;
+  /** Name of the saved sign-in the browser starts with. */
+  session?: string;
+}
+
+/** Wording of the approval dialog for the test browser. It is asked in Auto mode too. */
+export function describeTestBrowserApproval(args: TestBrowserApproval): { title: string; detail: string; confirm: string; target: string } {
+  const how = args.session
+    ? `already signed in with your saved session "${args.session}" (the assistant never sees the cookies or the password)`
+    : "signed out, in a window where you sign in yourself (the password is never shared with the assistant)";
+  return {
+    title: "Open a test browser?",
+    detail: `The assistant will drive a separate browser, ${how}, ${args.visible ? "in a window you can see" : "hidden (you watch it in the task pane)"}. `
+      + "It can open only the sites below; every other address, including IP addresses, is blocked.",
+    confirm: "Open browser", target: args.origins.join("\n"),
+  };
+}
+
+export interface SiteKnowledgeApproval {
+  action: "save" | "delete";
+  origin: string;
+  name: string;
+  kind?: string;
+  summary?: string;
+  content?: string;
+  replaces?: boolean;
+}
+
+/** Wording of the dialog for changing the saved notes about a system. Notes steer later sessions, so Ask mode shows them in full. */
+export function describeSiteKnowledgeApproval(args: SiteKnowledgeApproval): { title: string; detail: string; confirm: string; target: string } {
+  if (args.action === "delete") {
+    return { title: "Delete a saved note?", detail: `Delete the note "${args.name}" about ${args.origin}. Future sessions will no longer see it.`, confirm: "Delete note", target: "" };
+  }
+  return {
+    title: args.replaces ? "Replace a saved note?" : "Save a note about this system?",
+    detail: `The assistant wants to keep a ${args.kind ?? "note"} note "${args.name}" about ${args.origin} on this computer, so later sessions start with it: ${args.summary ?? ""} `
+      + "It is plain text you can read or delete in the knowledge folder (excel-partner knowledge). It must not hold passwords or tokens.",
+    confirm: args.replaces ? "Replace note" : "Save note", target: (args.content ?? "").slice(0, 8000),
+  };
+}

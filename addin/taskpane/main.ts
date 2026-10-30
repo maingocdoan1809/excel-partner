@@ -11,6 +11,8 @@ import { describeChange } from "./ui/changes.js";
 import { setupInputResizer } from "./ui/input-resizer.js";
 import { renderMarkdown } from "./ui/markdown.js";
 import { buildPreviewDocument, renderArtifactCard, type StoredArtifact } from "./ui/artifact.js";
+import { BrowserView } from "./ui/browser-view.js";
+import { setupTestingPanel } from "./ui/testing-panel.js";
 import { createSelfUpdater } from "./ui/self-update.js";
 import { setupProviderLogin } from "./ui/provider-login.js";
 import { setupToolSettings } from "./ui/tool-settings.js";
@@ -68,6 +70,8 @@ const els = {
     templates: byId<HTMLElement>("panel-templates"),
     session: byId<HTMLElement>("panel-session"),
     preview: byId<HTMLElement>("panel-preview"),
+    browser: byId<HTMLElement>("panel-browser"),
+    testing: byId<HTMLElement>("panel-testing"),
   },
   changesList: byId<HTMLElement>("changes-list"),
   historyList: byId<HTMLElement>("history-list"),
@@ -163,6 +167,19 @@ let autoQueueAllowed = true;
 let live: { element: HTMLElement; message: StoredMessage } | null = null;
 const liveTools = new Map<string, { card: HTMLElement; tool: StoredTool }>();
 const workbookToolNames = new Set<string>(exposedToolNames(true, { playwright: true, webSearch: true }));
+const browserView = new BrowserView({
+  dock: byId("browser-dock"), dockLabel: byId("browser-dock-label"), dockStep: byId("browser-dock-step"), dockUrl: byId("browser-dock-url"),
+  dockImage: byId<HTMLImageElement>("browser-dock-image"), dockOpen: byId<HTMLButtonElement>("browser-dock-open"),
+  dockExpand: byId<HTMLButtonElement>("browser-dock-expand"), dockClose: byId<HTMLButtonElement>("browser-dock-close"),
+  panelLabel: byId("browser-panel-label"), panelStep: byId("browser-panel-step"), panelUrl: byId("browser-panel-url"),
+  panelImage: byId<HTMLImageElement>("browser-panel-image"), panelPrev: byId<HTMLButtonElement>("browser-prev"), panelNext: byId<HTMLButtonElement>("browser-next"),
+}, () => showPanel("browser"), (count) => {
+  // Closing the small view must not lose the pictures: the menu keeps a way back while there are any.
+  byId("menu-browser").hidden = count === 0;
+  byId("browser-count").textContent = String(count);
+});
+// Back to the chat with the small view above the message box, as it first appeared; its expand button opens the large one.
+byId("menu-browser").addEventListener("click", () => { showPanel(null); browserView.showDock(); });
 const previewFrame = byId<HTMLIFrameElement>("preview-frame");
 const previewSource = byId<HTMLElement>("preview-source");
 const previewToggle = byId<HTMLButtonElement>("preview-toggle");
@@ -223,6 +240,7 @@ const slash = createSlashMenu({
 });
 const savedReferences = setupSavedReferences(() => client);
 const userSkills = setupUserSkills(() => client, () => slash.reload());
+const testingPanel = setupTestingPanel(() => client);
 const toolSettings = setupToolSettings(() => provider);
 const settings = setupSettings({
   loadInstructions: () => client.systemPrompt(),
@@ -281,6 +299,7 @@ Office.onReady((info) => {
       }
     },
     onProviderEvent: handleEvent,
+    onBrowserFrame: (frame) => { if (frame.requestId === currentRequestId) browserView.push(frame); },
     onError: (message) => append({ kind: "error", text: message }),
     onToolExecuted: (tool, args, result, context) => {
       if (tool === "create_artifact") {
@@ -367,6 +386,7 @@ Office.onReady((info) => {
   els.menuReferences.addEventListener("click", () => showPanel("references"));
   els.menuTemplates.addEventListener("click", () => showPanel("templates"));
   byId("menu-skills").addEventListener("click", () => showPanel("skills"));
+  byId("menu-testing").addEventListener("click", () => showPanel("testing"));
   byId("tools-button").addEventListener("click", () => {
     showPanel("settings");
     byId("settings-tools-section").scrollIntoView({ block: "nearest" });
@@ -754,6 +774,7 @@ async function submit(queued?: PendingPrompt): Promise<void> {
   liveToolGroup = null;
   currentRequestId = requestId;
   requestSession = session;
+  browserView.reset();
   setBusy(true);
   if (!queued) els.input.value = "";
   renderComposerPreview();
@@ -1454,6 +1475,7 @@ function startNewChat(): void {
   clearAttachment();
   persistNow();
   session = newSession(provider);
+  browserView.reset();
   activeModel = undefined;
   needsContext = false;
   live = null;
@@ -1482,6 +1504,7 @@ function loadSession(stored: StoredSession): void {
     void refreshModelCatalog(provider);
   }
   session = stored;
+  browserView.reset();
   activeModel = undefined;
   needsContext = true;
   live = null;
@@ -1644,10 +1667,13 @@ function showPanel(name: PanelName | null): void {
   closeMenu();
   for (const key of Object.keys(els.panels) as PanelName[]) els.panels[key].hidden = key !== name;
   document.body.classList.toggle("settings-active", name === "settings");
+  // The small view repeats the large one and takes its height, so it steps aside while the large one is open.
+  document.body.classList.toggle("browser-active", name === "browser");
   if (name === "settings") { persistNow(); void settings.open(); }
   if (name !== "preview") { previewFrame.srcdoc = ""; previewing = null; }
   if (name === "references") void savedReferences.refresh();
   if (name === "skills") void userSkills.refresh();
+  if (name === "testing") void testingPanel.refresh();
   document.body.classList.toggle("login-active", name === "login");
   if (name === "login") {
     byId("login-heading").textContent = `Sign in to ${PROVIDER_NAMES[provider]}`;

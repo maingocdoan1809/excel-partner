@@ -43,7 +43,7 @@ describe("optional external tools", () => {
     request.mockResolvedValue({ ok: true, data: { approved: true } });
     expect(await call("playwright_browser", args)).toEqual({ ok: true, data: { tools: [] } });
     expect(request).toHaveBeenLastCalledWith("__authorize_browser", args, 45_000);
-    expect(browser).toHaveBeenCalledWith(session.id, args.tool, args.arguments, undefined);
+    expect(browser).toHaveBeenCalledWith(session.id, args.tool, args.arguments, undefined, expect.any(Function), undefined);
   });
 
   it("does not start the browser if Stop arrives during approval", async () => {

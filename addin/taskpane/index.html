@@ -28,6 +28,7 @@
         <button id="menu-settings" type="button" class="menu-item" role="menuitem">Settings</button>
         <div class="menu-sep"></div>
         <button id="menu-changes" type="button" class="menu-item" role="menuitem">Changes <span id="changes-count" class="badge" hidden>0</span></button>
+        <button id="menu-browser" type="button" class="menu-item" role="menuitem" hidden>Assistant's browser <span id="browser-count" class="badge">0</span></button>
         <button id="menu-history" type="button" class="menu-item" role="menuitem">History</button>
         <button id="menu-new" type="button" class="menu-item" role="menuitem">New chat</button>
       </div>
@@ -87,9 +88,43 @@
           <section class="settings-section settings-links" aria-label="Workspace settings">
             <button type="button" data-settings-panel="changes">Workbook changes <span>›</span></button>
             <button id="menu-references" type="button">Reference files <span>›</span></button>
+            <button id="menu-testing" type="button">Testing: sign-ins, notes, scripts <span>›</span></button>
             <button id="menu-skills" type="button">Manage skills <span>›</span></button>
             <button id="menu-templates" type="button">Skill templates <span>›</span></button>
           </section>
+        </div>
+      </section>
+
+      <section id="panel-testing" class="panel" hidden aria-label="Testing">
+        <header class="panel-head"><button type="button" class="back" data-close="testing" aria-label="Back to chat">←</button><h2>Testing</h2></header>
+        <p id="testing-status" class="template-help" role="status" aria-live="polite"></p>
+        <div class="panel-body">
+          <h3 class="testing-heading">Sign-ins</h3>
+          <p class="template-help">A sign-in is a saved browser session, so the assistant can open your system already logged in. Your password is typed on the site itself and is never stored. It expires like any login: sign in again when it does.</p>
+          <div id="testing-signins"></div>
+          <form id="testing-signin-form" class="testing-form">
+            <input id="testing-signin-name" type="text" maxlength="32" placeholder="Name, e.g. admin" aria-label="Name for this sign-in" autocomplete="off" />
+            <input id="testing-signin-url" type="url" placeholder="https://staging.example.com" aria-label="System address" autocomplete="off" />
+            <button id="testing-signin-start" type="submit">Open browser to sign in</button>
+          </form>
+          <div id="testing-signin-wait" class="reference-row" hidden>
+            <p id="testing-signin-wait-text"></p>
+            <div class="reference-actions">
+              <button id="testing-signin-cancel" type="button" class="secondary">Cancel</button>
+              <button id="testing-signin-done" type="button">I'm signed in</button>
+            </div>
+          </div>
+          <h3 class="testing-heading">What the assistant learned</h3>
+          <p class="template-help">Short notes per system (how to log in, where screens are). Delete any that are wrong.</p>
+          <div id="testing-notes"></div>
+          <h3 class="testing-heading">Regression scripts</h3>
+          <p class="template-help">One Playwright script per test case that passed or failed because of the application.</p>
+          <div id="testing-scripts"></div>
+          <div class="reference-actions testing-folders">
+            <button type="button" class="secondary" data-testing-folder="sessions">Open sign-ins folder</button>
+            <button type="button" class="secondary" data-testing-folder="knowledge">Open notes folder</button>
+            <button type="button" class="secondary" data-testing-folder="scripts">Open scripts folder</button>
+          </div>
         </div>
       </section>
 
@@ -132,6 +167,20 @@
         </header>
         <iframe id="preview-frame" class="preview-frame" title="File preview" sandbox="allow-scripts" referrerpolicy="no-referrer"></iframe>
         <pre id="preview-source" class="preview-source" hidden></pre>
+      </section>
+
+      <section id="panel-browser" class="panel browser-panel" hidden aria-label="The assistant's browser">
+        <header class="panel-head">
+          <button type="button" class="back" data-close="browser" aria-label="Back to chat">←</button>
+          <h2>Assistant's browser</h2>
+          <button id="browser-prev" type="button" class="ghost" aria-label="Previous step" title="Previous step">‹</button>
+          <span id="browser-panel-step" class="browser-dock-step"></span>
+          <button id="browser-next" type="button" class="ghost" aria-label="Next step" title="Next step">›</button>
+        </header>
+        <p id="browser-panel-label" class="browser-panel-label" role="status" aria-live="polite"></p>
+        <p id="browser-panel-url" class="browser-dock-url"></p>
+        <div class="browser-panel-view"><img id="browser-panel-image" alt="" title="Click for actual size" /></div>
+        <p class="template-help">Click the picture for actual size, click again to fit. Pictures stay in memory while this chat is open. They are not saved in history and are not sent to the AI.</p>
       </section>
 
       <section id="panel-changes" class="panel" hidden aria-label="Changes">
@@ -207,6 +256,17 @@
     </main>
 
     <footer class="composer">
+      <section id="browser-dock" class="browser-dock" hidden aria-label="The assistant's browser">
+        <header class="browser-dock-head">
+          <span class="browser-dock-dot" aria-hidden="true"></span>
+          <span id="browser-dock-label" class="browser-dock-label" role="status" aria-live="polite">Browser</span>
+          <span id="browser-dock-step" class="browser-dock-step"></span>
+          <button id="browser-dock-expand" type="button" class="ghost" title="Open the larger view" aria-label="Open the larger browser view">⤢</button>
+          <button id="browser-dock-close" type="button" class="ghost" title="Hide" aria-label="Hide the browser view">×</button>
+        </header>
+        <button id="browser-dock-open" type="button" class="browser-dock-shot" aria-label="Open the larger browser view"><img id="browser-dock-image" alt="" /></button>
+        <p id="browser-dock-url" class="browser-dock-url"></p>
+      </section>
       <div id="question-dock" hidden aria-label="Assistant question"></div>
       <div id="composer-resizer" class="resizer" role="separator" aria-orientation="horizontal" tabindex="0" title="Drag to resize the input">
         <span></span>
