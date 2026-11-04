@@ -30,6 +30,7 @@ import type {
   PageLayoutInput,
   ReadRangeImageInput,
   ReadRangeInput,
+  RecordTestResultsInput,
   ResizeRangeInput,
   SearchDataInput,
   SetCellsInput,
@@ -55,6 +56,7 @@ import { addConnector, addLine, addShape, deleteShapes, listShapes, updateShape 
 import { insertSheetsFromFile, manageSheet } from "./sheets.js";
 import { insertRows, modifyStructure } from "./structure.js";
 import { clearRange, setFormula, writeRange } from "./write.js";
+import { recordTestResults } from "./test-results.js";
 
 /** Tools that change the workbook; the task pane lists their results as changes. */
 export const WRITE_TOOLS: ReadonlySet<string> = new Set([
@@ -86,6 +88,7 @@ export const WRITE_TOOLS: ReadonlySet<string> = new Set([
   "modify_pivot_table",
   "modify_table",
   "execute_office_js",
+  "record_test_results",
 ]);
 
 /**
@@ -109,6 +112,8 @@ class UnknownTool extends Error {}
 
 function run(tool: string, args: unknown): Promise<unknown> {
   switch (tool) {
+    case "record_test_results":
+      return recordTestResults(args as RecordTestResultsInput);
     case "get_selection":
       return getSelection();
     case "get_sheets":

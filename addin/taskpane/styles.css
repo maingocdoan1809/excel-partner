@@ -688,3 +688,10 @@ button.ghost { background: none; color: var(--muted); border: 0; }
 .bubble table { border-collapse: collapse; font-size: inherit; min-width: 100%; }
 .bubble th, .bubble td { border: 1px solid var(--border); padding: 6px 9px; text-align: left; vertical-align: top; }
 .bubble th { background: var(--blue-50); font-weight: 600; }
+
+/* Testing panel: sign-ins, notes and scripts */
+.testing-heading { margin: 14px 0 2px; font-size: 14px; }
+.testing-form { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
+.testing-row-title { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; }
+.testing-row pre { margin: 6px 0 0; padding: 8px; max-height: 240px; overflow: auto; border: 1px solid var(--border); border-radius: 8px; font-size: 11px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.testing-folders { flex-wrap: wrap; justify-content: flex-start; margin-bottom: 12px; }

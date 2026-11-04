@@ -137,6 +137,25 @@ export const ToolRequestMessageSchema = z.object({
 });
 export type ToolRequestMessage = z.infer<typeof ToolRequestMessageSchema>;
 
+/**
+ * One picture of the assistant's browser, sent after an action that changed the page. It goes to the task pane only;
+ * it is never added to the conversation, saved in history, or given to the model.
+ */
+export const BROWSER_FRAME_MAX_BASE64 = 2_500_000;
+export const BrowserFrameMessageSchema = z.object({
+  type: z.literal("browser_frame"),
+  requestId: z.string(),
+  seq: z.number().int().nonnegative(),
+  /** What the assistant just did, in words ("Clicking \"Confirm\""). Never contains typed text. */
+  label: z.string().max(200),
+  /** Address without query string or fragment. */
+  url: z.string().max(500).optional(),
+  title: z.string().max(200).optional(),
+  mimeType: z.enum(["image/jpeg", "image/png"]),
+  data: z.string().min(1).max(BROWSER_FRAME_MAX_BASE64),
+});
+export type BrowserFrameMessage = z.infer<typeof BrowserFrameMessageSchema>;
+
 export const PingMessageSchema = z.object({
   type: z.literal("ping"),
   nonce: z.string(),
@@ -148,6 +167,7 @@ export const ServerMessageSchema = z.union([
   HelloErrorMessageSchema,
   ProviderStatusMessageSchema,
   ToolRequestMessageSchema,
+  BrowserFrameMessageSchema,
   PingMessageSchema,
   ...ProviderEventSchema.options,
 ]);

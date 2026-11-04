@@ -16,6 +16,29 @@ describe("file mentions", () => {
     expect(activeFileMention("email@example.com", names)).toBeNull();
   });
 
+  it("opens the menu for an @ anywhere in the prompt, not only at the start", () => {
+    expect(activeFileMention("Please compare @", [])).toEqual({ start: 15, query: "" });
+    expect(activeFileMention("Please compare @sal", [])).toEqual({ start: 15, query: "sal" });
+    expect(activeFileMention("line one\nline two @", [])).toEqual({ start: 18, query: "" });
+    expect(activeFileMention("Xem file (@", [])).toEqual({ start: 10, query: "" });
+    expect(activeFileMention("Xem file:@rep", [])).toEqual({ start: 9, query: "rep" });
+    expect(activeFileMention("Gửi cho a.b@c.com rồi @", [])).toEqual({ start: 22, query: "" });
+    expect(activeFileMention("Gửi cho a.b@c.com", [])).toBeNull();
+  });
+
+  it("keeps the menu open when a second @ is typed", () => {
+    expect(activeFileMention("@@", [])).toEqual({ start: 0, query: "" });
+    expect(activeFileMention("Check @@", [])).toEqual({ start: 6, query: "" });
+    expect(activeFileMention("Check @@sal", [])).toEqual({ start: 6, query: "sal" });
+    expect(activeFileMention("@abc@", [])).toEqual({ start: 0, query: "abc@" });
+    expect(activeFileMention("@first.md @", ["first.md"])).toEqual({ start: 10, query: "" });
+  });
+
+  it("recognises a selected file badge after punctuation", () => {
+    expect(fileMentionRanges("Compare (@first.md) now", ["first.md"])).toEqual([{ start: 9, end: 18, name: "first.md" }]);
+    expect(fileMentionRanges("mail a@first.md", ["first.md"])).toEqual([]);
+  });
+
   it("marks only selected file references as badges", () => {
     expect(fileMentionRanges("Compare @first file.md with @second.zip", ["first file.md", "second.zip"]))
       .toEqual([{ start: 8, end: 22, name: "first file.md" }, { start: 28, end: 39, name: "second.zip" }]);

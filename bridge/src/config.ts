@@ -86,6 +86,8 @@ export interface BridgeConfig {
   /** Expose execute_office_js (arbitrary Office.js). On by default; can be disabled explicitly. */
   allowOfficeJs: boolean;
   logLevel: "debug" | "info" | "warn" | "error";
+  /** Local settings file (config.json), re-read on every use. */
+  configFile: string;
   /** Command used to launch the Excel MCP stdio server. */
   mcp: {
     command: string;
@@ -131,6 +133,7 @@ export function loadConfig(overrides: Partial<BridgeConfig> = {}): BridgeConfig 
     referenceDirs: [...(local.referenceDirs ?? []), ...splitPaths(process.env.BRIDGE_REFERENCE_DIRS)],
     allowOfficeJs: envBool("BRIDGE_ALLOW_OFFICE_JS", local.allowOfficeJs ?? true),
     logLevel: (process.env.BRIDGE_LOG_LEVEL as BridgeConfig["logLevel"]) ?? "info",
+    configFile: process.env.BRIDGE_CONFIG ?? path.join(PROJECT_ROOT, "excel-partner.config.json"),
     mcp: {
       command: process.env.BRIDGE_MCP_COMMAND ?? process.execPath,
       args: [

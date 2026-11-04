@@ -1,4 +1,8 @@
 import { cleanSessionTitle } from "../../protocol/src/session-title.js";
+import { TestSessions } from "./test-sessions.js";
+import { SiteKnowledge } from "./site-knowledge.js";
+import { TestScripts } from "./test-scripts.js";
+import { TestingAdmin, TestingAdminError, type FolderKind } from "./testing-admin.js";
 import { parseNativeCommand, type NativeCommand, type ProviderCommand } from "../../protocol/src/commands.js";
 import { normalizeCommands } from "../../providers/src/commands.js";
 import { supportsNativeWebSearch, type ToolCapabilities } from "../../protocol/src/index.js";
@@ -87,6 +91,7 @@ export class Bridge {
   private readonly logins = new ProviderLoginManager();
   private readonly userSkills: UserSkills;
   private readonly systemPrompt: SystemPromptStore;
+  private readonly testingAdmin: TestingAdmin;
 
   constructor(config: BridgeConfig, options: BridgeOptions = {}) {
     this.config = config;
@@ -110,6 +115,11 @@ export class Bridge {
     this.workspaceConfigPath = options.workspaceConfigPath === undefined
       ? options.references ? null : (process.env.BRIDGE_CONFIG ?? path.join(PROJECT_ROOT, "excel-partner.config.json"))
       : options.workspaceConfigPath;
+    const dataDir = path.dirname(config.configFile);
+    const testSessions = new TestSessions(path.join(dataDir, "sessions"));
+    const siteKnowledge = new SiteKnowledge(path.join(dataDir, "knowledge"));
+    const testScripts = new TestScripts(path.join(dataDir, "scripts"));
+    this.testingAdmin = new TestingAdmin(testSessions, siteKnowledge, testScripts);
     this.gateway = new ToolGateway(
       this.sessions,
       config.limits,
@@ -120,6 +130,9 @@ export class Bridge {
       this.references,
       this.userSkills,
       this.enrichSelection,
+      testSessions,
+      siteKnowledge,
+      testScripts,
     );
 
     const runtime = {
@@ -307,6 +320,7 @@ export class Bridge {
     if (url.pathname === "/session/workspaces/entries" && req.method === "GET") return this.listWorkspaceEntries(req, res, url);
     if (url.pathname === "/session/workspaces/attach" && req.method === "POST") return this.attachWorkspaceFile(req, res);
 
+    if (url.pathname === "/session/testing") return this.handleTesting(req, res, url);
     if (url.pathname === "/session/provider-login") return this.handleProviderLogin(req, res);
 
     if (req.method === "GET" && url.pathname.startsWith("/addin/")) {
@@ -383,6 +397,47 @@ export class Bridge {
       return this.sendJson(res, 200, { reference });
     } catch (error) {
       if (error instanceof ReferenceError_ || error instanceof SyntaxError) return this.sendJson(res, 400, { error: error.message });
+      throw error;
+    }
+  }
+
+  /** Sign-ins, notes and regression scripts for the testing workflow: what the `excel-partner login/knowledge/scripts` commands do, for buttons. */
+  private async handleTesting(req: http.IncomingMessage, res: http.ServerResponse, url: URL): Promise<void> {
+    if (!this.workspaceSession(req)) return this.sendJson(res, 401, { error: "unauthorized" });
+    res.setHeader("cache-control", "no-store");
+    const admin = this.testingAdmin;
+    try {
+      if (req.method === "GET") {
+        const kind = url.searchParams.get("view");
+        if (kind === "note") return this.sendJson(res, 200, admin.viewNote(url.searchParams.get("site") ?? "", url.searchParams.get("name") ?? ""));
+        if (kind === "script") return this.sendJson(res, 200, { content: admin.viewScript(url.searchParams.get("site") ?? "", url.searchParams.get("caseId") ?? "") });
+        return this.sendJson(res, 200, admin.overview());
+      }
+      if (req.method !== "POST" && req.method !== "DELETE") return this.sendJson(res, 405, { error: "method_not_allowed" });
+      const body = JSON.parse(await readBody(req)) as Record<string, unknown>;
+      const text = (key: string) => typeof body[key] === "string" ? body[key] as string : "";
+      if (req.method === "DELETE") {
+        const kind = text("kind");
+        if (kind === "signin") return this.sendJson(res, 200, { removed: admin.deleteSignIn(text("name")) });
+        if (kind === "note") return this.sendJson(res, 200, { removed: admin.deleteNote(text("site"), text("name")) });
+        if (kind === "script") return this.sendJson(res, 200, { removed: admin.deleteScript(text("site"), text("caseId")) });
+        throw new TestingAdminError("Say what to delete: signin, note or script.");
+      }
+      const action = text("action");
+      if (action === "sign-in-start") {
+        const extra = Array.isArray(body.extraOrigins) ? body.extraOrigins.filter((item): item is string => typeof item === "string").slice(0, 5) : [];
+        return this.sendJson(res, 200, await admin.startSignIn({ name: text("name"), url: text("url"), extraOrigins: extra }));
+      }
+      if (action === "sign-in-finish") return this.sendJson(res, 200, await admin.finishSignIn());
+      if (action === "sign-in-cancel") return this.sendJson(res, 200, { cancelled: admin.cancelSignIn() });
+      if (action === "open-folder") {
+        const kind = text("kind");
+        if (kind !== "sessions" && kind !== "knowledge" && kind !== "scripts") throw new TestingAdminError("Choose sessions, knowledge or scripts.");
+        return this.sendJson(res, 200, { folder: admin.folder(kind as FolderKind) });
+      }
+      throw new TestingAdminError("Unknown action.");
+    } catch (error) {
+      if (error instanceof TestingAdminError || error instanceof SyntaxError) return this.sendJson(res, 400, { error: error.message });
       throw error;
     }
   }

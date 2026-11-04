@@ -11,6 +11,8 @@ import { describeChange } from "./ui/changes.js";
 import { setupInputResizer } from "./ui/input-resizer.js";
 import { renderMarkdown } from "./ui/markdown.js";
 import { buildPreviewDocument, renderArtifactCard, type StoredArtifact } from "./ui/artifact.js";
+import { BrowserView } from "./ui/browser-view.js";
+import { setupTestingPanel } from "./ui/testing-panel.js";
 import { createSelfUpdater } from "./ui/self-update.js";
 import { setupProviderLogin } from "./ui/provider-login.js";
 import { setupToolSettings } from "./ui/tool-settings.js";
@@ -37,6 +39,7 @@ import { createSlashMenu } from "./ui/slash-menu.js";
 import { leadingCommand, slashBadgeRange } from "./ui/slash.js";
 import { parseNativeCommand, type ProviderCommand } from "../../protocol/src/commands.js";
 import { activeFileMention, atomicBadgeDeletion, fileMentionRanges } from "./ui/file-mentions.js";
+import { filesFromClipboard, filesFromDrop, isFileDrag } from "./ui/transfer-files.js";
 
 const els = {
   usageStats: byId<HTMLElement>("usage-stats"),
@@ -68,6 +71,8 @@ const els = {
     templates: byId<HTMLElement>("panel-templates"),
     session: byId<HTMLElement>("panel-session"),
     preview: byId<HTMLElement>("panel-preview"),
+    browser: byId<HTMLElement>("panel-browser"),
+    testing: byId<HTMLElement>("panel-testing"),
   },
   changesList: byId<HTMLElement>("changes-list"),
   historyList: byId<HTMLElement>("history-list"),
@@ -163,6 +168,19 @@ let autoQueueAllowed = true;
 let live: { element: HTMLElement; message: StoredMessage } | null = null;
 const liveTools = new Map<string, { card: HTMLElement; tool: StoredTool }>();
 const workbookToolNames = new Set<string>(exposedToolNames(true, { playwright: true, webSearch: true }));
+const browserView = new BrowserView({
+  dock: byId("browser-dock"), dockLabel: byId("browser-dock-label"), dockStep: byId("browser-dock-step"), dockUrl: byId("browser-dock-url"),
+  dockImage: byId<HTMLImageElement>("browser-dock-image"), dockOpen: byId<HTMLButtonElement>("browser-dock-open"),
+  dockExpand: byId<HTMLButtonElement>("browser-dock-expand"), dockClose: byId<HTMLButtonElement>("browser-dock-close"),
+  panelLabel: byId("browser-panel-label"), panelStep: byId("browser-panel-step"), panelUrl: byId("browser-panel-url"),
+  panelImage: byId<HTMLImageElement>("browser-panel-image"), panelPrev: byId<HTMLButtonElement>("browser-prev"), panelNext: byId<HTMLButtonElement>("browser-next"),
+}, () => showPanel("browser"), (count) => {
+  // Closing the small view must not lose the pictures: the menu keeps a way back while there are any.
+  byId("menu-browser").hidden = count === 0;
+  byId("browser-count").textContent = String(count);
+});
+// Back to the chat with the small view above the message box, as it first appeared; its expand button opens the large one.
+byId("menu-browser").addEventListener("click", () => { showPanel(null); browserView.showDock(); });
 const previewFrame = byId<HTMLIFrameElement>("preview-frame");
 const previewSource = byId<HTMLElement>("preview-source");
 const previewToggle = byId<HTMLButtonElement>("preview-toggle");
@@ -223,6 +241,7 @@ const slash = createSlashMenu({
 });
 const savedReferences = setupSavedReferences(() => client);
 const userSkills = setupUserSkills(() => client, () => slash.reload());
+const testingPanel = setupTestingPanel(() => client);
 const toolSettings = setupToolSettings(() => provider);
 const settings = setupSettings({
   loadInstructions: () => client.systemPrompt(),
@@ -281,6 +300,7 @@ Office.onReady((info) => {
       }
     },
     onProviderEvent: handleEvent,
+    onBrowserFrame: (frame) => { if (frame.requestId === currentRequestId) browserView.push(frame); },
     onError: (message) => append({ kind: "error", text: message }),
     onToolExecuted: (tool, args, result, context) => {
       if (tool === "create_artifact") {
@@ -367,6 +387,7 @@ Office.onReady((info) => {
   els.menuReferences.addEventListener("click", () => showPanel("references"));
   els.menuTemplates.addEventListener("click", () => showPanel("templates"));
   byId("menu-skills").addEventListener("click", () => showPanel("skills"));
+  byId("menu-testing").addEventListener("click", () => showPanel("testing"));
   byId("tools-button").addEventListener("click", () => {
     showPanel("settings");
     byId("settings-tools-section").scrollIntoView({ block: "nearest" });
@@ -396,6 +417,8 @@ Office.onReady((info) => {
   els.mentionMenu.addEventListener("mousedown", (event) => {
     if (!(event.target instanceof HTMLInputElement)) event.preventDefault();
   });
+  // Keep the caret in the message box: if the button takes focus, the box's blur handler closes the @ menu.
+  els.attachButton.addEventListener("mousedown", (event) => event.preventDefault());
   els.attachButton.addEventListener("click", () => {
     if (els.mentionMenu.hidden) {
       const cursor = els.input.selectionStart;
@@ -466,9 +489,18 @@ Office.onReady((info) => {
     updateMentionMenu();
   });
   els.input.addEventListener("scroll", () => { els.promptDisplay.scrollTop = els.input.scrollTop; });
+  els.input.addEventListener("paste", (event) => {
+    const files = filesFromClipboard(event.clipboardData);
+    if (!files.length) return;
+    event.preventDefault();
+    void chooseLocalFiles(files);
+  });
+  setupFileDrop();
   els.input.addEventListener("blur", () => window.setTimeout(() => {
     slash.close();
-    if (!els.mentionMenu.contains(document.activeElement)) els.mentionMenu.hidden = true;
+    // The box may already have its focus back (for example after the + button), so only close when focus left both.
+    const focused = document.activeElement;
+    if (focused !== els.input && !els.mentionMenu.contains(focused)) els.mentionMenu.hidden = true;
   }, 120));
   window.addEventListener("pagehide", persistNow);
 
@@ -754,6 +786,7 @@ async function submit(queued?: PendingPrompt): Promise<void> {
   liveToolGroup = null;
   currentRequestId = requestId;
   requestSession = session;
+  browserView.reset();
   setBusy(true);
   if (!queued) els.input.value = "";
   renderComposerPreview();
@@ -1084,6 +1117,43 @@ function openLocalFilePicker(): void {
     if (files.length) void chooseLocalFiles(files);
   };
   input.click();
+}
+
+/**
+ * Drop files anywhere on the pane to attach them. The whole window listens because a file dropped outside
+ * the message box would otherwise make the browser open it and replace the pane.
+ */
+function setupFileDrop(): void {
+  const card = els.input.closest<HTMLElement>(".composer-card");
+  let depth = 0;
+  const reset = () => { depth = 0; card?.classList.remove("drop-active"); };
+  const composerVisible = () => els.input.getClientRects().length > 0;
+  document.addEventListener("dragenter", (event) => {
+    if (!isFileDrag(event.dataTransfer)) return;
+    event.preventDefault();
+    depth++;
+    if (composerVisible()) card?.classList.add("drop-active");
+  });
+  document.addEventListener("dragover", (event) => {
+    if (!isFileDrag(event.dataTransfer)) return;
+    event.preventDefault();
+    if (event.dataTransfer) event.dataTransfer.dropEffect = composerVisible() ? "copy" : "none";
+  });
+  document.addEventListener("dragleave", (event) => {
+    if (!isFileDrag(event.dataTransfer)) return;
+    depth = Math.max(0, depth - 1);
+    if (!depth) reset();
+  });
+  document.addEventListener("dragend", reset);
+  document.addEventListener("drop", (event) => {
+    if (!isFileDrag(event.dataTransfer)) return;
+    event.preventDefault();
+    reset();
+    if (!composerVisible()) return;
+    const { files, folders } = filesFromDrop(event.dataTransfer);
+    if (folders) append({ kind: "error", text: "Folders cannot be attached. Drop the files inside the folder instead." });
+    if (files.length) void chooseLocalFiles(files);
+  });
 }
 
 async function chooseLocalFiles(files: File[]): Promise<void> {
@@ -1454,6 +1524,7 @@ function startNewChat(): void {
   clearAttachment();
   persistNow();
   session = newSession(provider);
+  browserView.reset();
   activeModel = undefined;
   needsContext = false;
   live = null;
@@ -1482,6 +1553,7 @@ function loadSession(stored: StoredSession): void {
     void refreshModelCatalog(provider);
   }
   session = stored;
+  browserView.reset();
   activeModel = undefined;
   needsContext = true;
   live = null;
@@ -1644,10 +1716,13 @@ function showPanel(name: PanelName | null): void {
   closeMenu();
   for (const key of Object.keys(els.panels) as PanelName[]) els.panels[key].hidden = key !== name;
   document.body.classList.toggle("settings-active", name === "settings");
+  // The small view repeats the large one and takes its height, so it steps aside while the large one is open.
+  document.body.classList.toggle("browser-active", name === "browser");
   if (name === "settings") { persistNow(); void settings.open(); }
   if (name !== "preview") { previewFrame.srcdoc = ""; previewing = null; }
   if (name === "references") void savedReferences.refresh();
   if (name === "skills") void userSkills.refresh();
+  if (name === "testing") void testingPanel.refresh();
   document.body.classList.toggle("login-active", name === "login");
   if (name === "login") {
     byId("login-heading").textContent = `Sign in to ${PROVIDER_NAMES[provider]}`;

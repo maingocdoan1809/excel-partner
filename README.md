@@ -56,6 +56,53 @@ excel-partner status
 
 Type `/` in the chat to browse commands and skills of the selected provider.
 
+## Testing from your own test-case file
+
+Open any test-case workbook (your company's format, any folder) and let the assistant test it. Nothing is set up per project.
+
+**One-time, per system you test.** In Excel: Settings → *Testing: sign-ins, notes, scripts* → enter a name and the address → *Open browser to sign in* → sign in → *I'm signed in*. The same panel lists, shows and deletes saved sign-ins, notes and scripts, and opens their folders. Or in a terminal:
+
+```powershell
+excel-partner login admin https://staging.example.com   # Chrome opens; you sign in; press Enter in the terminal
+excel-partner sessions                                   # list saved sign-ins (names, sites, date)
+excel-partner logout admin                               # delete one
+```
+
+The password is typed into the site itself. Only the browser's session (cookies) is saved, in `%LOCALAPPDATA%\Excel Partner\sessions`, and the assistant never sees it. If the sign-in page is on another host (single sign-on), the hosts visited during login are saved with it; add more with `--origin https://sso.example.com`. A saved sign-in expires like any login: run the command again.
+
+**Every time (in Excel):**
+
+1. Turn on **Playwright** in Tools beside the prompt, then type `/qa` with what you want, for example `/qa test sheet "Test Cases" on https://staging.example.com`. Type `/qa login` to be shown the exact command for your system.
+2. The assistant reads the sheet and tells you how it understood the layout (ID, steps, expected result, where results go). Correct it if it is wrong.
+3. It opens the browser with your saved sign-in (`open_test_browser`). **You are asked every time, even in Auto mode**, and the dialog shows which sign-in and which sites. The browser can reach only those sites; everything else, IP addresses included, is blocked.
+4. You watch every step in the live view above the message box. For each test case the assistant follows the steps, compares with the expected result and writes the outcome into the sheet (`record_test_results`): status, actual result, date and so on, in your own columns. Columns that do not exist yet, such as a progress column, are added after the last header with the same look.
+5. **Two things come out of every case.** The status in your sheet, and a Playwright script for that case. A script is saved only when the case passed, or failed and the assistant is sure the *application* is wrong (`save_test_script`). A case blocked by a technical problem, or one the assistant did not understand, is marked for review and gets no script.
+6. Before it may say the run is done, the assistant must call `finish_test_run`. The bridge reads each row back from the sheet and refuses (with a list of what is missing) if a result is not there, a script is missing, or a script exists for a case that should not have one. At the end you get a summary: passed, failed, needs review, blocked.
+
+**What the assistant remembers.** Everything it learns about a system (how to log in, where screens are, how to do a task, quirks, test data that is safe to keep) is saved as short Markdown notes in `%LOCALAPPDATA%\\Excel Partner\\knowledge\\<host>\\`, next to `sessions`. When the browser opens, the assistant is handed the list of notes for those sites (one line each, with the date) and opens only the ones it needs, so a new chat or a new day does not start from zero. In Ask mode you see each note before it is saved; notes that look like they contain a password, token or cookie are refused. A system keeps at most 30 notes (64,000 characters). Notes are treated as hints from earlier sessions, not as orders, and the assistant checks them against the page.
+
+```powershell
+excel-partner knowledge                      # which systems have notes (and where the folder is)
+excel-partner knowledge https://staging.example.com           # list that system's notes
+excel-partner knowledge show https://staging.example.com login # read one
+excel-partner knowledge delete https://staging.example.com login
+```
+
+You can also edit the `.md` files by hand; the list is read from each file's header (`kind`, `summary`, `updated`).
+
+**Regression scripts.** Each kept case becomes a file `%LOCALAPPDATA%\\Excel Partner\\scripts\\<host>\\<case id>.spec.js` (a Playwright Test file with a header: case, outcome, date, sheet row, the evidence). It asserts the *expected* result, so a script saved for an application defect fails until the defect is fixed. Scripts may import only `@playwright/test`, use relative paths and read only `BASE_URL` and `STORAGE_STATE`; ones with `require`, `fetch`, other sites or anything that looks like a password are refused. This is a check, not a sandbox: read a script before you run it. To run one (the add-in itself does not run them): `npm i -D @playwright/test`, then `BASE_URL=https://staging.example.com STORAGE_STATE=<saved session file> npx playwright test <file>`. `open_test_browser` also lists the scripts that already exist for the sites, so the assistant knows which cases were done before.
+
+```powershell
+excel-partner scripts                                   # which systems have scripts (and where the folder is)
+excel-partner scripts https://staging.example.com        # list that system's scripts
+excel-partner scripts show https://staging.example.com TC-001
+excel-partner scripts delete https://staging.example.com TC-001
+```
+
+Without a saved sign-in the assistant can still open a browser window and wait while you sign in by hand, but that sign-in is lost when the browser closes.
+
+Cells that already hold something are not overwritten unless you agree; cells the assistant wrote earlier in the session (for example "Đang test" before "Pass") are updated freely. Results are written as text, never as formulas. A step that is unclear, or a page that behaves differently from the sheet, is marked for review instead of being guessed. If the same browser action fails twice, the assistant stops repeating it and reports.
+
 ## Safety and permissions
 
 - **Ask / Auto** (next to the prompt): *Ask* approves each change, *Auto* approves automatically, including overwriting non-empty cells. In *Ask* mode, overwriting existing data needs your OK.
@@ -77,6 +124,8 @@ Type `/` in the chat to browse commands and skills of the selected provider.
 | `excel-partner status` | Show what is running |
 | `excel-partner doctor` | Check the installation and say what to fix |
 | `excel-partner logs` | Show recent log lines |
+| `excel-partner login <name> <url>` / `sessions` / `logout <name>` | Save, list and delete signed-in sessions for the test assistant (see Testing above) |
+| `excel-partner knowledge [<url>]` / `show` / `delete` | See and manage what the assistant has learned about each system |
 | `excel-partner update` | Install the latest release (close Excel first) |
 | `excel-partner uninstall` | Stop, unregister and remove start-up and certificate trust |
 | `excel-partner help` | Full CLI usage |

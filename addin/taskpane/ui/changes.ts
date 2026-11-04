@@ -96,6 +96,8 @@ export function describeChange(
       return { tool, ok: true, target: null, summary: `${cap(d.operation)}d table "${d.name}"` };
     case "execute_office_js":
       return { tool, ok: true, target: null, summary: `Ran Office.js${a.description ? `: ${a.description}` : ""}` };
+    case "record_test_results":
+      return { tool, ok: true, target: null, summary: `Test results written to ${d.sheet}: ${d.rowsUpdated} row(s), ${d.cellsWritten} cell(s)${Array.isArray(d.addedColumns) && d.addedColumns.length ? `, added column(s) ${d.addedColumns.join(", ")}` : ""}` };
     default:
       return { tool, ok: true, target, summary: tool };
   }
