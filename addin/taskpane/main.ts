@@ -39,6 +39,7 @@ import { createSlashMenu } from "./ui/slash-menu.js";
 import { leadingCommand, slashBadgeRange } from "./ui/slash.js";
 import { parseNativeCommand, type ProviderCommand } from "../../protocol/src/commands.js";
 import { activeFileMention, atomicBadgeDeletion, fileMentionRanges } from "./ui/file-mentions.js";
+import { filesFromClipboard, filesFromDrop, isFileDrag } from "./ui/transfer-files.js";
 
 const els = {
   usageStats: byId<HTMLElement>("usage-stats"),
@@ -416,6 +417,8 @@ Office.onReady((info) => {
   els.mentionMenu.addEventListener("mousedown", (event) => {
     if (!(event.target instanceof HTMLInputElement)) event.preventDefault();
   });
+  // Keep the caret in the message box: if the button takes focus, the box's blur handler closes the @ menu.
+  els.attachButton.addEventListener("mousedown", (event) => event.preventDefault());
   els.attachButton.addEventListener("click", () => {
     if (els.mentionMenu.hidden) {
       const cursor = els.input.selectionStart;
@@ -486,9 +489,18 @@ Office.onReady((info) => {
     updateMentionMenu();
   });
   els.input.addEventListener("scroll", () => { els.promptDisplay.scrollTop = els.input.scrollTop; });
+  els.input.addEventListener("paste", (event) => {
+    const files = filesFromClipboard(event.clipboardData);
+    if (!files.length) return;
+    event.preventDefault();
+    void chooseLocalFiles(files);
+  });
+  setupFileDrop();
   els.input.addEventListener("blur", () => window.setTimeout(() => {
     slash.close();
-    if (!els.mentionMenu.contains(document.activeElement)) els.mentionMenu.hidden = true;
+    // The box may already have its focus back (for example after the + button), so only close when focus left both.
+    const focused = document.activeElement;
+    if (focused !== els.input && !els.mentionMenu.contains(focused)) els.mentionMenu.hidden = true;
   }, 120));
   window.addEventListener("pagehide", persistNow);
 
@@ -1105,6 +1117,43 @@ function openLocalFilePicker(): void {
     if (files.length) void chooseLocalFiles(files);
   };
   input.click();
+}
+
+/**
+ * Drop files anywhere on the pane to attach them. The whole window listens because a file dropped outside
+ * the message box would otherwise make the browser open it and replace the pane.
+ */
+function setupFileDrop(): void {
+  const card = els.input.closest<HTMLElement>(".composer-card");
+  let depth = 0;
+  const reset = () => { depth = 0; card?.classList.remove("drop-active"); };
+  const composerVisible = () => els.input.getClientRects().length > 0;
+  document.addEventListener("dragenter", (event) => {
+    if (!isFileDrag(event.dataTransfer)) return;
+    event.preventDefault();
+    depth++;
+    if (composerVisible()) card?.classList.add("drop-active");
+  });
+  document.addEventListener("dragover", (event) => {
+    if (!isFileDrag(event.dataTransfer)) return;
+    event.preventDefault();
+    if (event.dataTransfer) event.dataTransfer.dropEffect = composerVisible() ? "copy" : "none";
+  });
+  document.addEventListener("dragleave", (event) => {
+    if (!isFileDrag(event.dataTransfer)) return;
+    depth = Math.max(0, depth - 1);
+    if (!depth) reset();
+  });
+  document.addEventListener("dragend", reset);
+  document.addEventListener("drop", (event) => {
+    if (!isFileDrag(event.dataTransfer)) return;
+    event.preventDefault();
+    reset();
+    if (!composerVisible()) return;
+    const { files, folders } = filesFromDrop(event.dataTransfer);
+    if (folders) append({ kind: "error", text: "Folders cannot be attached. Drop the files inside the folder instead." });
+    if (files.length) void chooseLocalFiles(files);
+  });
 }
 
 async function chooseLocalFiles(files: File[]): Promise<void> {

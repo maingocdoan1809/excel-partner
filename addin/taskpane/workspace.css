@@ -59,6 +59,7 @@ button:focus-visible, select:focus-visible, textarea:focus-visible { outline: 2p
 .composer { position: relative; flex-shrink: 0; padding: 0 14px 12px; background: var(--bg); }
 .composer-card { padding: 12px; border: 1px solid var(--composer-border); border-radius: 20px; background: var(--composer-bg); box-shadow: 0 2px 8px #00000003; }
 .composer-card:focus-within { border-color: var(--field); box-shadow: 0 2px 8px #00000006; }
+.composer-card.drop-active { border-style: dashed; border-color: var(--field); }
 .composer-card textarea, .prompt-display { font-family: inherit; font-size: var(--chat-font-size); line-height: 1.65; }
 .composer-card textarea::placeholder { color: var(--text-tertiary); }
 .composer-hint { display: none; }
