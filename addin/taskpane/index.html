@@ -76,6 +76,13 @@
             <div><h3>Chat history</h3><p id="settings-history-count" class="settings-description">Saved on this computer.</p></div>
             <button id="settings-clear-history" type="button" class="secondary">Delete all</button>
           </section>
+          <section id="settings-update-section" class="settings-section">
+            <div class="settings-row"><div><h3>Updates</h3><p id="update-version" class="settings-description">Version …</p></div>
+              <button id="update-check" type="button" class="secondary">Check for updates</button>
+            </div>
+            <p id="update-status" class="settings-description" role="status" aria-live="polite"></p>
+            <button id="update-run" type="button" hidden>Update now</button>
+          </section>
           <section id="settings-tools-section" class="settings-section"><h3>AI tools</h3>
             <div id="tools-menu" class="settings-tools" aria-label="AI tools">
               <label><input id="tool-web-search" type="checkbox" /> Web search</label>

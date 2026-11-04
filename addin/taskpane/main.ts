@@ -16,6 +16,7 @@ import { renderMarkdown } from "./ui/markdown.js";
 import { buildPreviewDocument, renderArtifactCard, type StoredArtifact } from "./ui/artifact.js";
 import { BrowserView } from "./ui/browser-view.js";
 import { setupTestingPanel } from "./ui/testing-panel.js";
+import { setupUpdatePanel } from "./ui/update-panel.js";
 import { createSelfUpdater } from "./ui/self-update.js";
 import { setupProviderLogin } from "./ui/provider-login.js";
 import { setupToolSettings } from "./ui/tool-settings.js";
@@ -250,6 +251,7 @@ const slash = createSlashMenu({
 const savedReferences = setupSavedReferences(() => client);
 const userSkills = setupUserSkills(() => client, () => slash.reload());
 const testingPanel = setupTestingPanel(() => client);
+const updatePanel = setupUpdatePanel({ getClient: () => client, reload: () => window.location.reload(), announce: (text) => append({ kind: "note", text }) });
 const toolSettings = setupToolSettings(() => provider);
 const settings = setupSettings({
   loadInstructions: () => client.systemPrompt(),
@@ -297,6 +299,7 @@ Office.onReady((info) => {
       workspaceStack = [];
       void ensureWorkspaces();
       updater.check(addinBuildId);
+      void updatePanel.afterReload();
     },
     onProviderStatus: ({ provider: id, detection }) => {
       providerStatuses.set(id, detection.status === "ready" && modelLoginRequired.has(id) ? "login_required" : detection.status);
@@ -1734,7 +1737,7 @@ function showPanel(name: PanelName | null): void {
   document.body.classList.toggle("settings-active", name === "settings");
   // The small view repeats the large one and takes its height, so it steps aside while the large one is open.
   document.body.classList.toggle("browser-active", name === "browser");
-  if (name === "settings") { persistNow(); void settings.open(); }
+  if (name === "settings") { persistNow(); void settings.open(); void updatePanel.refresh(); }
   if (name !== "preview") { previewFrame.srcdoc = ""; previewing = null; }
   if (name === "references") void savedReferences.refresh();
   if (name === "skills") void userSkills.refresh();

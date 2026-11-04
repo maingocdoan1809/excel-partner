@@ -7,7 +7,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import selfsigned from "selfsigned";
-import { updatePackage } from "./update.mjs";
+import { stopPackageProcesses, updatePackage } from "./update.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const dataDir = path.join(process.env.LOCALAPPDATA || os.homedir(), "Excel Partner");
@@ -278,7 +278,7 @@ const HELP = `Usage: excel-partner <command> [addin|gateway|all]
   scripts    Playwright regression scripts saved per test case: scripts [<url>] | show <url> <case id> | delete <url> <case id> | path.
   backups    Workbook copies saved before changes Undo cannot reverse: backups | path.
   allow-host Let the bridge answer to another hostname/IP (e.g. a WSL IP): allow-host <name> [--remove]; no name lists them.
-  update     Install the latest release and refresh both (always the whole package).
+  update     Install the latest release and refresh both (always the whole package). --from <spec|.tgz> installs that instead.
   uninstall  Stop and remove registration and startup entries.
 
 Gateway settings use: excel-partner gateway <config|alias|model-name|provider|models|warmup|autostart> ...
@@ -286,7 +286,14 @@ Examples: excel-partner setup            excel-partner setup gateway
           excel-partner start all        excel-partner info --copy`;
 
 async function main() {
-  const args = process.argv.slice(2).filter(arg => arg !== "--help");
+  let args = process.argv.slice(2).filter(arg => arg !== "--help");
+  // `update --from <npm spec or .tgz>` installs that instead of the latest release (mirrors, offline, testing).
+  const fromAt = args.indexOf("--from");
+  const updateSpec = fromAt >= 0 ? args[fromAt + 1] : undefined;
+  if (fromAt >= 0) {
+    if (!updateSpec || updateSpec.startsWith("--")) fail("Usage: excel-partner update --from <npm spec or path to a .tgz>");
+    args = args.filter((_, index) => index !== fromAt && index !== fromAt + 1);
+  }
   const command = args[0] || "help";
   if (command === "help" || process.argv.includes("--help")) { console.log(HELP); return; }
   if (command === "gateway") { gateway(args.slice(1)); return; }
@@ -357,7 +364,13 @@ async function main() {
         // The gateway ships in the same package: stop it while files are replaced, then start the new one.
         const gatewaySetUp = existsSync(path.join(gatewayDir, "token.txt"));
         if (gatewaySetUp) gateway(["stop"]);
-        try { await updatePackage({ root, dataDir, nodePath: process.execPath, stop, wasRunning: Boolean(livePid()) }); }
+        try {
+          await updatePackage({
+            root, dataDir, nodePath: process.execPath, wasRunning: Boolean(livePid()), ...(updateSpec ? { spec: updateSpec } : {}),
+            // Also stop what the bridge started (relay, helper scripts): any of them can keep npm from replacing the folder.
+            stop: async () => { await stop(); stopPackageProcesses({ root }); },
+          });
+        }
         finally {
           if (gatewaySetUp) spawnSync(process.execPath, [fileURLToPath(import.meta.url), "gateway", "start"], { stdio: "inherit" });
         }

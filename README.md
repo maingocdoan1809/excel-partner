@@ -135,11 +135,13 @@ Cells that already hold something are not overwritten unless you agree; cells th
 | `excel-partner login <name> <url>` / `sessions` / `logout <name>` | Save, list and delete signed-in sessions for the test assistant (see Testing above) |
 | `excel-partner knowledge [<url>]` / `show` / `delete` | See and manage what the assistant has learned about each system |
 | `excel-partner backups` | List the workbook copies saved before changes Undo cannot reverse (and where the folder is) |
-| `excel-partner update` | Install the latest release (close Excel first) |
+| `excel-partner update [--from <spec\|.tgz>]` | Install the latest release (or the given package); same as Settings > Updates |
 | `excel-partner uninstall` | Stop, unregister and remove start-up and certificate trust |
 | `excel-partner help` | Full CLI usage |
 
-**Update:** `excel-partner update`, then reopen Excel and start a new chat. Configuration, skills and templates are kept.
+**Update:** open **Settings > Updates** in the task pane. It shows the installed version, **Check for updates** asks the npm registry, and when a newer release exists **Update now** (click twice to confirm) installs it. Excel does not need to be closed: the add-in is served by the local bridge, so the connection drops for about a minute while the bridge and gateway restart, then the pane reloads by itself and says which version it is now on. It refuses to start while the assistant is working, and only works for the copy installed with `npm install -g` (a source checkout says so; use `scripts/update.ps1` there). If something goes wrong the old version is started again and Settings shows the error; the log is `%LOCALAPPDATA%\Excel Partner\update.log`.
+
+From a terminal: `excel-partner update` does the same (`--from <npm spec or .tgz>` installs that instead of the latest release). Reopen the pane and start a new chat afterwards. Configuration, skills and templates are kept.
 
 **Uninstall:** `excel-partner uninstall`, then `npm uninstall -g excel-partner`, then restart Excel. Local data stays on disk (see below).
 

@@ -715,3 +715,9 @@ button.ghost { background: none; color: var(--muted); border: 0; }
 .testing-row-title { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; }
 .testing-row pre { margin: 6px 0 0; padding: 8px; max-height: 240px; overflow: auto; border: 1px solid var(--border); border-radius: 8px; font-size: 11px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .testing-folders { flex-wrap: wrap; justify-content: flex-start; margin-bottom: 12px; }
+
+/* Settings > Updates */
+#update-status[data-kind="error"] { color: var(--error); }
+#update-status[data-kind="ok"] { color: var(--accent-dot); }
+#update-run { align-self: flex-start; }
+#update-run[data-confirm="true"] { background: var(--error); border-color: var(--error); color: #fff; }

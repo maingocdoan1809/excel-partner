@@ -3,6 +3,7 @@ import { TestSessions } from "./test-sessions.js";
 import { SiteKnowledge } from "./site-knowledge.js";
 import { TestScripts } from "./test-scripts.js";
 import { BackupError, MAX_BACKUP_BYTES, WorkbookBackups } from "./workbook-backups.js";
+import { UpdateError, UpdateService } from "./updater.js";
 import { TestingAdmin, TestingAdminError, type FolderKind } from "./testing-admin.js";
 import { parseNativeCommand, type NativeCommand, type ProviderCommand } from "../../protocol/src/commands.js";
 import { normalizeCommands } from "../../providers/src/commands.js";
@@ -63,6 +64,8 @@ export interface BridgeOptions {
   systemPromptFile?: string | null;
   usageFile?: string | null;
   savedReferencesFile?: string | null;
+  /** Replaces the updater (tests); null turns updating from the task pane off. */
+  updater?: UpdateService | null;
 }
 
 const MAX_BODY_BYTES = 8 * 1024 * 1024;
@@ -94,6 +97,7 @@ export class Bridge {
   private readonly systemPrompt: SystemPromptStore;
   private readonly testingAdmin: TestingAdmin;
   private readonly backups: WorkbookBackups;
+  private readonly updater: UpdateService | null;
 
   constructor(config: BridgeConfig, options: BridgeOptions = {}) {
     this.config = config;
@@ -123,6 +127,13 @@ export class Bridge {
     const testScripts = new TestScripts(path.join(dataDir, "scripts"));
     this.testingAdmin = new TestingAdmin(testSessions, siteKnowledge, testScripts);
     this.backups = new WorkbookBackups(path.join(dataDir, "backups"));
+    this.updater = options.updater === undefined
+      ? new UpdateService({
+          packageRoot: PROJECT_ROOT,
+          dataDir,
+          gatewayDir: process.env.AGENT_GATEWAY_HOME ?? path.join(process.env.LOCALAPPDATA || path.join(os.homedir(), ".config"), "Agent Gateway"),
+        })
+      : options.updater;
     this.gateway = new ToolGateway(
       this.sessions,
       config.limits,
@@ -289,6 +300,9 @@ export class Bridge {
     }
     if (req.method === "POST" && url.pathname === "/session/backup") {
       return this.handleBackup(req, res);
+    }
+    if (url.pathname === "/session/update" && (req.method === "GET" || req.method === "POST")) {
+      return this.handleUpdate(req, res, url);
     }
     if (req.method === "GET" && url.pathname === "/session/models") return this.listProviderModels(req, res, url);
     if (req.method === "GET" && url.pathname === "/session/commands") {
@@ -584,6 +598,25 @@ export class Bridge {
       return this.sendJson(res, 200, { id: attachment.id, name: attachment.name, kind: attachment.kind, path: attachmentPath(attachment.id) });
     } catch (error) {
       if (error instanceof AttachmentError) return this.sendJson(res, 400, { error: error.message });
+      throw error;
+    }
+  }
+
+  /** GET: is a newer version out, and how is an update going. POST: start one (the bridge is replaced while it runs). */
+  private async handleUpdate(req: http.IncomingMessage, res: http.ServerResponse, url: URL): Promise<void> {
+    const session = this.sessions.getByToken(bearerToken(req.headers.authorization) ?? "");
+    if (!session?.isConnected) return this.sendJson(res, 401, { error: "unauthorized" });
+    if (!this.updater) return this.sendJson(res, 404, { error: "Updating from the task pane is turned off." });
+    if (req.method === "GET") {
+      return this.sendJson(res, 200, await this.updater.check(url.searchParams.get("refresh") === "1"));
+    }
+    try {
+      const busy = this.sessions.list().some((other) => other.isBusy);
+      const status = this.updater.start({ busy });
+      this.logger.info("update started", { from: this.updater.version });
+      return this.sendJson(res, 202, { status });
+    } catch (error) {
+      if (error instanceof UpdateError) return this.sendJson(res, error.code === "unsupported" ? 400 : error.code === "failed" ? 500 : 409, { error: error.message, code: error.code });
       throw error;
     }
   }
@@ -955,7 +988,9 @@ export class Bridge {
   /** Changes whenever the task pane bundle is rebuilt (its modification time). */
   private addinBuildId(): string {
     try {
-      return String(Math.round(statSync(path.join(PROJECT_ROOT, "addin", "dist", "taskpane.js")).mtimeMs));
+      // Version and size too: packages installed from npm carry one fixed file date, so the date alone never changes.
+      const bundle = statSync(path.join(PROJECT_ROOT, "addin", "dist", "taskpane.js"));
+      return `${this.updater?.version ?? "0"}-${Math.round(bundle.mtimeMs)}-${bundle.size}`;
     } catch {
       return "none";
     }

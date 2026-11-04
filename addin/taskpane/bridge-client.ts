@@ -165,6 +165,16 @@ export class BridgeClient {
     return { id: data.id, name: data.name, kind: data.kind, path: data.path };
   }
 
+  /** Installed and latest version, and how an update is going. `refresh` asks the npm registry again. */
+  async updateInfo(refresh = false): Promise<import("./ui/update-panel.js").UpdateInfo> {
+    return this.sessionFetch(`/session/update${refresh ? "?refresh=1" : ""}`);
+  }
+
+  /** Replace this installation with the latest release; the bridge stops and comes back by itself. */
+  async startUpdate(): Promise<void> {
+    await this.sessionFetch("/session/update", { method: "POST", body: "{}" });
+  }
+
   /** Store a copy of the open workbook on this computer; used before changes that cannot be undone. */
   async saveBackup(workbookName: string, bytes: Uint8Array): Promise<{ file: string; folder: string }> {
     const data = await this.sessionFetch<{ file: string; folder: string }>("/session/backup", {
