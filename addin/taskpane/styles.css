@@ -144,6 +144,21 @@ button:disabled { cursor: default; }
 .bubble p:last-child { margin-bottom: 0; }
 .bubble a { color: var(--accent-strong); text-decoration: underline; text-underline-offset: 2px; overflow-wrap: anywhere; }
 .bubble a:hover { text-decoration-thickness: 2px; }
+/* Cell and range mentions: a badge with a diagonal arrow; the arrow is drawn, so copying the text copies only the address. */
+.bubble a.cell-link {
+  display: inline-flex; align-items: center; gap: 4px; vertical-align: baseline;
+  padding: 0 7px 0 8px; border-radius: 999px; white-space: nowrap; cursor: pointer; text-decoration: none;
+  background: var(--blue-100); color: var(--accent-strong);
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+  font: 12px/1.65 ui-monospace, "Cascadia Code", monospace;
+}
+.bubble a.cell-link::after {
+  content: ""; flex: none; width: 9px; height: 9px; background: currentColor;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12' fill='none' stroke='black' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 9L9 3M4.5 3H9v4.5'/%3E%3C/svg%3E") center / contain no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12' fill='none' stroke='black' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 9L9 3M4.5 3H9v4.5'/%3E%3C/svg%3E") center / contain no-repeat;
+}
+.bubble a.cell-link:hover { background: color-mix(in srgb, var(--accent) 18%, var(--blue-100)); border-color: var(--accent); }
+.bubble a.cell-link:hover::after { transform: translate(1px, -1px); }
 .bubble a:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; border-radius: 2px; }
 .bubble ul, .bubble ol { margin: 2px 0 4px; padding-left: 20px; }
 .bubble code { font: 12px ui-monospace, "Cascadia Code", monospace; background: var(--blue-100); padding: 0 4px; border-radius: 4px; }

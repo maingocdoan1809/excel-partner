@@ -1,11 +1,12 @@
 /// <reference lib="dom" />
 import DOMPurify from "dompurify";
 import { Marked } from "marked";
+import { linkifyCells } from "./cell-links.js";
 
 const markdown = new Marked({ gfm: true, breaks: true });
 
-/** Render GFM (including tables) and sanitize provider-supplied HTML. */
-export function renderMarkdown(source: string): string {
+/** Render GFM (including tables) and sanitize provider-supplied HTML. With `cellLinks`, cell and range mentions become links that select them in Excel. */
+export function renderMarkdown(source: string, options: { cellLinks?: boolean } = {}): string {
   const html = markdown.parse(source, { async: false });
   const safe = DOMPurify.sanitize(html, {
     ALLOWED_TAGS: ["p", "br", "strong", "em", "del", "code", "pre", "blockquote", "ul", "ol", "li",
@@ -28,5 +29,6 @@ export function renderMarkdown(source: string): string {
     table.replaceWith(wrapper);
     wrapper.append(table);
   }
+  if (options.cellLinks) linkifyCells(container);
   return container.innerHTML;
 }

@@ -277,7 +277,7 @@ Office.onReady((info) => {
       const response = await pending;
       dock.hidden = true;
       document.body.classList.remove("question-active");
-      if (session === owner) questionBubble.innerHTML = renderMarkdown(questionText);
+      if (session === owner) questionBubble.innerHTML = renderMarkdown(questionText, { cellLinks: true });
       if (session === owner && requestId === currentRequestId) {
         append({ kind: response.cancelled ? "note" : "user", text: response.cancelled ? "Question skipped or cancelled." : request.questions.map(q =>
           `${q.header || q.question}: ${q.isSecret ? "[Hidden answer]" : response.answers[q.id]!.join(", ")}`).join("\n") });
@@ -375,6 +375,13 @@ Office.onReady((info) => {
   });
   byId<HTMLSelectElement>("provider-select").addEventListener("change", event => selectProvider((event.target as HTMLSelectElement).value as ProviderId));
   els.menuChanges.addEventListener("click", () => showPanel("changes"));
+  // Cell and range mentions in the assistant's replies (see ui/cell-links.ts).
+  els.messages.addEventListener("click", (event) => {
+    const link = (event.target as HTMLElement | null)?.closest<HTMLAnchorElement>("a.cell-link");
+    if (!link?.dataset.address) return;
+    event.preventDefault();
+    void goTo({ ...(link.dataset.sheet ? { sheet: link.dataset.sheet } : {}), address: link.dataset.address });
+  });
   byId("menu-login").addEventListener("click", () => showPanel("login"));
   byId("provider-login-button").addEventListener("click", () => showPanel("login"));
   byId("login-recheck").addEventListener("click", () => {
@@ -549,7 +556,7 @@ function renderMessage(container: HTMLElement, message: StoredMessage): HTMLElem
     }
     case "assistant":
       element = bubble("assistant");
-      element.innerHTML = renderMarkdown(message.text);
+      element.innerHTML = renderMarkdown(message.text, { cellLinks: true });
       break;
     case "error":
       element = bubble("error");
@@ -1328,7 +1335,7 @@ function handleEvent(event: ProviderEvent): void {
       if (!event.text || (!live && !event.text.trim())) return;
       if (!live) live = startLive("assistant", event.text);
       else live.message.text += event.text;
-      live.element.innerHTML = renderMarkdown(live.message.text);
+      live.element.innerHTML = renderMarkdown(live.message.text, { cellLinks: true });
       scrollToEnd();
       schedulePersist();
       return;
@@ -1338,7 +1345,7 @@ function handleEvent(event: ProviderEvent): void {
       if (!event.text.trim()) { live = null; return; }
       if (!live) live = startLive("assistant", event.text);
       live.message.text = event.text;
-      live.element.innerHTML = renderMarkdown(event.text);
+      live.element.innerHTML = renderMarkdown(event.text, { cellLinks: true });
       live = null; // the next message (after a tool call) gets its own bubble
       scrollToEnd();
       schedulePersist();
@@ -1884,16 +1891,21 @@ function changeRow(entry: StoredChange): HTMLElement {
   return row;
 }
 
-async function goTo(target: { sheet: string; address: string }): Promise<void> {
+async function goTo(target: { sheet?: string; address: string }): Promise<void> {
   try {
     await Excel.run(async (context) => {
-      const sheet = context.workbook.worksheets.getItem(target.sheet);
+      const sheet = target.sheet ? context.workbook.worksheets.getItemOrNullObject(target.sheet) : context.workbook.worksheets.getActiveWorksheet();
+      if (target.sheet) {
+        await context.sync();
+        if ((sheet as Excel.Worksheet & { isNullObject?: boolean }).isNullObject) throw new Error(`There is no sheet named "${target.sheet}" in this workbook.`);
+      }
       sheet.activate();
       sheet.getRange(target.address).select();
       await context.sync();
     });
   } catch (error) {
-    append({ kind: "error", text: `Cannot go to ${target.sheet}!${target.address}: ${error instanceof Error ? error.message : String(error)}` });
+    const reason = error instanceof Error ? error.message : String(error);
+    append({ kind: "error", text: `Cannot go to ${target.sheet ? `${target.sheet}!` : ""}${target.address}: ${reason}` });
   }
 }
 
