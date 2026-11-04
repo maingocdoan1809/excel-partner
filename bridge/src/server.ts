@@ -2,6 +2,7 @@ import { cleanSessionTitle } from "../../protocol/src/session-title.js";
 import { TestSessions } from "./test-sessions.js";
 import { SiteKnowledge } from "./site-knowledge.js";
 import { TestScripts } from "./test-scripts.js";
+import { BackupError, MAX_BACKUP_BYTES, WorkbookBackups } from "./workbook-backups.js";
 import { TestingAdmin, TestingAdminError, type FolderKind } from "./testing-admin.js";
 import { parseNativeCommand, type NativeCommand, type ProviderCommand } from "../../protocol/src/commands.js";
 import { normalizeCommands } from "../../providers/src/commands.js";
@@ -92,6 +93,7 @@ export class Bridge {
   private readonly userSkills: UserSkills;
   private readonly systemPrompt: SystemPromptStore;
   private readonly testingAdmin: TestingAdmin;
+  private readonly backups: WorkbookBackups;
 
   constructor(config: BridgeConfig, options: BridgeOptions = {}) {
     this.config = config;
@@ -120,6 +122,7 @@ export class Bridge {
     const siteKnowledge = new SiteKnowledge(path.join(dataDir, "knowledge"));
     const testScripts = new TestScripts(path.join(dataDir, "scripts"));
     this.testingAdmin = new TestingAdmin(testSessions, siteKnowledge, testScripts);
+    this.backups = new WorkbookBackups(path.join(dataDir, "backups"));
     this.gateway = new ToolGateway(
       this.sessions,
       config.limits,
@@ -283,6 +286,9 @@ export class Bridge {
     }
     if (req.method === "POST" && url.pathname === "/session/attachment") {
       return this.handleAttachment(req, res);
+    }
+    if (req.method === "POST" && url.pathname === "/session/backup") {
+      return this.handleBackup(req, res);
     }
     if (req.method === "GET" && url.pathname === "/session/models") return this.listProviderModels(req, res, url);
     if (req.method === "GET" && url.pathname === "/session/commands") {
@@ -578,6 +584,23 @@ export class Bridge {
       return this.sendJson(res, 200, { id: attachment.id, name: attachment.name, kind: attachment.kind, path: attachmentPath(attachment.id) });
     } catch (error) {
       if (error instanceof AttachmentError) return this.sendJson(res, 400, { error: error.message });
+      throw error;
+    }
+  }
+
+  /** A copy of the open workbook, taken by the task pane before something the undo journal cannot reverse. */
+  private async handleBackup(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+    const session = this.sessions.getByToken(bearerToken(req.headers.authorization) ?? "");
+    if (!session?.isConnected) return this.sendJson(res, 401, { error: "unauthorized" });
+    let name: string;
+    try { name = decodeURIComponent(String(req.headers["x-file-name"] ?? "")); }
+    catch { return this.sendJson(res, 400, { error: "invalid_file_name" }); }
+    try {
+      const bytes = await readBinaryBody(req, MAX_BACKUP_BYTES);
+      session.touch();
+      return this.sendJson(res, 200, { ...this.backups.save(name, bytes), folder: this.backups.dir });
+    } catch (error) {
+      if (error instanceof BackupError || error instanceof AttachmentError) return this.sendJson(res, 400, { error: error.message });
       throw error;
     }
   }

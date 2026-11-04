@@ -5,6 +5,9 @@ import type { UsageSummary, TokenUsage, ProviderEvent, ProviderId, ProviderConne
 import { BridgeClient, type ModelCatalog, type SavedReference, type SkillTemplate, type UploadedAttachment, type WorkspaceEntry, type WorkspaceRoot } from "./bridge-client.js";
 import type { PermissionMode } from "./permissions.js";
 import { WRITE_TOOLS, executeTool } from "./executor/index.js";
+import { UndoJournal } from "./executor/journal.js";
+import { undoBar, undoControl, type UndoView } from "./ui/undo-controls.js";
+import { readWorkbookFile } from "./executor/backup.js";
 import { formatCredits, formatDuration, usageCsv } from "./ui/usage.js";
 import { setupUsagePopover } from "./ui/usage-popover.js";
 import { describeChange } from "./ui/changes.js";
@@ -137,6 +140,11 @@ function loadModels(): Partial<Record<ProviderId, string>> {
 }
 
 const store = new SessionStore(localStorage);
+const journal = new UndoJournal((tool) => WRITE_TOOLS.has(tool), async () => client.saveBackup((await currentWorkbookName()) || "workbook", await readWorkbookFile()));
+// Handle for end-to-end checks against a live workbook; it grants nothing execute_office_js does not already have.
+(globalThis as { __undoJournal?: UndoJournal }).__undoJournal = journal;
+/** Result of the last undo, shown above the change list until the next one. */
+let undoNote: { ok: boolean; text: string } | null = null;
 let client: BridgeClient;
 let provider: ProviderId = loadProvider();
 const models = loadModels();
@@ -300,6 +308,7 @@ Office.onReady((info) => {
       }
     },
     onProviderEvent: handleEvent,
+    runTool: (context, tool, args, execute) => journal.run(context, tool, args, execute),
     onBrowserFrame: (frame) => { if (frame.requestId === currentRequestId) browserView.push(frame); },
     onError: (message) => append({ kind: "error", text: message }),
     onToolExecuted: (tool, args, result, context) => {
@@ -315,7 +324,7 @@ Office.onReady((info) => {
       }
       if (context.requestId === currentRequestId && session === requestSession) appendTurnTool({ name: tool, args: summarize(args), input: formatToolValue(args),
         result: formatToolValue(result), state: result.ok ? "ok" : "error", error: result.ok ? null : result.error.message });
-      recordChange(tool, args, result);
+      recordChange(tool, args, result, context);
       if (result.ok && ["add_shape", "add_connector", "add_line", "update_shape", "delete_shapes", "execute_office_js", "manage_sheet", "insert_sheets_from_file"].includes(tool)) {
         refreshSelectionSubscriptions?.();
       }
@@ -1801,10 +1810,10 @@ async function addTemplate(file: File): Promise<void> {
   finally { els.templateAdd.disabled = false; }
 }
 
-function recordChange(tool: string, args: unknown, result: ToolResult): void {
+function recordChange(tool: string, args: unknown, result: ToolResult, context: { callId: string; requestId: string }): void {
   const change = describeChange(tool, args, result, WRITE_TOOLS);
   if (!change) return;
-  session.changes.push({ at: Date.now(), tool: change.tool, ok: change.ok, summary: change.summary, target: change.target });
+  session.changes.push({ at: Date.now(), tool: change.tool, ok: change.ok, summary: change.summary, target: change.target, callId: context.callId, requestId: context.requestId });
   renderChanges();
   schedulePersist();
 }
@@ -1823,8 +1832,33 @@ function renderChanges(): void {
     els.changesList.innerHTML = '<div class="empty">No changes yet. Edits made to the workbook in this chat will be listed here.</div>';
     return;
   }
-  els.changesList.replaceChildren(...[...session.changes].reverse().map((entry) => changeRow(entry)));
+  const bar = undoBar(session.changes, undoView());
+  els.changesList.replaceChildren(...(bar ? [bar] : []), ...[...session.changes].reverse().map((entry) => changeRow(entry)));
 }
+
+let undoBusy = false;
+
+async function runUndo(work: () => Promise<{ ok: boolean; message: string }>): Promise<void> {
+  if (undoBusy) return;
+  undoBusy = true;
+  undoNote = { ok: true, text: "Undoing…" };
+  renderChanges();
+  try {
+    const outcome = await work();
+    undoNote = { ok: outcome.ok, text: outcome.message };
+  } catch (error) {
+    undoNote = { ok: false, text: `Could not undo: ${error instanceof Error ? error.message : String(error)}` };
+  } finally {
+    undoBusy = false;
+  }
+  renderChanges();
+}
+
+const undoView = (): UndoView => ({
+  journal, busy: undoBusy, note: undoNote,
+  undoCall: (callId) => void runUndo(() => journal.undoCall(callId)),
+  undoReply: (requestId) => void runUndo(() => journal.undoRequest(requestId)),
+});
 
 function changeRow(entry: StoredChange): HTMLElement {
   const row = document.createElement("div");
@@ -1845,6 +1879,8 @@ function changeRow(entry: StoredChange): HTMLElement {
     go.addEventListener("click", () => void goTo(target));
     row.append(go);
   }
+  const undo = undoControl(entry, undoView());
+  if (undo) row.append(undo);
   return row;
 }
 

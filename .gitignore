@@ -16,3 +16,6 @@ certs/
 .playwright-cli/
 output/playwright/
 excel-partner.config.json
+
+# Workbook copies saved before changes Undo cannot reverse (when the data folder is the repo)
+/backups/

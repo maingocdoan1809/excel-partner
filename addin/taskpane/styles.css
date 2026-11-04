@@ -208,6 +208,11 @@ button:disabled { cursor: default; }
 .change .time { color: var(--muted); font-size: 11px; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .change .summary { flex: 1; min-width: 0; word-break: break-word; }
 .change button { padding: 2px 10px; font-size: 12px; }
+.change .undo-label { color: var(--muted); font-size: 11px; white-space: nowrap; }
+.undo-bar { display: flex; flex-direction: column; gap: 6px; align-items: stretch; }
+.undo-bar button { align-self: flex-start; padding: 3px 12px; font-size: 12px; }
+.undo-note { padding: 6px 10px; border-radius: 8px; border: 1px solid var(--border); background: var(--panel); font-size: 12px; word-break: break-word; }
+.undo-note[data-ok="false"] { border-color: color-mix(in srgb, var(--error) 45%, transparent); background: var(--error-soft); }
 
 /* ---- composer ------------------------------------------------------------ */
 .composer { padding: 0 14px 10px; background: linear-gradient(0deg, var(--composer-end), var(--bg)); }

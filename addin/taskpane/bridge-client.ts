@@ -53,6 +53,8 @@ export interface BridgeClientHandlers {
   /** A picture of the assistant's browser; shown to the person only. */
   onBrowserFrame?(frame: BrowserFrameMessage): void;
   onError(message: string): void;
+  /** Wraps every workbook tool run, so edits can be recorded for undo. Reads pass straight through. */
+  runTool?(context: { callId: string; requestId: string }, tool: string, args: unknown, execute: (tool: string, args: unknown) => Promise<ToolResult>): Promise<ToolResult>;
   /** A tool request from the bridge finished running in this workbook. */
   onToolExecuted?(tool: string, args: unknown, result: ToolResult, context: { callId: string; requestId: string }): void;
 }
@@ -161,6 +163,14 @@ export class BridgeClient {
     const data = await response.json() as { id?: string; name?: string; kind?: "workbook" | "image" | "file"; path?: string; error?: string };
     if (!response.ok || !data.id || !data.name || !data.kind || !data.path) throw new Error(data.error ?? "Could not attach the file");
     return { id: data.id, name: data.name, kind: data.kind, path: data.path };
+  }
+
+  /** Store a copy of the open workbook on this computer; used before changes that cannot be undone. */
+  async saveBackup(workbookName: string, bytes: Uint8Array): Promise<{ file: string; folder: string }> {
+    const data = await this.sessionFetch<{ file: string; folder: string }>("/session/backup", {
+      method: "POST", body: bytes as BodyInit, headers: { "x-file-name": encodeURIComponent(workbookName), "content-type": "application/octet-stream" },
+    });
+    return { file: data.file, folder: data.folder };
   }
 
   async listWorkspaces(documentUrl: string, workbookName: string): Promise<{ roots: WorkspaceRoot[]; defaultError: string | null }> {
@@ -392,7 +402,9 @@ export class BridgeClient {
         message.tool,
         message.args,
         this.permissionMode,
-        executeTool,
+        (tool, args) => this.handlers.runTool
+          ? this.handlers.runTool({ callId: message.callId, requestId: message.requestId }, tool, args, executeTool)
+          : executeTool(tool, args),
         (detail) => this.askPermission("Allow workbook change?", detail, "Allow change", message.timeoutMs),
       );
     this.send({ type: "tool_result", callId: message.callId, result });

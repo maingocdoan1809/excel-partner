@@ -140,7 +140,7 @@ export async function insertSheetsFromFile(input: InsertSheetsFromFileInput & { 
       const added = sheets.items.map((s) => s.name).filter((sheetName) => !known.has(sheetName));
       inserted.push(...added);
       known = new Set([...known, ...added]);
-      anchor = added.at(-1) ?? anchor;
+      anchor = added[added.length - 1] ?? anchor;
       // Let Excel repaint between sheets so the window does not freeze for the whole import.
       await new Promise((resolve) => setTimeout(resolve, 0));
     }

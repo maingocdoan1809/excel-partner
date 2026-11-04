@@ -32,6 +32,9 @@ export interface StoredChange {
   ok: boolean;
   summary: string;
   target: { sheet: string; address: string } | null;
+  /** Ties the entry to the undo journal; the journal is memory-only, so older entries cannot be undone. */
+  callId?: string;
+  requestId?: string;
 }
 
 export interface StoredSession {
