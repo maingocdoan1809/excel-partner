@@ -3,6 +3,7 @@ import {
   MAX_SKILL_UPLOAD_BYTES,
   MAX_DELEGATED_TEXT,
   WORKBOOK_NAME_REQUEST,
+  GO_TO_REQUEST,
   decodeServerMessage,
   encodeMessage,
   type ProviderEvent,
@@ -35,7 +36,7 @@ export interface SkillTemplate { name: string; kind: "workbook" | "image" | "tex
 export interface AvailableSkill { name: string; description: string }
 export interface InstalledSkill extends AvailableSkill { removable: boolean; enabled: boolean }
 export interface SkillTextFile { file: string; content: string; revision: string }
-export interface SavedReference { id: string; name: string; path: string; description: string; available: boolean }
+export interface SavedReference { id: string; name: string; path: string; description: string; kind: "file" | "folder"; available: boolean }
 export interface TestingSignIn { name: string; origins: string[]; savedAt: string; url: string }
 export interface TestingNote { name: string; kind: string; summary: string; updated: string }
 export interface TestingScript { caseId: string; title: string; outcome: "pass" | "fail_app_defect"; tested: string }
@@ -62,6 +63,8 @@ export interface BridgeClientHandlers {
   readWorkbookName?(): Promise<string | null>;
   /** The workbooks open with this add-in changed (one opened, closed or renamed). The current file is first. */
   onConnectedFiles?(files: ConnectedFile[]): void;
+  /** Another file's chat asked this workbook to show a range. Reject with the reason when it cannot. */
+  goTo?(target: { sheet?: string; address: string }): Promise<void>;
   /** Another workbook's assistant asked this one to do something. Run it as a turn, or call declineDelegation. */
   onDelegatedPrompt?(request: DelegatedPromptMessage): void;
   onError(message: string): void;
@@ -121,6 +124,7 @@ export class BridgeClient {
         clientInfo: {
           platform: Office.context?.platform ? String(Office.context.platform) : null,
           locale: Office.context?.displayLanguage ?? null,
+          ...((window as { __EXCEL_PARTNER_STANDALONE__?: boolean }).__EXCEL_PARTNER_STANDALONE__ ? { standalone: true } : {}),
         },
       });
     };
@@ -321,6 +325,15 @@ export class BridgeClient {
     await this.sessionFetch("/session/skill-templates", { method: "DELETE", body: JSON.stringify({ skill, name }) });
   }
 
+  /**
+   * Show a range in another open workbook (its window comes to the front). The bridge finds that file by name and asks its pane.
+   * Rejects with the reason: the file is not open, or it has no such sheet.
+   */
+  async goToFile(target: { file: string; sheet?: string; address: string }): Promise<void> {
+    const answer = await this.sessionFetch<{ ok: boolean; error?: string }>("/session/go-to", { method: "POST", body: JSON.stringify(target) });
+    if (!answer.ok) throw new Error(answer.error ?? "That file could not show the range.");
+  }
+
   private async sessionFetch<T>(url: string, options: RequestInit = {}): Promise<T> {
     if (!this.connected || !this.sessionToken) throw new Error("Bridge is not connected. Try again after reconnecting.");
     const response = await fetch(url, {
@@ -412,6 +425,20 @@ export class BridgeClient {
       }
       if (socket === this.ws) this.send({ type: "tool_result", callId: message.callId,
         result: { ok: true, data: controller.signal.aborted ? CANCELLED_USER_INPUT : response } });
+      return;
+    }
+    if (message.tool === GO_TO_REQUEST) {
+      // A link followed in another file's chat. It only moves the selection: no card, no change record, no permission prompt.
+      let result: ToolResult = { ok: true, data: {} };
+      try {
+        const { sheet, address } = (message.args ?? {}) as { sheet?: unknown; address?: unknown };
+        if (typeof address !== "string" || !address || (sheet !== undefined && typeof sheet !== "string")) throw new Error("A sheet name and a range are needed.");
+        await this.handlers.goTo?.({ ...(sheet ? { sheet } : {}), address });
+        if (!this.handlers.goTo) result = { ok: false, error: { code: "unsupported", message: "This pane cannot show a range." } };
+      } catch (error) {
+        result = { ok: false, error: { code: "office_error", message: error instanceof Error ? error.message : String(error) } };
+      }
+      this.send({ type: "tool_result", callId: message.callId, result });
       return;
     }
     if (message.tool === WORKBOOK_NAME_REQUEST) {

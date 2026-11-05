@@ -44,6 +44,8 @@ export class ProviderSessionManager<S extends ProviderSessionState = ProviderSes
     session: S,
     settings: ProviderSessionSettings,
     context: () => StartSessionContext,
+    /** Called just before a runtime is opened (not when an open one is reused), so callers can say so. */
+    onOpening?: () => void,
   ): Promise<string> {
     if (!session.provider) throw new Error("Select a provider before opening a session");
     const adapter = this.providers.require(session.provider);
@@ -75,6 +77,7 @@ export class ProviderSessionManager<S extends ProviderSessionState = ProviderSes
     const lifetime = { closed: false };
     const started = performance.now();
     this.log.debug("runtime_opening", { sessionId: session.id, provider: adapter.id, resume: Boolean(resumeSessionId) });
+    onOpening?.();
     const id = await adapter.startSession({ ...ctx, resumeSessionId, onRuntimeClosed: () => { lifetime.closed = true; } });
     // Disconnect/provider change can happen while an adapter is initializing.
     // Never attach its late result to a different conversation/provider lifecycle.

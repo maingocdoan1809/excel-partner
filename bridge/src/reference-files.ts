@@ -93,6 +93,22 @@ export class ReferenceFiles {
     return true;
   }
 
+  /**
+   * True for a saved reference file, and for anything inside a saved reference folder. `real` is already a real path, so a
+   * symlink inside a folder cannot lead out of it; and a saved folder only counts while its path is its own real path,
+   * so a folder swapped for a link to somewhere else opens nothing.
+   */
+  private isSavedReference(real: string): boolean {
+    for (const saved of this.savedPaths()) {
+      if (saved === real) return true;
+      const prefix = saved.endsWith(path.sep) ? saved : saved + path.sep; // a drive root already ends with one
+      if (!real.startsWith(prefix)) continue;
+      try { if (fs.realpathSync(saved) === saved && fs.statSync(saved).isDirectory()) return true; }
+      catch { /* moved or removed */ }
+    }
+    return false;
+  }
+
   /** Resolve a user-supplied path to a real path inside an allowed folder, or throw with guidance. */
   resolve(input: string, grants: ReadonlySet<string> = new Set()): string {
     const candidate = path.resolve(toLocalPath(input));
@@ -102,7 +118,7 @@ export class ReferenceFiles {
     } catch {
       throw new ReferenceError_(`'${input}' does not exist or is not readable`);
     }
-    if (!this.savedPaths().includes(real) && ![...this.roots, ...grants].some((root) => real === root || real.startsWith(root + path.sep))) {
+    if (!this.isSavedReference(real) && ![...this.roots, ...grants].some((root) => real === root || real.startsWith(root + path.sep))) {
       throw new ReferenceError_(`'${input}' is outside the folders the assistant may read: ${this.roots.join(", ") || "none"}`, "outside");
     }
     return real;
@@ -166,6 +182,17 @@ export class ReferenceFiles {
     if (!stat.isFile() || !WORKBOOK_EXT.has(path.extname(real).toLowerCase())) throw new ReferenceError_("only Excel workbooks can be read");
     if (stat.size > MAX_WORKBOOK_BYTES) throw new ReferenceError_("workbook exceeds the 30 MB limit");
     return real;
+  }
+
+  /** What a person typed for a saved reference: the real path of a file or a folder, and which of the two it is. */
+  referenceTarget(input: string): { path: string; kind: "file" | "folder" } {
+    let real: string;
+    try { real = fs.realpathSync(path.resolve(toLocalPath(input))); }
+    catch { throw new ReferenceError_(`'${input}' does not exist or is not readable`); }
+    const stat = fs.statSync(real);
+    if (stat.isDirectory()) return { path: real, kind: "folder" };
+    if (stat.isFile()) return { path: real, kind: "file" };
+    throw new ReferenceError_(`'${input}' is neither a file nor a folder`);
   }
 
   /** Exact file selected through the native picker, regardless of extension. */

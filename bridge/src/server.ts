@@ -10,6 +10,7 @@ import { parseNativeCommand, type NativeCommand, type ProviderCommand } from "..
 import { normalizeCommands } from "../../providers/src/commands.js";
 import { supportsNativeWebSearch, type ToolCapabilities } from "../../protocol/src/index.js";
 import { SavedReferences } from "./saved-references.js";
+import { standalonePage } from "./standalone-page.js";
 import http from "node:http";
 import https from "node:https";
 import path from "node:path";
@@ -18,9 +19,12 @@ import { createReadStream, readFileSync, renameSync, statSync, writeFileSync } f
 import type { Duplex } from "node:stream";
 import { WebSocketServer, type WebSocket, type RawData } from "ws";
 import {
+  GO_TO_REQUEST,
   PROTOCOL_VERSION,
   ProviderIdSchema,
+  UNNAMED_WORKBOOK,
   WorkbookInfoMessageSchema,
+  sameWorkbookName,
   providerSessionKey,
   type ClientMessage,
   type ProviderId,
@@ -41,7 +45,7 @@ import { SystemPromptStore, PromptSettingsError, PromptSettingsConflict } from "
 import { WorkbookSession } from "./session.js";
 import { ToolGateway } from "./tool-gateway.js";
 import { enrichWindowsSelection, type SelectionEnricher } from "./windows-selection.js";
-import { activeWorkbookPath, pickWorkspaceFolder } from "./windows-workspace.js";
+import { activateWorkbook, activeWorkbookPath, pickWorkspaceFolder } from "./windows-workspace.js";
 import { MockAdapter, ProviderRegistry, createDefaultRegistry } from "../../providers/src/index.js";
 import { ProviderLoginError, ProviderLoginManager } from "./provider-login.js";
 import type { McpEndpoint } from "../../providers/src/types.js";
@@ -68,6 +72,8 @@ export interface BridgeOptions {
   savedReferencesFile?: string | null;
   /** Replaces the updater (tests); null turns updating from the task pane off. */
   updater?: UpdateService | null;
+  /** Replaces bringing a workbook's window to the front (tests); it is Excel on Windows only. */
+  activateWorkbook?: (workbookName: string) => Promise<unknown>;
 }
 
 const MAX_BODY_BYTES = 8 * 1024 * 1024;
@@ -101,6 +107,7 @@ export class Bridge {
   private readonly testingAdmin: TestingAdmin;
   private readonly backups: WorkbookBackups;
   private readonly updater: UpdateService | null;
+  private readonly activateWorkbook: (workbookName: string) => Promise<unknown>;
 
   constructor(config: BridgeConfig, options: BridgeOptions = {}) {
     this.config = config;
@@ -130,6 +137,7 @@ export class Bridge {
     const testScripts = new TestScripts(path.join(dataDir, "scripts"));
     this.testingAdmin = new TestingAdmin(testSessions, siteKnowledge, testScripts);
     this.backups = new WorkbookBackups(path.join(dataDir, "backups"));
+    this.activateWorkbook = options.activateWorkbook ?? activateWorkbook;
     this.updater = options.updater === undefined
       ? new UpdateService({
           packageRoot: PROJECT_ROOT,
@@ -253,6 +261,8 @@ export class Bridge {
     }
     const url = new URL(req.url ?? "/", "http://localhost");
 
+    if (req.method === "GET" && (url.pathname === "/" || url.pathname === "/index.html")) return this.serveStandalonePage(res);
+
     if (req.method === "GET" && url.pathname === "/health") {
       return this.sendJson(res, 200, {
         status: "ok",
@@ -306,6 +316,7 @@ export class Bridge {
     if (req.method === "POST" && url.pathname === "/session/backup") {
       return this.handleBackup(req, res);
     }
+    if (url.pathname === "/session/go-to" && req.method === "POST") return this.goToFile(req, res);
     if (url.pathname === "/session/update" && (req.method === "GET" || req.method === "POST")) {
       return this.handleUpdate(req, res, url);
     }
@@ -353,6 +364,18 @@ export class Bridge {
     }
 
     return this.sendJson(res, 404, { error: "not_found" });
+  }
+
+  /** The task pane for a browser tab: the add-in's page with a stand-in for Office.js (see standalone-page.ts). */
+  private serveStandalonePage(res: http.ServerResponse): void {
+    try {
+      const html = readFileSync(path.join(PROJECT_ROOT, "addin", "taskpane", "index.html"), "utf8").replace("__ADDIN_BUILD_ID__", this.addinBuildId());
+      res.writeHead(200, { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" });
+      res.end(standalonePage(html));
+    } catch (error) {
+      this.logger.error("could not serve the browser page", { error: String(error) });
+      this.sendJson(res, 500, { error: "page_unavailable" });
+    }
   }
 
   /**
@@ -409,16 +432,16 @@ export class Bridge {
       }
       if (typeof body.name !== "string" || typeof body.description !== "string" || (body.id !== undefined && typeof body.id !== "string")) throw new ReferenceError_("Specify a name and description.");
       const existing = this.savedReferences.list().find(e => e.id === body.id);
-      let file = existing?.path;
+      let target = existing ? { path: existing.path, kind: existing.kind } : undefined;
       if (body.path !== undefined) {
-        if (typeof body.path !== "string") throw new ReferenceError_("Enter a valid file path.");
+        if (typeof body.path !== "string") throw new ReferenceError_("Enter a valid file or folder path.");
         // Explorer's "Copy as path" wraps the path in double quotes.
         const typed = body.path.trim().replace(/^"(.*)"$/, "$1").trim();
-        if (!typed) throw new ReferenceError_("Enter the full path of the file.");
-        file = this.references.permissionTargetAny(typed);
+        if (!typed) throw new ReferenceError_("Enter the full path of the file or folder.");
+        target = this.references.referenceTarget(typed);
       }
-      if (!file) throw new ReferenceError_("Enter the full path of the file.");
-      const reference = this.savedReferences.save({ id: body.id as string | undefined, name: body.name, description: body.description, path: file });
+      if (!target) throw new ReferenceError_("Enter the full path of the file or folder.");
+      const reference = this.savedReferences.save({ id: body.id as string | undefined, name: body.name, description: body.description, path: target.path, kind: target.kind });
       return this.sendJson(res, 200, { reference });
     } catch (error) {
       if (error instanceof ReferenceError_ || error instanceof SyntaxError) return this.sendJson(res, 400, { error: error.message });
@@ -645,6 +668,36 @@ export class Bridge {
       if (error instanceof BackupError || error instanceof AttachmentError) return this.sendJson(res, 400, { error: error.message });
       throw error;
     }
+  }
+
+  /**
+   * A link in one file's chat that points into another open file: ask that file's pane to show the range, then bring its
+   * window forward. The file is found by name (the chat only knows what the text said); the answer is always 200 with `ok`,
+   * and `error` says why not (not open, two files with that name, no such sheet) in words the person can read.
+   */
+  private async goToFile(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+    const session = this.workspaceSession(req);
+    if (!session) return this.sendJson(res, 401, { error: "unauthorized" });
+    let body: Record<string, unknown>;
+    try { body = JSON.parse(await readBody(req, 16 * 1024)) as Record<string, unknown>; }
+    catch { return this.sendJson(res, 400, { error: "invalid_json" }); }
+    const file = typeof body.file === "string" ? body.file.trim() : "";
+    const address = typeof body.address === "string" ? body.address.trim() : "";
+    const sheet = typeof body.sheet === "string" ? body.sheet.trim() : "";
+    if (!file || file.length > 255 || !/^[A-Za-z0-9$:]{1,64}$/.test(address) || sheet.length > 255 || (body.sheet !== undefined && typeof body.sheet !== "string")) {
+      return this.sendJson(res, 400, { error: "invalid_target" });
+    }
+    session.touch();
+    await this.sessions.refreshNames(); // a rename (Save As) has no event: names are read when someone needs them
+    const matches = this.sessions.connected().filter((item) => item.id !== session.id && sameWorkbookName(item.workbookName ?? "", file));
+    if (matches.length === 0) return this.sendJson(res, 200, { ok: false, error: `"${file}" is not open in Excel with this add-in.` });
+    if (matches.length > 1) return this.sendJson(res, 200, { ok: false, error: `More than one open file is called "${file}", so it is not clear which one to show.` });
+    const target = matches[0]!;
+    const result = await target.requestPeerRead(GO_TO_REQUEST, { ...(sheet ? { sheet } : {}), address }, 15_000);
+    if (!result.ok) return this.sendJson(res, 200, { ok: false, error: `[${target.workbookName ?? UNNAMED_WORKBOOK}] ${result.error.message}` });
+    try { await this.activateWorkbook(target.workbookName ?? ""); }
+    catch (error) { this.logger.warn("could not bring the workbook window forward", { error: String(error) }); }
+    return this.sendJson(res, 200, { ok: true });
   }
 
   private listSkillTemplates(req: http.IncomingMessage, res: http.ServerResponse, url: URL): void {
@@ -1195,7 +1248,7 @@ export class Bridge {
         mcp: this.mcpEndpointFor(session),
         signal: controller.signal,
         systemPrompt: promptSettings.content,
-      }));
+      }), () => session.send({ type: "session_starting", requestId }));
 
       for await (const event of this.providerSessions.sendTurn(session, {
         systemPrompt: promptSettings.content,

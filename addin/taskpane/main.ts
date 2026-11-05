@@ -27,7 +27,9 @@ import { setupUserSkills } from "./ui/user-skills.js";
 import { showUserInput } from "./ui/user-input.js";
 import { setupSettings } from "./ui/settings.js";
 import { renderToolCard, paintTool, formatToolValue, toolChevron } from "./ui/tool-view.js";
-import { exposedToolNames } from "../../protocol/src/index.js";
+import { ThoughtView } from "./ui/thought.js";
+import { mentionsFile } from "./ui/cell-links.js";
+import { exposedToolNames, sameWorkbookName } from "../../protocol/src/index.js";
 import {
   SessionStore,
   buildContextPreface,
@@ -203,6 +205,14 @@ const previewCopy = byId<HTMLButtonElement>("preview-copy");
 let previewing: StoredArtifact | null = null;
 let liveToolGroup: { element: HTMLDetailsElement; message: StoredMessage } | null = null;
 let thinking: HTMLElement | null = null;
+const thoughts = new ThoughtView(els.messages, () => thinking, () => scrollToEnd());
+/** The other workbooks open with this add-in (not this one), as the bridge last listed them. */
+let otherFiles: string[] = [];
+/** Set once the assistant has used the connected-file tools in the running request: what it says may be about another file. */
+let turnTouchedOtherFiles = false;
+const CONNECTED_FILE_TOOLS: ReadonlySet<string> = new Set(["list_connected_files", "read_connected_file", "send_to_connected_file"]);
+/** How to link the cells in a reply. Bare cells (no link written by the assistant) are linked only when it cannot be about another file. */
+const cellLinkOptions = (text: string, aboutOtherFiles = false) => ({ plain: !aboutOtherFiles && !mentionsFile(text, otherFiles) });
 const pendingAttachments: Array<{ reference: UploadedAttachment; name: string }> = [];
 let workspaceRoots: WorkspaceRoot[] | null = null;
 let mentionReferences: SavedReference[] = [];
@@ -286,7 +296,7 @@ Office.onReady((info) => {
       const response = await pending;
       dock.hidden = true;
       document.body.classList.remove("question-active");
-      if (session === owner) questionBubble.innerHTML = renderMarkdown(questionText, { cellLinks: true });
+      if (session === owner) questionBubble.innerHTML = renderMarkdown(questionText, { cellLinks: cellLinkOptions(questionText) });
       if (session === owner && requestId === currentRequestId) {
         append({ kind: response.cancelled ? "note" : "user", text: response.cancelled ? "Question skipped or cancelled." : request.questions.map(q =>
           `${q.header || q.question}: ${q.isSecret ? "[Hidden answer]" : response.answers[q.id]!.join(", ")}`).join("\n") });
@@ -322,7 +332,16 @@ Office.onReady((info) => {
     runTool: (context, tool, args, execute) => journal.run(context, tool, args, execute),
     onBrowserFrame: (frame) => { if (frame.requestId === currentRequestId) browserView.push(frame); },
     readWorkbookName,
-    onConnectedFiles: (files) => connectedFiles.render(files),
+    onConnectedFiles: (files) => {
+      const names = files.filter((file) => !file.current).map((file) => file.name).filter(Boolean);
+      const changed = names.join("\n") !== otherFiles.join("\n");
+      otherFiles = names;
+      connectedFiles.render(files);
+      // Whether a reply's bare cells are linked depends on which other files are open (a chat opened before this list arrived, for one).
+      if (changed && !currentRequestId && session.messages.length) redrawMessages();
+    },
+    // Another file's chat asked this workbook to show a cell (a link there): only the selection moves.
+    goTo: selectRange,
     onDelegatedPrompt: (request) => {
       // The other assistant's request is a turn like any other here, so it waits its turn: refuse while this chat is busy.
       if (currentRequestId || cancelRequested || resolvingCommand) {
@@ -401,7 +420,11 @@ Office.onReady((info) => {
     const link = (event.target as HTMLElement | null)?.closest<HTMLAnchorElement>("a.cell-link");
     if (!link?.dataset.address) return;
     event.preventDefault();
-    void goTo({ ...(link.dataset.sheet ? { sheet: link.dataset.sheet } : {}), address: link.dataset.address });
+    void goToLink({
+      ...(link.dataset.file ? { file: link.dataset.file } : {}),
+      ...(link.dataset.sheet ? { sheet: link.dataset.sheet } : {}),
+      address: link.dataset.address,
+    });
   });
   byId("menu-login").addEventListener("click", () => showPanel("login"));
   byId("provider-login-button").addEventListener("click", () => showPanel("login"));
@@ -578,7 +601,7 @@ function renderMessage(container: HTMLElement, message: StoredMessage): HTMLElem
     }
     case "assistant":
       element = bubble("assistant");
-      element.innerHTML = renderMarkdown(message.text, { cellLinks: true });
+      element.innerHTML = renderMarkdown(message.text, { cellLinks: cellLinkOptions(message.text, message.aboutOtherFiles) });
       break;
     case "error":
       element = bubble("error");
@@ -830,6 +853,7 @@ async function submit(queued?: PendingPrompt, delegated?: { delegationId: string
   liveToolGroup = null;
   currentRequestId = requestId;
   requestSession = session;
+  turnTouchedOtherFiles = false;
   browserView.reset();
   setBusy(true);
   if (!queued && !delegated) els.input.value = "";
@@ -1077,11 +1101,13 @@ function renderWorkspaceMenu(): void {
   if (!workspaceStack.length && !workspaceLoading && !workspaceError) {
     const before = els.input.value.slice(0, els.input.selectionStart);
     const query = activeFileMention(before, pendingAttachments.map((item) => item.name))?.query.toLowerCase().trim() ?? "";
-    const refs = query ? mentionReferences.filter((ref) => `${ref.name} ${ref.path}`.toLowerCase().includes(query)) : mentionReferences;
+    // A folder reference is not something to attach: the assistant reads inside it itself.
+    const files = mentionReferences.filter((ref) => ref.kind !== "folder");
+    const refs = query ? files.filter((ref) => `${ref.name} ${ref.path}`.toLowerCase().includes(query)) : files;
     if (refs.length) {
       const label = document.createElement("div");
       label.className = "workspace-heading";
-      label.textContent = "Reference files";
+      label.textContent = "References";
       menu.append(label);
       for (const ref of refs) {
         const button = document.createElement("button");
@@ -1353,8 +1379,12 @@ function handleEvent(event: ProviderEvent): void {
       persistNow();
       return;
     }
+    case "session_starting":
+      setThinkingLabel("Starting session…");
+      return;
     case "turn_started":
       if (event.requestId !== currentRequestId) return;
+      setThinkingLabel(null);
       usageSessionId = session.id;
       usageRequestId = event.requestId;
       usageStartedAt = Date.now();
@@ -1369,11 +1399,15 @@ function handleEvent(event: ProviderEvent): void {
         renderUsage();
       }
       return;
+    case "thinking_delta":
+      thoughts.add(event.text);
+      return;
     case "message_delta":
       if (!event.text || (!live && !event.text.trim())) return;
+      thoughts.end();
       if (!live) live = startLive("assistant", event.text);
       else live.message.text += event.text;
-      live.element.innerHTML = renderMarkdown(live.message.text, { cellLinks: true });
+      live.element.innerHTML = renderMarkdown(live.message.text, { cellLinks: cellLinkOptions(live.message.text, live.message.aboutOtherFiles) });
       scrollToEnd();
       schedulePersist();
       return;
@@ -1381,15 +1415,18 @@ function handleEvent(event: ProviderEvent): void {
       // Providers can finish an assistant message that only calls a tool.
       // It has no chat text and must not create (or erase) a visible bubble.
       if (!event.text.trim()) { live = null; return; }
+      thoughts.end();
       if (!live) live = startLive("assistant", event.text);
       live.message.text = event.text;
-      live.element.innerHTML = renderMarkdown(event.text, { cellLinks: true });
+      live.element.innerHTML = renderMarkdown(event.text, { cellLinks: cellLinkOptions(event.text, live.message.aboutOtherFiles) });
       live = null; // the next message (after a tool call) gets its own bubble
       scrollToEnd();
       schedulePersist();
       return;
     case "tool_started": {
+      thoughts.end();
       live = null;
+      if (CONNECTED_FILE_TOOLS.has(event.tool)) turnTouchedOtherFiles = true;
       // Workbook calls get their exact result from onToolExecuted. Provider-local
       // tools have a separate native call ID and must not be paired by name.
       if (workbookToolNames.has(event.tool)) return;
@@ -1546,13 +1583,26 @@ function showThinking(): void {
   scrollToEnd();
 }
 
+/** Words next to the dots while something slow is happening (the provider CLI opening); null goes back to dots only. */
+function setThinkingLabel(text: string | null): void {
+  if (!thinking) return;
+  thinking.querySelector(".thinking-label")?.remove();
+  thinking.setAttribute("aria-label", text ?? "AI is working");
+  if (text === null) return;
+  const label = document.createElement("span");
+  label.className = "thinking-label";
+  label.textContent = text;
+  thinking.append(label);
+}
+
 function clearThinking(): void {
+  thoughts.reset();
   thinking?.remove();
   thinking = null;
 }
 
 function startLive(kind: "assistant", text: string): { element: HTMLElement; message: StoredMessage } {
-  const message: StoredMessage = { kind, text };
+  const message: StoredMessage = { kind, text, ...(turnTouchedOtherFiles ? { aboutOtherFiles: true } : {}) };
   session.messages.push(message);
   return { element: renderMessage(els.messages, message), message };
 }
@@ -1590,6 +1640,14 @@ function startNewChat(): void {
   renderChanges();
   void refreshUsage();
   showPanel(null);
+}
+
+/** Draw the current chat's messages again, where they were. Only between requests: a running one has live parts on screen. */
+function redrawMessages(): void {
+  const top = els.messages.scrollTop;
+  els.messages.replaceChildren();
+  for (const message of session.messages) renderMessage(els.messages, message);
+  els.messages.scrollTop = top;
 }
 
 /** Make a stored chat the current one (its messages are shown in the chat area). */
@@ -1929,21 +1987,42 @@ function changeRow(entry: StoredChange): HTMLElement {
   return row;
 }
 
+/** Show a range in this workbook: its sheet (or the open one) is activated and the range selected. Throws when it cannot. */
+async function selectRange(target: { sheet?: string; address: string }): Promise<void> {
+  await Excel.run(async (context) => {
+    const sheet = target.sheet ? context.workbook.worksheets.getItemOrNullObject(target.sheet) : context.workbook.worksheets.getActiveWorksheet();
+    if (target.sheet) {
+      await context.sync();
+      if ((sheet as Excel.Worksheet & { isNullObject?: boolean }).isNullObject) throw new Error(`There is no sheet named "${target.sheet}" in this workbook.`);
+    }
+    sheet.activate();
+    sheet.getRange(target.address).select();
+    await context.sync();
+  });
+}
+
+const placeLabel = (target: { file?: string; sheet?: string; address: string }) =>
+  `${target.file ? `${target.file} → ` : ""}${target.sheet ? `${target.sheet}!` : ""}${target.address}`;
+
 async function goTo(target: { sheet?: string; address: string }): Promise<void> {
   try {
-    await Excel.run(async (context) => {
-      const sheet = target.sheet ? context.workbook.worksheets.getItemOrNullObject(target.sheet) : context.workbook.worksheets.getActiveWorksheet();
-      if (target.sheet) {
-        await context.sync();
-        if ((sheet as Excel.Worksheet & { isNullObject?: boolean }).isNullObject) throw new Error(`There is no sheet named "${target.sheet}" in this workbook.`);
-      }
-      sheet.activate();
-      sheet.getRange(target.address).select();
-      await context.sync();
-    });
+    await selectRange(target);
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
     append({ kind: "error", text: `Cannot go to ${target.sheet ? `${target.sheet}!` : ""}${target.address}: ${reason}` });
+  }
+}
+
+/** A link in a reply: in this workbook, or, when it names another open file, in that file's window (the bridge asks its pane). */
+async function goToLink(target: { file?: string; sheet?: string; address: string }): Promise<void> {
+  if (!target.file) return goTo(target);
+  const here = await readWorkbookName();
+  if (here && sameWorkbookName(here, target.file)) return goTo({ ...(target.sheet ? { sheet: target.sheet } : {}), address: target.address });
+  try {
+    await client.goToFile({ file: target.file, ...(target.sheet ? { sheet: target.sheet } : {}), address: target.address });
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    append({ kind: "error", text: `Cannot go to ${placeLabel(target)}: ${reason}` });
   }
 }
 

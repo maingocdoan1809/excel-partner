@@ -174,7 +174,25 @@ export class ClaudeAdapter extends BaseCliAdapter {
     return { status: "login_required", hint: `Run \`claude\` on ${cliEnvironment()} and complete /login, then retry.` };
   }
 
+  /**
+   * Claude 5 models answer with empty thinking unless the request asks for summaries. The CLI's own flag for that is
+   * hidden (not in `--help`) and missing from older versions, so a CLI that rejects it is opened again without it
+   * and remembered: everything else works, there is just no thinking text to show.
+   */
+  private thinkingDisplay = true;
+
   override async startSession(ctx: StartSessionContext): Promise<string> {
+    if (!this.thinkingDisplay) return this.openSession(ctx, false);
+    try { return await this.openSession(ctx, true); }
+    catch (error) {
+      if (!/--thinking-display|thinking-display/.test(error instanceof Error ? error.message : String(error))) throw error;
+      this.runtime.logger.warn("claude does not support --thinking-display; thinking will not be shown");
+      this.thinkingDisplay = false;
+      return this.openSession(ctx, false);
+    }
+  }
+
+  private async openSession(ctx: StartSessionContext, thinkingDisplay: boolean): Promise<string> {
     if (ctx.resumeSessionId && !validNativeId(ctx.resumeSessionId)) throw new Error("Invalid Claude resume session ID");
     ctx.signal.throwIfAborted();
     const providerSessionId = `claude-${randomUUID()}`;
@@ -204,6 +222,7 @@ export class ClaudeAdapter extends BaseCliAdapter {
           // Preserve the existing restriction to the empty scratch workspace.
           "--setting-sources", "project",
           ...(model ? ["--model", model] : []), "--effort", ctx.effort ?? "medium",
+          ...(thinkingDisplay ? ["--thinking-display", "summarized"] : []),
         ],
         cwd: ensureWorkspaceDir(),
         env: { ...this.env, CLAUDE_CODE_EFFORT_LEVEL: ctx.effort ?? "medium" },
@@ -381,6 +400,11 @@ export class ClaudeAdapter extends BaseCliAdapter {
 export class ClaudeStreamTranslator {
   /** Message ids whose text already streamed as deltas. */
   private readonly streamed = new Set<string>();
+  /** Message ids whose thinking already streamed as deltas. */
+  private readonly streamedThinking = new Set<string>();
+  /** A thinking block was shown this turn: the next one starts a new paragraph. */
+  private hadThinking = false;
+  private thinkingBreak = false;
   private currentMessageId: string | null = null;
   private readonly toolNames = new Map<string, string>();
 
@@ -399,6 +423,11 @@ export class ClaudeStreamTranslator {
         } else if (event.type === "content_block_delta" && event.delta?.type === "text_delta" && event.delta.text) {
           if (this.currentMessageId) this.streamed.add(this.currentMessageId);
           return [{ type: "message_delta", requestId, text: String(event.delta.text) }];
+        } else if (event.type === "content_block_start" && event.content_block?.type === "thinking") {
+          this.thinkingBreak = this.hadThinking;
+        } else if (event.type === "content_block_delta" && event.delta?.type === "thinking_delta" && event.delta.thinking) {
+          if (this.currentMessageId) this.streamedThinking.add(this.currentMessageId);
+          return [this.thinking(String(event.delta.thinking))];
         }
         return [];
       }
@@ -407,7 +436,13 @@ export class ClaudeStreamTranslator {
         const out: ProviderEvent[] = [];
         const id: string | undefined = message.message?.id;
         for (const block of message.message?.content ?? []) {
-          if (block.type === "text" && block.text) {
+          if (block.type === "thinking" && block.thinking) {
+            // Without partial messages the whole block arrives here instead.
+            if (!(id && this.streamedThinking.has(id))) {
+              this.thinkingBreak = this.hadThinking;
+              out.push(this.thinking(String(block.thinking)));
+            }
+          } else if (block.type === "text" && block.text) {
             if (!(id && this.streamed.has(id))) {
               out.push({ type: "message_delta", requestId, text: String(block.text) });
             }
@@ -467,6 +502,13 @@ export class ClaudeStreamTranslator {
       default:
         return [];
     }
+  }
+
+  private thinking(text: string): ProviderEvent {
+    const prefix = this.thinkingBreak ? "\n\n" : "";
+    this.thinkingBreak = false;
+    this.hadThinking = true;
+    return { type: "thinking_delta", requestId: this.requestId, text: prefix + text };
   }
 }
 

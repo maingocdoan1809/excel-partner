@@ -82,6 +82,8 @@ export class SessionManager {
    */
   connectedFiles(session: WorkbookSession): ConnectedFile[] {
     return this.connected()
+      // A browser tab has no workbook: it is not a file anyone else can read or send a request to.
+      .filter((item) => item.clientInfo?.standalone !== true || item.id === session.id)
       .map((item) => ({ id: item.fileId, name: item.workbookName ?? "", current: item.id === session.id }))
       .sort((a, b) => Number(b.current) - Number(a.current));
   }

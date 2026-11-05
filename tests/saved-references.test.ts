@@ -101,7 +101,6 @@ describe("saved reference files", () => {
     const request = (route: string, method = "GET", body?: unknown, headers = first.headers) => fetch(`${url}${route}`, { method, headers, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
     expect((await fetch(`${url}/session/references`)).status).toBe(401);
     expect((await request("/session/references", "POST", { name: "Knowledge", description: "Rules", path: path.join(path.dirname(file), "missing.md") })).status).toBe(400);
-    expect((await request("/session/references", "POST", { name: "Knowledge", description: "Rules", path: path.dirname(file) })).status).toBe(400);
     const input = { name: "Knowledge", description: "Common rules", path: `  "${file}"  ` };
     expect((await request("/session/references", "POST", input, second.headers)).status).toBe(200);
     expect((await request("/session/references", "DELETE", { id: ((await (await request("/session/references")).json()) as { references: SavedReferenceStatus[] }).references[0]!.id })).status).toBe(200);

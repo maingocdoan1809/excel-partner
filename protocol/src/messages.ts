@@ -13,6 +13,8 @@ export const ClientInfoSchema = z.object({
   platform: z.string().nullable().optional(),
   locale: z.string().nullable().optional(),
   addinVersion: z.string().nullable().optional(),
+  /** The pane is open in a browser tab, not in Excel: there is no workbook behind it. */
+  standalone: z.boolean().optional(),
 });
 export type ClientInfo = z.infer<typeof ClientInfoSchema>;
 
@@ -46,6 +48,12 @@ export const RefreshConnectedFilesMessageSchema = z.object({
  * `{ ok: true, data: { name: string | null } }`. A name has no change event in Excel, so it is read when someone needs it.
  */
 export const WORKBOOK_NAME_REQUEST = "__workbook_name";
+
+/**
+ * Pseudo tool the bridge sends to a pane to show a range in its workbook: `{ sheet?, address }`. Sent when someone follows a
+ * link in another file's chat. It only moves the selection; the pane answers `{ ok: true, data: {} }` or the reason it could not.
+ */
+export const GO_TO_REQUEST = "__go_to";
 
 export const SetProviderMessageSchema = z.object({
   type: z.literal("set_provider"),

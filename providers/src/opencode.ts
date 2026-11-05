@@ -537,6 +537,11 @@ export class OpencodeAdapter extends BaseCliAdapter {
     const { queue, requestId } = active;
 
     switch (update.sessionUpdate) {
+      case "agent_thought_chunk": {
+        const text = update.content?.type === "text" ? String(update.content.text ?? "") : "";
+        if (text) queue.push({ type: "thinking_delta", requestId, text });
+        break;
+      }
       case "agent_message_chunk": {
         const text = update.content?.type === "text" ? String(update.content.text ?? "") : "";
         if (text) {

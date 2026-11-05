@@ -1,5 +1,7 @@
 export * from "./version.js";
 export * from "./address.js";
+export * from "./workbook-name.js";
+export * from "./cell-link.js";
 export * from "./providers.js";
 export * from "./tools.js";
 export * from "./tools-advanced.js";

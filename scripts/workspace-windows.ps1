@@ -1,6 +1,6 @@
 param(
   [Parameter(Mandatory = $true)]
-  [ValidateSet('pick', 'file', 'workbook', 'server')]
+  [ValidateSet('pick', 'file', 'workbook', 'activate', 'server')]
   [string]$Mode,
   [string]$WorkbookName = ''
 )
@@ -22,6 +22,20 @@ function Get-WorkbookPath([string]$Name) {
     if ($book -and $book.Path) { return [string]$book.FullName }
   } catch {
     # Excel is not running, the workbook is unsaved, or COM is unavailable.
+  }
+  return $null
+}
+
+# Bring one workbook's window to the front. Excel is usually the foreground program already (the person just clicked in
+# its task pane), so activating the workbook is enough.
+function Show-Workbook([string]$Name) {
+  try {
+    $excel = [Runtime.InteropServices.Marshal]::GetActiveObject('Excel.Application')
+    foreach ($candidate in $excel.Workbooks) {
+      if ($candidate.Name -eq $Name) { $candidate.Activate(); return 'activated' }
+    }
+  } catch {
+    # Excel is not running, the workbook is gone, or COM is unavailable.
   }
   return $null
 }
@@ -118,6 +132,11 @@ if ($Mode -eq 'workbook') {
   if ($result) { [Console]::WriteLine($result) }
   exit 0
 }
+if ($Mode -eq 'activate') {
+  $result = Show-Workbook $WorkbookName
+  if ($result) { [Console]::WriteLine($result) }
+  exit 0
+}
 if ($Mode -eq 'pick' -or $Mode -eq 'file') {
   $result = [WorkspacePicker.Dialog]::Choose($Mode -eq 'pick')
   if ($result) { [Console]::WriteLine($result) }
@@ -130,7 +149,7 @@ while ($true) {
   if ($null -eq $line) { break }
   try {
     $request = ConvertFrom-Json $line
-    $result = if ($request.mode -eq 'pick') { Show-WorkspacePicker } elseif ($request.mode -eq 'file') { [WorkspacePicker.Dialog]::Choose($false) } else { Get-WorkbookPath ([string]$request.workbookName) }
+    $result = if ($request.mode -eq 'pick') { Show-WorkspacePicker } elseif ($request.mode -eq 'file') { [WorkspacePicker.Dialog]::Choose($false) } elseif ($request.mode -eq 'activate') { Show-Workbook ([string]$request.workbookName) } else { Get-WorkbookPath ([string]$request.workbookName) }
     [Console]::WriteLine((ConvertTo-Json -Compress -InputObject @{ id = [string]$request.id; path = $result; error = $null }))
   } catch {
     [Console]::WriteLine((ConvertTo-Json -Compress -InputObject @{ id = [string]$request.id; path = $null; error = $_.Exception.Message }))

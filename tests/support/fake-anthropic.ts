@@ -1,9 +1,10 @@
 import http from "node:http";
 import type { AddressInfo } from "node:net";
 
+/** `thinking`: what the model reasons before this step. Like the real API, it is only sent when the request asks for summaries. */
 export type FakeStep =
-  | { tool: string; input: unknown }
-  | { text: string; delayMs?: number };
+  | { tool: string; input: unknown; thinking?: string }
+  | { text: string; delayMs?: number; thinking?: string };
 
 export interface FakeAnthropicRequest {
   url: string;
@@ -84,29 +85,43 @@ export class FakeAnthropic {
       },
     });
 
+    // A thinking block comes first when the request enables thinking; its text is empty unless summaries were asked for.
+    let index = 0;
+    if (isMain && step.thinking && body.thinking && body.thinking.type !== "disabled") {
+      const shown = body.thinking.display === "omitted" ? "" : step.thinking;
+      send("content_block_start", { type: "content_block_start", index, content_block: { type: "thinking", thinking: "" } });
+      const mid = Math.max(1, Math.floor(shown.length / 2));
+      for (const part of shown ? [shown.slice(0, mid), shown.slice(mid)] : [""]) {
+        send("content_block_delta", { type: "content_block_delta", index, delta: { type: "thinking_delta", thinking: part } });
+      }
+      send("content_block_delta", { type: "content_block_delta", index, delta: { type: "signature_delta", signature: "fake-signature" } });
+      send("content_block_stop", { type: "content_block_stop", index });
+      index++;
+    }
+
     if (isMain && "tool" in step) {
       const toolName = body.tools.find((t: any) => t.name === `mcp__excel__${step.tool}`)?.name ?? step.tool;
       send("content_block_start", {
         type: "content_block_start",
-        index: 0,
+        index,
         content_block: { type: "tool_use", id: `toolu_${Math.random().toString(36).slice(2)}`, name: toolName, input: {} },
       });
       send("content_block_delta", {
         type: "content_block_delta",
-        index: 0,
+        index,
         delta: { type: "input_json_delta", partial_json: JSON.stringify(step.input) },
       });
-      send("content_block_stop", { type: "content_block_stop", index: 0 });
+      send("content_block_stop", { type: "content_block_stop", index });
       send("message_delta", { type: "message_delta", delta: { stop_reason: "tool_use", stop_sequence: null }, usage: { output_tokens: 5 } });
     } else {
       const text = "text" in step ? step.text : "ok";
-      send("content_block_start", { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } });
+      send("content_block_start", { type: "content_block_start", index, content_block: { type: "text", text: "" } });
       const mid = Math.max(1, Math.floor(text.length / 2));
       for (const part of [text.slice(0, mid), text.slice(mid)]) {
-        send("content_block_delta", { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: part } });
+        send("content_block_delta", { type: "content_block_delta", index, delta: { type: "text_delta", text: part } });
       }
       if ("delayMs" in step && step.delayMs) await new Promise((r) => setTimeout(r, step.delayMs));
-      send("content_block_stop", { type: "content_block_stop", index: 0 });
+      send("content_block_stop", { type: "content_block_stop", index });
       send("message_delta", { type: "message_delta", delta: { stop_reason: "end_turn", stop_sequence: null }, usage: { output_tokens: 5 } });
     }
     send("message_stop", { type: "message_stop" });

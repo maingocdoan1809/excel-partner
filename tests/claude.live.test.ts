@@ -68,6 +68,27 @@ describe.skipIf(!hasClaude())("claude adapter (real CLI, fake model)", () => {
     expect(toolNames).toHaveLength(exposedToolNames(false).length + 1);
   }, 120_000);
 
+  it("asks the API for thinking summaries and streams what the model reasons, before the answer", async () => {
+    const h = await setup([
+      { tool: "get_selection", input: {}, thinking: "The user wants a total, so look at the selection first." },
+      { text: "Done.", thinking: "The selection is B2, so write the formula there." },
+    ]);
+    const result = await h.turn("add a total");
+    expect(result.finished.reason, JSON.stringify(result.events.filter(e => e.type === "error"))).toBe("completed");
+    // The CLI's thinking-display flag reached the API: without it a Claude 5 model answers with empty thinking.
+    const main = fake!.requests.filter(r => r.body.tools?.length);
+    expect(main.length).toBeGreaterThan(0);
+    expect(main.every(r => r.body.thinking?.display === "summarized"), JSON.stringify(main.map(r => r.body.thinking))).toBe(true);
+    const thinking = result.events.flatMap(e => e.type === "thinking_delta" ? [e.text] : []).join("");
+    expect(thinking).toContain("The user wants a total, so look at the selection first.");
+    expect(thinking).toContain("The selection is B2, so write the formula there.");
+    // Each reasoning arrives before what follows it.
+    const order = result.events.map(e => e.type);
+    expect(order.indexOf("thinking_delta")).toBeLessThan(order.indexOf("tool_started"));
+    expect(order.lastIndexOf("thinking_delta")).toBeLessThan(order.indexOf("message_delta"));
+    expect(result.text).toBe("Done.");
+  }, 120_000);
+
   it("returns a native AskUserQuestion answer through the pane to the real CLI", async () => {
     const h = await setup([
       { tool: "AskUserQuestion", input: { questions: [{ question: "Where should the result go?", header: "Output",
