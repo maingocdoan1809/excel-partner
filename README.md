@@ -51,10 +51,30 @@ excel-partner status
 - **Write:** values and formulas (with a check for `#REF!`/`#NAME?` errors), formatting, sort, filter, merge, validation, conditional formatting, named ranges, print layout, sheets.
 - **Build:** tables, charts, pivot tables, flowcharts with attached connectors.
 - **Audit:** `find_errors` scans for formula errors; writes refuse to overwrite existing data unless overwrite is approved.
+- **Look across open files:** the button at the top left lists every workbook open with Excel Partner. The assistant can read another one when you ask, for example to compare or look something up, or ask that file's assistant to make a change there. See *Connected files* below.
 - **Extend:** your own reusable skills (`/skill-name`), reference files and templates, file attachments (`@`), optional web search and browser automation.
 - **Work your way:** choose provider, model and effort per chat; queue a message while the assistant works; review changes and reopen past chats from History.
 
 Type `/` in the chat to browse commands and skills of the selected provider.
+
+## Connected files
+
+Open two workbooks and open **Home > Excel Partner** in each. The button at the top left of the task pane (green dot = connected) lists both files, with the current one marked **This file**.
+
+Ask for it in plain words, for example *"Compare the totals in this sheet with the Actuals file"* or *"In the Actuals file, fill column D with the totals"*. The assistant has two ways to reach the other file:
+
+- **Look something up** (`list_connected_files`, `read_connected_file`): runs one **read** tool in the other workbook (`get_sheets`, `read_range`, `get_cell_ranges`, `search_data`, `find_errors`, `check_formula_consistency`, `get_objects`). It never writes. In *Ask* mode you are asked once per message and per file.
+- **Have something done** (`send_to_connected_file`): the assistant of this file sends a message to the assistant of the other file. That one runs it as a normal turn in **its own chat** (its own model, tools and Ask/Auto setting), and its final reply comes back to the asker. In *Ask* mode you see the exact message and are asked every time; *Auto* mode sends without asking.
+
+What to expect when something is done in the other file:
+
+- The request appears in the other file's chat as a message *From <file name>*, and its changes are listed in that file's **Changes** like any other edit. There is no undo, so save that file first.
+- That file's own Ask/Auto setting applies. In *Ask* mode its change prompts appear **in that window**, so switch to it to approve them; the asker waits up to 10 minutes.
+- If the other file fails or you stop it there, the asker is told it failed (with the reason), not that it finished. If the asker is stopped first, the request is not run.
+- A file that is busy with its own request is refused at once; try again when it has finished. A file needs a provider selected in its own pane.
+- A file's name is read from Excel when someone needs it: when you open the list, or when the assistant lists or uses the files. After a Save As, the new name shows up the next time you open the list.
+- Its task pane must be open: a workbook without the pane is not listed. A file that was closed and reopened gets a new id, so the assistant lists again.
+- What is read or sent goes to the AI provider of the chat that handles it. Replies and cell contents from the other file are data, not instructions.
 
 ## Testing from your own test-case file
 

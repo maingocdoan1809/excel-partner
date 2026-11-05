@@ -16,3 +16,6 @@ certs/
 .playwright-cli/
 output/playwright/
 excel-partner.config.json
+
+# A copy of the excel-report skill bundle, not part of the add-in
+/excel-report.zip

@@ -21,6 +21,8 @@ export interface StoredMessage {
   delivery?: "pending" | "held";
   queueId?: string;
   attachments?: Array<{ name: string }>;
+  /** Set on a request another open workbook's assistant sent: the name of that workbook. `text` is the request itself. */
+  from?: string;
   tool?: StoredTool;
   tools?: StoredTool[];
   artifact?: StoredArtifact;
@@ -219,7 +221,8 @@ export function buildContextPreface(session: Pick<StoredSession, "messages" | "c
   for (let i = turns.length - 1; i >= 0; i--) {
     const m = turns[i]!;
     const body = m.text.length > 2_000 ? `${m.text.slice(0, 2_000)}…` : m.text;
-    const line = `${m.kind === "user" ? "User" : "Assistant"}: ${body}`;
+    const who = m.kind !== "user" ? "Assistant" : m.from !== undefined ? `Request from the assistant of workbook "${m.from}"` : "User";
+    const line = `${who}: ${body}`;
     if (used + line.length > maxChars && lines.length > 0) {
       lines.unshift("(earlier messages omitted)");
       break;

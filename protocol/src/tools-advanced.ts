@@ -643,3 +643,41 @@ export const CreateArtifactInputSchema = z.object({
   content: z.string().min(1).max(MAX_ARTIFACT_CHARS).describe("Complete file text. Not a diff: to change a file, send the whole file again."),
 }).strict();
 export type CreateArtifactInput = z.infer<typeof CreateArtifactInputSchema>;
+
+/* -------------------------------------------------------------------------- */
+/* Other workbooks open in Excel with this add-in (read-only)                  */
+/* -------------------------------------------------------------------------- */
+
+/** Reading tools that may be pointed at another connected workbook. Writing is never allowed across files. */
+export const CONNECTED_READ_TOOLS = ["get_sheets", "read_range", "get_cell_ranges", "search_data", "find_errors", "check_formula_consistency", "get_objects"] as const;
+export type ConnectedReadTool = (typeof CONNECTED_READ_TOOLS)[number];
+
+/** Longest request one workbook's assistant may send to another's (the tool input and the `delegated_prompt` message share it). */
+export const MAX_DELEGATED_TEXT = 8_000;
+
+/**
+ * The longest one send_to_connected_file call can legitimately take: the person's approval (2 min), the other pane starting
+ * the request (20 s), the other assistant working (10 min) and a margin. Every timeout between the model and the bridge
+ * (the MCP forwarder, the provider's own tool timeout) must be at least this, or the call is abandoned while it still runs.
+ */
+export const SEND_TO_CONNECTED_FILE_MAX_MS = 13 * 60_000;
+
+/** How a workbook with no known name is called, for the assistant and for the person alike. */
+export const UNNAMED_WORKBOOK = "Untitled workbook";
+
+export const ListConnectedFilesInputSchema = z.object({});
+export type ListConnectedFilesInput = z.infer<typeof ListConnectedFilesInputSchema>;
+
+// Strict: a `sheet` or `address` passed next to `tool` must fail loudly, not be dropped so that the other file is scanned whole.
+export const ReadConnectedFileInputSchema = z.object({
+  file: z.string().min(1).max(64).describe("`id` of the file from list_connected_files, e.g. f2."),
+  tool: z.enum(CONNECTED_READ_TOOLS).describe("The read tool to run in that file."),
+  arguments: z.record(z.unknown()).default({}).describe("Arguments for that tool, exactly as you would pass them to it for the current workbook. `sheet`, `address` and the rest go inside `arguments`."),
+}).strict();
+export type ReadConnectedFileInput = z.infer<typeof ReadConnectedFileInputSchema>;
+
+export const SendToConnectedFileInputSchema = z.object({
+  file: z.string().min(1).max(64).describe("`id` of the file from list_connected_files, e.g. f2."),
+  message: z.string().min(1).max(MAX_DELEGATED_TEXT).describe("What you want that file's assistant to do or find out. Be specific and self-contained: it cannot see this conversation."),
+}).strict();
+export type SendToConnectedFileInput = z.infer<typeof SendToConnectedFileInputSchema>;

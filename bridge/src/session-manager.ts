@@ -1,4 +1,4 @@
-import type { ClientInfo } from "../../protocol/src/index.js";
+import type { ClientInfo, ConnectedFile } from "../../protocol/src/index.js";
 import { WorkbookSession } from "./session.js";
 import type { Logger } from "./logger.js";
 
@@ -20,6 +20,7 @@ export class SessionManager {
   private readonly ttlMs: number;
   private readonly maxSessions: number;
   private readonly log?: Logger;
+  private fileCounter = 0;
 
   constructor(options: SessionManagerOptions) {
     this.ttlMs = options.ttlMs;
@@ -40,7 +41,7 @@ export class SessionManager {
       if (oldest) this.remove(oldest, "evicted");
     }
 
-    const session = new WorkbookSession(workbookConnectionId, clientInfo);
+    const session = new WorkbookSession(workbookConnectionId, clientInfo, `f${++this.fileCounter}`);
     this.sessions.set(session.id, session);
     this.byToken.set(session.sessionToken, session);
     this.byConnection.set(workbookConnectionId, session);
@@ -62,6 +63,27 @@ export class SessionManager {
 
   list(): WorkbookSession[] {
     return [...this.sessions.values()];
+  }
+
+  /** Workbooks whose task pane is connected right now, oldest first. */
+  connected(): WorkbookSession[] {
+    return this.list().filter((session) => session.isConnected).sort((a, b) => a.createdAt - b.createdAt);
+  }
+
+  /** Ask the panes (all connected ones unless given) for their workbooks' current names, in parallel. True when any name changed. */
+  async refreshNames(sessions: WorkbookSession[] = this.connected()): Promise<boolean> {
+    const changed = await Promise.all(sessions.map((session) => session.refreshWorkbookName()));
+    return changed.some(Boolean);
+  }
+
+  /**
+   * The connected workbooks as `session` sees them: its own first, then the others oldest first. The one list both the
+   * assistant and the pane get; a workbook whose name is not known yet has the name "" (callers show UNNAMED_WORKBOOK).
+   */
+  connectedFiles(session: WorkbookSession): ConnectedFile[] {
+    return this.connected()
+      .map((item) => ({ id: item.fileId, name: item.workbookName ?? "", current: item.id === session.id }))
+      .sort((a, b) => Number(b.current) - Number(a.current));
   }
 
   remove(session: WorkbookSession, reason: string): void {

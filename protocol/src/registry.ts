@@ -31,6 +31,9 @@ import {
   GetCellRangesInputSchema,
   GetObjectsInputSchema,
   InsertSheetsFromFileInputSchema,
+  ListConnectedFilesInputSchema,
+  ReadConnectedFileInputSchema,
+  SendToConnectedFileInputSchema,
   ListReferenceFilesInputSchema,
   ListSkillsInputSchema,
   SaveSkillInputSchema,
@@ -123,6 +126,10 @@ export const ToolInputSchemas = {
   read_attached_image: ReadAttachedImageInputSchema,
   read_attached_file: ReadAttachedFileInputSchema,
   insert_sheets_from_file: InsertSheetsFromFileInputSchema,
+  // other workbooks open in Excel with this add-in: listed and read (never written) by the bridge
+  list_connected_files: ListConnectedFilesInputSchema,
+  read_connected_file: ReadConnectedFileInputSchema,
+  send_to_connected_file: SendToConnectedFileInputSchema,
   playwright_browser: z.object({ tool: z.string().regex(/^(list_tools|browser_[a-z_]+)$/), arguments: z.record(z.unknown()).default({}) }),
   // testing from a sheet: the browser is opened by the bridge, results are written by the task pane
   list_test_sessions: ListTestSessionsInputSchema,
@@ -141,7 +148,7 @@ export type ExcelToolName = keyof typeof ToolInputSchemas;
 export const EXCEL_TOOL_NAMES = Object.keys(ToolInputSchemas) as ExcelToolName[];
 
 /** Tools the bridge answers itself instead of forwarding to the task pane. */
-export const SERVER_TOOLS: readonly ExcelToolName[] = ["playwright_browser", "list_skills", "read_skill", "save_skill", "update_skill", "run_skill_script", "run_python", "list_reference_files", "read_workbook_file", "read_attached_image", "read_attached_file", "list_test_sessions", "open_test_browser", "read_site_knowledge", "save_site_knowledge", "delete_site_knowledge", "save_test_script", "finish_test_run"];
+export const SERVER_TOOLS: readonly ExcelToolName[] = ["playwright_browser", "list_skills", "read_skill", "save_skill", "update_skill", "run_skill_script", "run_python", "list_reference_files", "read_workbook_file", "read_attached_image", "read_attached_file", "list_connected_files", "read_connected_file", "send_to_connected_file", "list_test_sessions", "open_test_browser", "read_site_knowledge", "save_site_knowledge", "delete_site_knowledge", "save_test_script", "finish_test_run"];
 
 /** Tools that need the user to have switched on the browser (Playwright) in Tools. */
 export const BROWSER_TOOLS: readonly ExcelToolName[] = ["playwright_browser", "list_test_sessions", "open_test_browser", "save_test_script", "finish_test_run"];

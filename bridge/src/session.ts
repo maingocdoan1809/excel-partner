@@ -12,9 +12,15 @@ import {
   UserInputRequestSchema,
   validateUserInputResponse,
   CANCELLED_USER_INPUT,
+  WORKBOOK_NAME_REQUEST,
   type UserInputRequest,
   type UserInputResponse,
 } from "../../protocol/src/index.js";
+
+/** How long a pane has to say what its workbook is called before the name it last gave is used. */
+export const WORKBOOK_NAME_TIMEOUT_MS = 2_000;
+
+const ENDED_BEFORE_RUN = { ok: false, error: { code: "cancelled", message: "The request ended before this tool could run." } } as const satisfies ToolResult;
 
 interface PendingToolCall {
   callId: string;
@@ -49,6 +55,8 @@ export class WorkbookSession implements ProviderSessionState {
   readonly id: string;
   readonly sessionToken: string;
   readonly workbookConnectionId: string;
+  /** Short name the assistant uses to point at this file (`f1`, `f2`, ...). Not a credential; see list_connected_files. */
+  readonly fileId: string;
   readonly createdAt: number;
   readonly clientInfo: ClientInfo | null;
 
@@ -70,6 +78,10 @@ export class WorkbookSession implements ProviderSessionState {
   readonly referenceGrants = new Set<string>();
   /** Folder containing the workbook currently open in this pane, when its local path is available. */
   defaultWorkspace: string | null = null;
+  /** Name of the workbook open in this pane, as Excel reports it; null until the pane says. */
+  workbookName: string | null = null;
+  /** Other files this chat may read, keyed by the other session's id, and the request (message) the user allowed it for. */
+  readonly connectedReadGrants = new Map<string, string>();
   /**
    * What the current test run has done so far, keyed "sheet|row": results written to the sheet (with the columns they went
    * to) and regression scripts saved. finish_test_run checks the two against each other before the run may be called done.
@@ -103,8 +115,9 @@ export class WorkbookSession implements ProviderSessionState {
   private toolChain: Promise<unknown> = Promise.resolve();
   private readonly pending = new Map<string, PendingToolCall>();
 
-  constructor(workbookConnectionId: string, clientInfo: ClientInfo | null = null) {
+  constructor(workbookConnectionId: string, clientInfo: ClientInfo | null = null, fileId = "f1") {
     this.id = randomUUID();
+    this.fileId = fileId;
     this.sessionToken = randomBytes(32).toString("base64url");
     this.workbookConnectionId = workbookConnectionId;
     this.clientInfo = clientInfo;
@@ -192,6 +205,7 @@ export class WorkbookSession implements ProviderSessionState {
       this.abortTurn();
       this.socket = null;
       this.referenceGrants.clear();
+      this.connectedReadGrants.clear();
       this.defaultWorkspace = null;
       this.attachments.clear();
     }
@@ -215,9 +229,40 @@ export class WorkbookSession implements ProviderSessionState {
   requestTool(tool: string, args: unknown, timeoutMs: number): Promise<ToolResult> {
     const requestId = this.activeRequestId;
     const signal = this.turnController?.signal;
-    const run = (): Promise<ToolResult> => signal?.aborted || this.activeRequestId !== requestId
-      ? Promise.resolve({ ok: false, error: { code: "cancelled", message: "The request ended before this tool could run." } })
-      : this.dispatchTool(tool, args, timeoutMs, requestId);
+    return this.enqueue(() => signal?.aborted || this.activeRequestId !== requestId
+      ? Promise.resolve(ENDED_BEFORE_RUN)
+      : this.dispatchTool(tool, args, timeoutMs, requestId));
+  }
+
+  /**
+   * A read made for another workbook's chat. It waits behind this pane's own calls so Office.js never runs two at
+   * once, but it belongs to no turn of this pane: this pane's own chat neither shows nor cancels it. `signal` is the
+   * asker's: when it aborts, the read is dropped (or stops being waited for) so this pane's own calls are not held up.
+   */
+  requestPeerRead(tool: string, args: unknown, timeoutMs: number, signal?: AbortSignal): Promise<ToolResult> {
+    return this.enqueue(() => signal?.aborted
+      ? Promise.resolve(ENDED_BEFORE_RUN)
+      : this.dispatchTool(tool, args, timeoutMs, null, signal));
+  }
+
+  /**
+   * Ask the pane what its workbook is called now and remember the answer. Excel has no event for a rename (Save As), so the
+   * name is read when someone needs it. This skips the tool queue on purpose: it changes nothing, and it must not wait
+   * behind a long tool call. A pane that does not answer in time keeps the name it gave before. True when the name changed.
+   */
+  async refreshWorkbookName(timeoutMs = WORKBOOK_NAME_TIMEOUT_MS): Promise<boolean> {
+    if (!this.isConnected) return false;
+    const result = await this.dispatchTool(WORKBOOK_NAME_REQUEST, {}, timeoutMs, null);
+    const name = result.ok ? (result.data as { name?: unknown } | null)?.name : undefined;
+    if (typeof name !== "string" || !name.trim()) return false;
+    const next = name.trim().slice(0, 255);
+    const changed = next !== this.workbookName;
+    this.workbookName = next;
+    return changed;
+  }
+
+  /** Run `run` after every call queued before it, whether those succeeded or not. */
+  private enqueue(run: () => Promise<ToolResult>): Promise<ToolResult> {
     const result = this.toolChain.then(run, run);
     this.toolChain = result.catch(() => undefined);
     return result;
@@ -243,7 +288,7 @@ export class WorkbookSession implements ProviderSessionState {
         if (tool === "__request_user_input") this.send({ type: "user_input_closed", callId });
         resolve(result);
       };
-      const abort = () => finish({ ok: false, error: { code: "cancelled", message: "Question cancelled." } });
+      const abort = () => finish({ ok: false, error: { code: "cancelled", message: tool === "__request_user_input" ? "Question cancelled." : ENDED_BEFORE_RUN.error.message } });
       const timer = setTimeout(() => {
         finish({
           ok: false,

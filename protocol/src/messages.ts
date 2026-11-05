@@ -2,6 +2,7 @@ import { z } from "zod";
 import { ProviderIdSchema, ProviderDetectionSchema } from "./providers.js";
 import { ProviderEventSchema } from "./events.js";
 import { SelectionSnapshotSchema, ToolResultSchema } from "./tool-results.js";
+import { MAX_DELEGATED_TEXT } from "./tools-advanced.js";
 
 /* -------------------------------------------------------------------------- */
 /* Client -> Bridge                                                            */
@@ -25,6 +26,26 @@ export const HelloMessageSchema = z.object({
   workbookConnectionId: z.string().min(8).max(128),
   clientInfo: ClientInfoSchema.optional(),
 });
+
+/** The workbook's current name, sent after the handshake and whenever it changes (Save As, rename). */
+export const WorkbookInfoMessageSchema = z.object({
+  type: z.literal("workbook_info"),
+  name: z.string().trim().min(1).max(255),
+});
+
+/**
+ * The pane wants the list of connected files to be current (it opened the list). The bridge asks every pane for its
+ * workbook's name right now and sends `connected_files` to all of them.
+ */
+export const RefreshConnectedFilesMessageSchema = z.object({
+  type: z.literal("refresh_connected_files"),
+});
+
+/**
+ * Pseudo tool the bridge sends to a pane to ask for its workbook's current name. The pane answers
+ * `{ ok: true, data: { name: string | null } }`. A name has no change event in Excel, so it is read when someone needs it.
+ */
+export const WORKBOOK_NAME_REQUEST = "__workbook_name";
 
 export const SetProviderMessageSchema = z.object({
   type: z.literal("set_provider"),
@@ -58,6 +79,15 @@ export const PromptMessageSchema = z.object({
   attachmentIds: z.array(z.string().uuid()).max(10).optional(),
   /** Exact local files chosen by the user; the bridge validates each path against session grants. */
   referencePaths: z.array(z.string().min(1).max(500)).max(10).optional(),
+  /** Set when this turn answers a request another workbook's assistant sent (see `delegated_prompt`). */
+  delegationId: z.string().min(1).max(64).optional(),
+});
+
+/** The task pane cannot take a request another workbook's assistant sent (busy, not ready). */
+export const DelegationDeclinedMessageSchema = z.object({
+  type: z.literal("delegation_declined"),
+  delegationId: z.string().min(1).max(64),
+  reason: z.string().max(200),
 });
 
 export const CancelMessageSchema = z.object({
@@ -86,8 +116,11 @@ export const ClientPongSchema = z.object({
 
 export const ClientMessageSchema = z.discriminatedUnion("type", [
   HelloMessageSchema,
+  WorkbookInfoMessageSchema,
+  RefreshConnectedFilesMessageSchema,
   SetProviderMessageSchema,
   PromptMessageSchema,
+  DelegationDeclinedMessageSchema,
   CancelMessageSchema,
   FollowupMessageSchema,
   ToolResultMessageSchema,
@@ -156,6 +189,35 @@ export const BrowserFrameMessageSchema = z.object({
 });
 export type BrowserFrameMessage = z.infer<typeof BrowserFrameMessageSchema>;
 
+/** One workbook open in Excel with this add-in. `id` is what the assistant uses to point at it; it is not a credential. */
+export const ConnectedFileSchema = z.object({
+  id: z.string().min(1).max(64),
+  name: z.string().max(255),
+  /** True for the workbook this task pane belongs to. */
+  current: z.boolean(),
+});
+export type ConnectedFile = z.infer<typeof ConnectedFileSchema>;
+
+/** The files connected right now, current one first. Sent to every task pane whenever the list changes. */
+export const ConnectedFilesMessageSchema = z.object({
+  type: z.literal("connected_files"),
+  files: z.array(ConnectedFileSchema).max(32),
+});
+export type ConnectedFilesMessage = z.infer<typeof ConnectedFilesMessageSchema>;
+
+/**
+ * Another workbook's assistant asks this one's to do something. The task pane runs it as a normal turn in its own chat
+ * (its own tools, model and Ask/Auto setting) and sends `prompt` with the same `delegationId`; the bridge returns the
+ * final reply to the asker.
+ */
+export const DelegatedPromptMessageSchema = z.object({
+  type: z.literal("delegated_prompt"),
+  delegationId: z.string().min(1).max(64),
+  from: z.object({ id: z.string().min(1).max(64), name: z.string().max(255) }),
+  text: z.string().min(1).max(MAX_DELEGATED_TEXT),
+});
+export type DelegatedPromptMessage = z.infer<typeof DelegatedPromptMessageSchema>;
+
 export const PingMessageSchema = z.object({
   type: z.literal("ping"),
   nonce: z.string(),
@@ -168,6 +230,8 @@ export const ServerMessageSchema = z.union([
   ProviderStatusMessageSchema,
   ToolRequestMessageSchema,
   BrowserFrameMessageSchema,
+  ConnectedFilesMessageSchema,
+  DelegatedPromptMessageSchema,
   PingMessageSchema,
   ...ProviderEventSchema.options,
 ]);
