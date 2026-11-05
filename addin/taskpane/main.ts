@@ -28,7 +28,7 @@ import { showUserInput } from "./ui/user-input.js";
 import { setupSettings } from "./ui/settings.js";
 import { renderToolCard, paintTool, formatToolValue, toolChevron } from "./ui/tool-view.js";
 import { ThoughtView } from "./ui/thought.js";
-import { mentionsFile } from "./ui/cell-links.js";
+import { mentionsFile, mentionsSheet } from "./ui/cell-links.js";
 import { exposedToolNames, sameWorkbookName } from "../../protocol/src/index.js";
 import {
   SessionStore,
@@ -212,7 +212,9 @@ let otherFiles: string[] = [];
 let turnTouchedOtherFiles = false;
 const CONNECTED_FILE_TOOLS: ReadonlySet<string> = new Set(["list_connected_files", "read_connected_file", "send_to_connected_file"]);
 /** How to link the cells in a reply. Bare cells (no link written by the assistant) are linked only when it cannot be about another file. */
-const cellLinkOptions = (text: string, aboutOtherFiles = false) => ({ plain: !aboutOtherFiles && !mentionsFile(text, otherFiles) });
+/** The names of this workbook's sheets, as last read from Excel (so a reply that names one is not guessed at). */
+let sheetNames: string[] = [];
+const cellLinkOptions = (text: string, aboutOtherFiles = false) => ({ plain: !aboutOtherFiles && !mentionsFile(text, otherFiles) && !mentionsSheet(text, sheetNames) });
 const pendingAttachments: Array<{ reference: UploadedAttachment; name: string }> = [];
 let workspaceRoots: WorkspaceRoot[] | null = null;
 let mentionReferences: SavedReference[] = [];
@@ -307,6 +309,7 @@ Office.onReady((info) => {
     onState: renderState,
     onHello: ({ addinBuildId }) => {
       void publishWorkbookName();
+      void refreshSheetNames();
       slash.reload();
       client.setProvider(provider);
       void refreshUsage();
@@ -1098,25 +1101,29 @@ function renderWorkspaceMenu(): void {
     if (!workspaceStack.length && workspaceDefaultError && visible.length) menu.append(workspaceNote("Workbook folder unavailable. Choose local files below."));
   }
 
-  if (!workspaceStack.length && !workspaceLoading && !workspaceError) {
+  // The saved references (files and folders) are always offered, even when the workspace folders could not be listed.
+  if (!workspaceStack.length && !workspaceLoading) {
     const before = els.input.value.slice(0, els.input.selectionStart);
     const query = activeFileMention(before, pendingAttachments.map((item) => item.name))?.query.toLowerCase().trim() ?? "";
-    // A folder reference is not something to attach: the assistant reads inside it itself.
-    const files = mentionReferences.filter((ref) => ref.kind !== "folder");
-    const refs = query ? files.filter((ref) => `${ref.name} ${ref.path}`.toLowerCase().includes(query)) : files;
+    const refs = query ? mentionReferences.filter((ref) => `${ref.name} ${ref.path}`.toLowerCase().includes(query)) : mentionReferences;
     if (refs.length) {
       const label = document.createElement("div");
       label.className = "workspace-heading";
       label.textContent = "References";
       menu.append(label);
       for (const ref of refs) {
+        const kind = ref.kind === "folder" ? "Folder" : "File";
         const button = document.createElement("button");
         button.type = "button";
         button.className = "workspace-row";
-        button.title = ref.available ? `${ref.path}${ref.description ? `\n${ref.description}` : ""}` : `File not found: ${ref.path}`;
-        setWorkspaceRow(button, `${ref.name}${ref.available ? "" : " · file not found"}`, false);
+        button.title = ref.available ? `${ref.path}${ref.description ? `\n${ref.description}` : ""}` : `${kind} not found: ${ref.path}`;
+        setWorkspaceRow(button, `${ref.name}${ref.available ? "" : ` · ${kind.toLowerCase()} not found`}`, ref.kind === "folder");
         button.disabled = !ref.available;
-        button.addEventListener("click", () => void chooseWorkspaceFile(ref.path));
+        // A file is attached by its path, like any workspace file. A folder is only pointed at: its path goes to the assistant,
+        // which lists and reads inside it itself, so there is nothing to open or attach here.
+        button.addEventListener("click", () => ref.kind === "folder"
+          ? addAttachment({ reference: { name: ref.name, kind: "folder", path: ref.path }, name: ref.name })
+          : void chooseWorkspaceFile(ref.path));
         menu.append(button);
       }
     }
@@ -1384,6 +1391,7 @@ function handleEvent(event: ProviderEvent): void {
       return;
     case "turn_started":
       if (event.requestId !== currentRequestId) return;
+      void refreshSheetNames();
       setThinkingLabel(null);
       usageSessionId = session.id;
       usageRequestId = event.requestId;
@@ -1419,6 +1427,13 @@ function handleEvent(event: ProviderEvent): void {
       if (!live) live = startLive("assistant", event.text);
       live.message.text = event.text;
       live.element.innerHTML = renderMarkdown(event.text, { cellLinks: cellLinkOptions(event.text, live.message.aboutOtherFiles) });
+      {
+        // The reply may name a sheet the assistant just made: read the names again and draw it once more if they changed.
+        const { element, message } = live;
+        void refreshSheetNames(false).then((changed) => {
+          if (changed && element.isConnected) element.innerHTML = renderMarkdown(message.text, { cellLinks: cellLinkOptions(message.text, message.aboutOtherFiles) });
+        });
+      }
       live = null; // the next message (after a tool call) gets its own bubble
       scrollToEnd();
       schedulePersist();
@@ -1985,6 +2000,27 @@ function changeRow(entry: StoredChange): HTMLElement {
   const undo = undoControl(entry, undoView());
   if (undo) row.append(undo);
   return row;
+}
+
+/**
+ * Read the sheet names from Excel. True when they changed. With `redraw`, a changed list also draws the chat again, since which
+ * cells of a reply are linked depends on it (a chat opened before the first read, for one).
+ */
+async function refreshSheetNames(redraw = true): Promise<boolean> {
+  try {
+    const names = await Excel.run(async (context) => {
+      const sheets = context.workbook.worksheets;
+      sheets.load("items/name");
+      await context.sync();
+      return sheets.items.map((sheet) => sheet.name);
+    });
+    if (names.join("\n") === sheetNames.join("\n")) return false;
+    sheetNames = names;
+    if (redraw && !currentRequestId && session.messages.length) redrawMessages();
+    return true;
+  } catch {
+    return false; // no Excel behind this page, or it is busy: keep the names we have
+  }
 }
 
 /** Show a range in this workbook: its sheet (or the open one) is activated and the range selected. Throws when it cannot. */

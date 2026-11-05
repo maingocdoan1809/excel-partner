@@ -214,7 +214,7 @@ export class ToolGateway {
     this.delegations?.recordChange(session, request.tool, result);
     if (request.tool === "record_test_results" && result.ok) this.trackRecorded(session, parsed as RecordTestResultsInput, result.data);
     this.logOutcome(request.tool, parsed, result, Date.now() - started);
-    return result;
+    return withRangeLink(result);
   }
 
   /** The workbooks open with this add-in, the current one first, so the assistant can point at another one by id. */
@@ -791,4 +791,17 @@ function summariseArgs(args: unknown): string {
   } catch {
     return "<unserialisable>";
   }
+}
+
+/**
+ * A tool result that names a range (`sheet` and `address`) gets that range as a ready-made link: the assistant pastes it when it
+ * points the user at those cells, so the link says exactly which sheet and range, and nothing is worked out from the words.
+ */
+function withRangeLink(result: ToolResult): ToolResult {
+  if (!result.ok || !result.data || typeof result.data !== "object" || Array.isArray(result.data)) return result;
+  const data = result.data as { sheet?: unknown; address?: unknown; link?: unknown };
+  if (data.link !== undefined || typeof data.sheet !== "string" || !data.sheet || typeof data.address !== "string") return result;
+  const address = data.address.replace(/\$/g, "");
+  if (!isA1Range(address)) return result;
+  return { ...result, data: { ...data, link: cellLinkMarkdown(address, { sheet: data.sheet, address }) } };
 }

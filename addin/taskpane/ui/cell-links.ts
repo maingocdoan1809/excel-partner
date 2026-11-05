@@ -74,10 +74,22 @@ export function isRefList(text: string, refs: CellRef[]): boolean {
  * the wrong file is worse than no link. Used only to hold links back, never to decide where one goes.
  */
 export function mentionsFile(text: string, names: readonly string[]): boolean {
+  return mentionsName(text, names.map(workbookStem));
+}
+
+/**
+ * True when `text` names one of the sheets in `names` (a whole word, any case). A bare "C5" in a reply that also says
+ * "sheet2/C5" is not the open sheet's: it could be the named sheet's, and the page cannot tell which, so it is left unlinked.
+ */
+export function mentionsSheet(text: string, names: readonly string[]): boolean {
+  return mentionsName(text, names);
+}
+
+function mentionsName(text: string, names: readonly string[]): boolean {
   for (const name of names) {
-    const stem = workbookStem(name);
-    if (stem.length < 2) continue;
-    const escaped = stem.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    // One letter would match the article "a" in a sentence; such a name is too short to tell from ordinary words.
+    if (name.length < 2) continue;
+    const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     if (new RegExp(String.raw`(?<![\p{L}\p{N}_])${escaped}(?![\p{L}\p{N}_])`, "iu").test(text)) return true;
   }
   return false;

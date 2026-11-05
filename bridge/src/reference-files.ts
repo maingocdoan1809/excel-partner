@@ -166,6 +166,18 @@ export class ReferenceFiles {
     return { path: file, bytes: fs.readFileSync(file) };
   }
 
+  /**
+   * What a person pointed at with @ and an allowed path: a file or, for a saved reference folder (or any folder the assistant
+   * may read), a folder. Nothing is read or copied; the assistant is told where it is.
+   */
+  mentionedPath(input: string, grants: ReadonlySet<string> = new Set()): { path: string; folder: boolean } {
+    const real = this.resolve(input, grants);
+    const stat = fs.statSync(real);
+    if (stat.isDirectory()) return { path: real, folder: true };
+    if (!stat.isFile()) throw new ReferenceError_(`'${input}' is neither a file nor a folder`);
+    return { path: real, folder: false };
+  }
+
   /** Check a selected file without copying its content into the session. */
   selectedPath(input: string, grants: ReadonlySet<string> = new Set()): string {
     const file = this.resolve(input, grants);

@@ -31,7 +31,7 @@ export type BridgeState = "idle" | "connecting" | "open" | "closed";
 export interface WorkspaceRoot { path: string; name: string; isDefault: boolean; removable: boolean }
 export interface WorkspaceEntry { path: string; name: string; type: "folder" | "file"; size: number | null; supported: boolean }
 export interface WorkspaceListing { path: string; entries: WorkspaceEntry[]; truncated: boolean }
-export interface UploadedAttachment { id?: string; name: string; kind: "workbook" | "image" | "file"; path: string }
+export interface UploadedAttachment { id?: string; name: string; kind: "workbook" | "image" | "file" | "folder"; path: string }
 export interface SkillTemplate { name: string; kind: "workbook" | "image" | "text"; size: number; path: string }
 export interface AvailableSkill { name: string; description: string }
 export interface InstalledSkill extends AvailableSkill { removable: boolean; enabled: boolean }

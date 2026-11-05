@@ -176,4 +176,45 @@ describe("saved reference folders", () => {
     expect((await request("/session/references", "DELETE", { id })).status).toBe(200);
     expect((await tool("read_attached_file", { path: path.join(docs, "rules.md") })).ok).toBe(false);
   });
+
+  it("tells the assistant which folder or file the person pointed at with @, and refuses what it may not read", async () => {
+    const { docs, root, metadata } = tree();
+    new SavedReferences(metadata).save({ name: "Docs", path: fs.realpathSync(docs), description: "House rules", kind: "folder" });
+    let prompt = "";
+    class CaptureAdapter extends MockAdapter {
+      override async *sendTurn(input: Parameters<MockAdapter["sendTurn"]>[0]) { prompt = input.prompt; yield* super.sendTurn(input); }
+    }
+    const port = await getFreePort();
+    const config = loadConfig({ host: "127.0.0.1", port, tls: null, publicBaseUrl: `http://127.0.0.1:${port}`, logLevel: "error" });
+    bridge = new Bridge(config, { savedReferencesFile: metadata, references: new ReferenceFiles([]), usageFile: null,
+      registry: new ProviderRegistry().register(new CaptureAdapter({ id: "claude" })) });
+    const { url } = await bridge.listen();
+    const pane = await PaneClient.connect(`${url.replace("http", "ws")}/ws`);
+    panes.push(pane);
+    pane.send({ type: "hello", protocolVersion: 1, workbookConnectionId: "reference-mention-123" });
+    await pane.waitFor((m) => m.type === "hello_ok");
+    pane.send({ type: "set_provider", provider: "claude" });
+    await pane.waitFor((m) => m.type === "provider_status");
+    const turn = async (requestId: string, referencePaths: string[]) => {
+      prompt = "";
+      pane.send({ type: "prompt", requestId, prompt: "Look at @Docs", selection: null, referencePaths });
+      await pane.waitFor((m) => m.type === "turn_finished" && m.requestId === requestId);
+    };
+    const real = fs.realpathSync(docs);
+
+    await turn("folder", [docs]);
+    expect(prompt).toContain("<user_attached_files>");
+    expect(prompt).toContain(JSON.stringify({ name: "docs", path: real, kind: "reference_folder", hint: "A folder the user pointed at. Call list_reference_files with this path to see what is inside, then read the files you need." }));
+
+    await turn("inside", [path.join(docs, "deep", "more.md")]);
+    expect(prompt).toContain(JSON.stringify({ name: "more.md", path: path.join(real, "deep", "more.md"), kind: "reference" }));
+    expect(prompt).not.toContain("reference_folder");
+
+    // A folder the assistant may not read cannot be pointed at: the request fails and nothing reaches the model.
+    await turn("outside", [path.join(root, "private")]);
+    expect(prompt).toBe("");
+    const failure = pane.received.find((m) => m.type === "error" && m.requestId === "outside");
+    expect(failure).toMatchObject({ type: "error", code: "invalid_attachment" });
+    expect(pane.received.find((m) => m.type === "turn_finished" && m.requestId === "outside")).toMatchObject({ reason: "error" });
+  });
 });

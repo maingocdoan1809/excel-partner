@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from "vitest";
-import { findCellRefs, isRefList, linkifyCells, mentionsFile } from "../addin/taskpane/ui/cell-links.js";
+import { findCellRefs, isRefList, linkifyCells, mentionsFile, mentionsSheet } from "../addin/taskpane/ui/cell-links.js";
 import { cellLinkMarkdown } from "../protocol/src/index.js";
 import { renderMarkdown } from "../addin/taskpane/ui/markdown.js";
 
@@ -254,5 +254,33 @@ describe("mentionsFile", () => {
 
   it("ignores names too short to tell from ordinary words", () => {
     expect(mentionsFile("a b c", ["A.xlsx", ""])).toBe(false);
+  });
+});
+
+describe("mentionsSheet", () => {
+  const sheets = ["Sheet1", "Sheet2", "Tổng hợp", "Data (2026)", "A"];
+
+  it("finds a sheet by its name, any case, wherever the sentence puts it", () => {
+    expect(mentionsSheet("mình chưa đụng gì vào workbook Excel — sheet2/C5 vẫn nguyên", sheets)).toBe(true);
+    expect(mentionsSheet("Trong Tổng hợp, ô B2 sai", sheets)).toBe(true);
+    expect(mentionsSheet("xem DATA (2026): C3", sheets)).toBe(true);
+  });
+
+  it("does not take part of another word, or a one-letter name, for a sheet", () => {
+    expect(mentionsSheet("Sheet20 and MySheet2", sheets)).toBe(false);
+    expect(mentionsSheet("a total in a cell, C5", sheets)).toBe(false);
+    expect(mentionsSheet("ô C5 vẫn nguyên", sheets)).toBe(false);
+    expect(mentionsSheet("anything", [])).toBe(false);
+  });
+
+  it("is what keeps a bare C5 from being linked to the open sheet when the sentence says sheet2", () => {
+    const text = "mình chưa đụng gì vào workbook Excel — sheet2/C5 vẫn nguyên.";
+    const draw = (plain: boolean) => {
+      const root = document.createElement("div");
+      root.innerHTML = renderMarkdown(text, { cellLinks: { plain } });
+      return root.querySelectorAll("a.cell-link").length;
+    };
+    expect(draw(true)).toBe(1); // what the page used to do: C5 on whatever sheet is open
+    expect(draw(!mentionsSheet(text, sheets))).toBe(0);
   });
 });
