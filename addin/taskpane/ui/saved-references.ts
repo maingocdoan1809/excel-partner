@@ -16,7 +16,7 @@ export function setupSavedReferences(client: () => BridgeClient): { refresh(): P
   let originalPath = "";
   let busy = false;
   let request = 0;
-  const errorText = (error: unknown) => error instanceof Error ? error.message : "Could not update reference files.";
+  const errorText = (error: unknown) => error instanceof Error ? error.message : "Could not update references.";
 
   function setBusy(value: boolean): void {
     busy = value;
@@ -29,33 +29,33 @@ export function setupSavedReferences(client: () => BridgeClient): { refresh(): P
     name.value = entry?.name ?? "";
     file.value = entry?.path ?? "";
     description.value = entry?.description ?? "";
-    message.textContent = entry && !entry.available ? "File not found. Enter its new path." : "";
+    message.textContent = entry && !entry.available ? `${entry.kind === "folder" ? "Folder" : "File"} not found. Enter its new path.` : "";
     dialog.showModal();
     (entry ? name : file).focus();
   }
 
   async function refresh(): Promise<void> {
     const current = ++request;
-    list.textContent = "Loading reference files…";
+    list.textContent = "Loading references…";
     try {
       const entries = await client().listSavedReferences();
       if (current !== request) return;
       list.replaceChildren();
-      if (!entries.length) list.textContent = "No reference files registered yet.";
+      if (!entries.length) list.textContent = "No references yet.";
       for (const entry of entries) {
         const row = document.createElement("div");
         row.className = "reference-row";
         const title = document.createElement("strong");
         title.textContent = entry.name;
         const location = document.createElement("p");
-        location.textContent = entry.path;
+        location.textContent = `${entry.kind === "folder" ? "Folder" : "File"} · ${entry.path}`;
         const detail = document.createElement("p");
         detail.textContent = entry.description;
         row.append(title, location, detail);
         if (!entry.available) {
           const missing = document.createElement("p");
           missing.className = "reference-missing";
-          missing.textContent = "File not found — edit the reference to enter its new path.";
+          missing.textContent = `${entry.kind === "folder" ? "Folder" : "File"} not found — edit the reference to enter its new path.`;
           row.append(missing);
         }
         const actions = document.createElement("div");
@@ -93,7 +93,7 @@ export function setupSavedReferences(client: () => BridgeClient): { refresh(): P
   form.addEventListener("submit", async event => {
     event.preventDefault();
     if (busy) return;
-    if (!file.value.trim()) { message.textContent = "Enter the file path first."; file.focus(); return; }
+    if (!file.value.trim()) { message.textContent = "Enter the file or folder path first."; file.focus(); return; }
     setBusy(true);
     try {
       await client().saveReference({ id: editing, ...(file.value.trim() !== originalPath ? { path: file.value } : {}), name: name.value, description: description.value });

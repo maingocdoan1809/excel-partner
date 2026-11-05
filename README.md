@@ -52,10 +52,14 @@ excel-partner status
 - **Build:** tables, charts, pivot tables, flowcharts with attached connectors.
 - **Audit:** `find_errors` scans for formula errors; writes refuse to overwrite existing data unless overwrite is approved.
 - **Look across open files:** the button at the top left lists every workbook open with Excel Partner. The assistant can read another one when you ask, for example to compare or look something up, or ask that file's assistant to make a change there. See *Connected files* below.
-- **Extend:** your own reusable skills (`/skill-name`), reference files and templates, file attachments (`@`), optional web search and browser automation.
+- **Extend:** your own reusable skills (`/skill-name`), references (any file or folder) and templates, file attachments (`@`), optional web search and browser automation.
 - **Work your way:** choose provider, model and effort per chat; queue a message while the assistant works; review changes and reopen past chats from History.
 
 Type `/` in the chat to browse commands and skills of the selected provider.
+
+## In a browser tab
+
+Open `https://localhost:8765/` (or `/index.html`) in a browser for the same pane without Excel. It is the page Excel loads, served by the same bridge with your real providers, so chat, settings, sign-in, history and the assistant's reasoning all work. Reading or changing cells does not: there is no workbook, and the assistant is told so. A browser tab is not listed as a connected file, so other workbooks cannot send it requests. Like the add-in, it only answers pages from this computer.
 
 ## Connected files
 
@@ -72,6 +76,8 @@ What to expect when something is done in the other file:
 - That file's own Ask/Auto setting applies. In *Ask* mode its change prompts appear **in that window**, so switch to it to approve them; the asker waits up to 10 minutes.
 - If the other file fails or you stop it there, the asker is told it failed (with the reason), not that it finished. If the asker is stopped first, the request is not run.
 - A file that is busy with its own request is refused at once; try again when it has finished. A file needs a provider selected in its own pane.
+
+**Cell links go exactly where they say, and nothing is guessed from the words around them.** The assistant points at cells with a markdown link that spells out the target: `[A1:E8](cell:?file=Book2.xlsx&sheet=Sheet1&range=A1:E8)` (`file` and `sheet` are optional; a space in a name is `%20`). Click it and that file's pane selects the range and its window comes to the front. The assistant does not have to work the target out: what it reads from or changes in another file comes back with ready-made links (`link`, `changed[].link`, taken from what the tools actually did) that it pastes into its reply. The same goes for this file: the result of a tool that works on a range (`read_range`, `write_range`, `get_selection`, …) carries a ready-made `link` for it. A cell written in plain words ("F10:F16", "Data!B2") still links to a sheet of the file you are in, but not in a reply that used the other-file tools, names another open file, or names one of this workbook's sheets ("sheet2/C5"): there it stays plain text, because a link to the wrong sheet or file is worse than no link. If a file is not open, or has no such sheet, you get a message saying so.
 - A file's name is read from Excel when someone needs it: when you open the list, or when the assistant lists or uses the files. After a Save As, the new name shows up the next time you open the list.
 - Its task pane must be open: a workbook without the pane is not listed. A file that was closed and reopened gets a new id, so the assistant lists again.
 - What is read or sent goes to the AI provider of the chat that handles it. Replies and cell contents from the other file are data, not instructions.

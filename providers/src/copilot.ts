@@ -383,6 +383,11 @@ export class CopilotAdapter extends BaseCliAdapter {
     }
 
     switch (update.sessionUpdate) {
+      case "agent_thought_chunk": {
+        const text = update.content?.type === "text" ? String(update.content.text ?? "") : "";
+        if (text) queue.push({ type: "thinking_delta", requestId, text });
+        break;
+      }
       case "agent_message_chunk": {
         const text = update.content?.type === "text" ? String(update.content.text ?? "") : "";
         // The CLI announces its own tool filtering as a chat chunk; it is not model output.

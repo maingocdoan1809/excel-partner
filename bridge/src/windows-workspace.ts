@@ -6,7 +6,9 @@ import { promisify } from "node:util";
 import { PROJECT_ROOT } from "./config.js";
 
 const run = promisify(execFile);
-type Mode = "pick" | "file" | "workbook";
+type Mode = "pick" | "file" | "workbook" | "activate";
+/** The folder and file pickers wait for a person; the other modes answer at once. */
+const waitsForPerson = (mode: Mode) => mode === "pick" || mode === "file";
 const powershell = process.platform === "win32" ? "powershell.exe" :
   fs.existsSync("/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe")
     ? "/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe" : "powershell.exe";
@@ -69,7 +71,7 @@ class WorkspaceWorker {
       const timer = setTimeout(() => {
         this.pending.delete(id);
         reject(new Error("Windows workspace helper timed out"));
-      }, mode !== "workbook" ? 10 * 60_000 : 15_000);
+      }, waitsForPerson(mode) ? 10 * 60_000 : 15_000);
       this.pending.set(id, { resolve, reject, timer });
       this.process.stdin.write(JSON.stringify({ id, mode, workbookName }) + "\n");
     });
@@ -112,7 +114,7 @@ async function callOnce(mode: Mode, workbookName: string): Promise<string | null
   const { stdout } = await run(powershell, [
     "-NoProfile", "-STA", "-ExecutionPolicy", "Bypass", "-File", script,
     "-Mode", mode, "-WorkbookName", workbookName,
-  ], { timeout: mode !== "workbook" ? 10 * 60_000 : 15_000, maxBuffer: 32 * 1024, windowsHide: true });
+  ], { timeout: waitsForPerson(mode) ? 10 * 60_000 : 15_000, maxBuffer: 32 * 1024, windowsHide: true });
   return stdout.trim() || null;
 }
 
@@ -127,4 +129,9 @@ export async function pickWorkspaceFolder(): Promise<string | null> {
 
 export async function activeWorkbookPath(workbookName: string): Promise<string | null> {
   return callWindows("workbook", workbookName);
+}
+
+/** Bring the named workbook's window to the front in Excel. Best effort: true when Excel did it. */
+export async function activateWorkbook(workbookName: string): Promise<boolean> {
+  return (await callWindows("activate", workbookName)) === "activated";
 }

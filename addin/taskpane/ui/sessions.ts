@@ -23,6 +23,8 @@ export interface StoredMessage {
   attachments?: Array<{ name: string }>;
   /** Set on a request another open workbook's assistant sent: the name of that workbook. `text` is the request itself. */
   from?: string;
+  /** The assistant used the connected-file tools before writing this reply, so its bare cell references could be another file's. */
+  aboutOtherFiles?: boolean;
   tool?: StoredTool;
   tools?: StoredTool[];
   artifact?: StoredArtifact;

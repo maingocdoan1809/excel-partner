@@ -26,7 +26,9 @@ interface CodexSession {
   baselinePending?: boolean;
   tokenTotals?: import("../../protocol/src/index.js").TokenUsage;
   /** Sink for the turn currently running, if any. */
-  active: { queue: AsyncQueue<ProviderEvent>; requestId: string; turnId: string | null; interrupting: boolean; tokenBaseline?: import("../../protocol/src/index.js").TokenUsage; usageUnavailable?: boolean } | null;
+  active: { queue: AsyncQueue<ProviderEvent>; requestId: string; turnId: string | null; interrupting: boolean; tokenBaseline?: import("../../protocol/src/index.js").TokenUsage; usageUnavailable?: boolean;
+    /** Item and part of the reasoning text last shown, to start a new paragraph when it changes. */
+    reasoningPart?: string; sawReasoningSummary?: boolean } | null;
 }
 
 interface TurnLike {
@@ -413,6 +415,19 @@ export class CodexAdapter extends BaseCliAdapter {
       case "item/agentMessage/delta":
         if (params.delta) queue.push({ type: "message_delta", requestId, text: String(params.delta) });
         break;
+      case "item/reasoning/summaryTextDelta":
+      case "item/reasoning/textDelta": {
+        // OpenAI models send a summary; open-weight ones send the reasoning itself. Show the summary when there is one.
+        const summary = method === "item/reasoning/summaryTextDelta";
+        if (summary) active.sawReasoningSummary = true;
+        else if (active.sawReasoningSummary) break;
+        if (!params.delta) break;
+        const part = `${params.itemId}:${summary ? "s" : "t"}${summary ? params.summaryIndex : params.contentIndex}`;
+        const text = `${active.reasoningPart && active.reasoningPart !== part ? "\n\n" : ""}${String(params.delta)}`;
+        active.reasoningPart = part;
+        queue.push({ type: "thinking_delta", requestId, text });
+        break;
+      }
       case "item/started": {
         const item = params.item;
         if (item?.type === "mcpToolCall") {

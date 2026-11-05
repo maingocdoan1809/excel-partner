@@ -54,6 +54,16 @@ describe.each(["claude", "copilot", "codex", "opencode"] as const)("%s shared se
     expect(h.adapter.closes).toEqual([]);
   });
 
+  it("announces only a runtime that is really being opened, before it opens", async () => {
+    const h = setup(provider);
+    const opening = vi.fn(() => { expect(h.adapter.starts).toHaveLength(0); });
+    await h.manager.ensure(h.session, h.settings, h.context, opening);
+    await h.complete();
+    await h.manager.ensure(h.session, { ...h.settings, chatSessionId: `${provider}:native`, resumeSessionId: "native" }, h.context, opening);
+    expect(opening).toHaveBeenCalledTimes(1);
+    expect(h.adapter.starts).toHaveLength(1);
+  });
+
   it.each([
     { model: "new-model" }, { effort: "high" as const }, { systemPromptRevision: "new-revision" },
     { capabilities: { webSearch: true, playwright: false } }, { capabilities: { webSearch: false, playwright: true } },

@@ -91,6 +91,35 @@ describe("two workbooks talking to each other over the wire", () => {
     await budget.close(); await actuals.close();
   });
 
+  it("hands the asker the ranges the other file's tools really changed, as links, whatever its reply says", async () => {
+    const adapter = new MockAdapter({ id: "claude", reply: "Đã nhập dữ liệu vào Actuals → Sheet9, vùng Z99.", toolCalls: [
+      { tool: "write_range", args: { sheet: { name: "Data" }, address: "A1", values: [["Sản phẩm", "SL"], ["Táo", 3]] } },
+      { tool: "format_range", args: { sheet: { name: "Data" }, address: "A1:B1", format: { bold: true } } },
+    ] });
+    const wsUrl = await start("unused", adapter);
+    const budget = await openPane(wsUrl, "budget-connection-1", "Budget.xlsx");
+    const actuals = await openPane(wsUrl, "actuals-connection-1", "Actuals.xlsx");
+    const from = await sessionIdOf(budget, "Budget.xlsx");
+    const to = await sessionIdOf(actuals, "Actuals.xlsx");
+    handle(actuals, (m) => {
+      if (m.type === "delegated_prompt") actuals.send({ type: "prompt", requestId: "actuals-turn-1", prompt: m.text, selection: null, model: null, effort: "medium", delegationId: m.delegationId });
+      // What the Excel executor answers: the sheet and the range it really wrote.
+      if (m.type === "tool_request" && (m.tool === "write_range" || m.tool === "format_range")) {
+        const address = m.tool === "write_range" ? "A1:B2" : "A1:B1";
+        actuals.send({ type: "tool_result", callId: m.callId, result: { ok: true, data: { sheet: "Data", address, rowsWritten: 2, columnsWritten: 2 } } });
+      }
+    });
+
+    const result = await bridge!.gateway.invoke({ sessionId: from.id, tool: "send_to_connected_file", args: { file: to.fileId, message: "Fill a sample sales table" } });
+    expect(result).toMatchObject({ ok: true, data: { outcome: "completed", reply: "Đã nhập dữ liệu vào Actuals → Sheet9, vùng Z99." } });
+    // The reply names the wrong place (Sheet9, Z99): the links come from what the tools did.
+    expect((result as { data: { changed: unknown[] } }).data.changed).toEqual([
+      { file: "Actuals.xlsx", sheet: "Data", address: "A1:B2", link: "[A1:B2](cell:?file=Actuals.xlsx&sheet=Data&range=A1:B2)" },
+      { file: "Actuals.xlsx", sheet: "Data", address: "A1:B1", link: "[A1:B1](cell:?file=Actuals.xlsx&sheet=Data&range=A1:B1)" },
+    ]);
+    await budget.close(); await actuals.close();
+  });
+
   it("tells the asker when the other pane declines because it is busy", async () => {
     const wsUrl = await start("unused");
     const budget = await openPane(wsUrl, "budget-connection-2", "Budget.xlsx");

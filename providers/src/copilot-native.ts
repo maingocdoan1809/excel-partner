@@ -131,9 +131,24 @@ export class CopilotNativeSessions {
     let pending = "";
     const toolNames = new Map<string, string>();
     let failed = false;
+    // Reasoning blocks that already streamed, and the one shown last (a new block starts a new paragraph).
+    const reasoningStreamed = new Set<string>();
+    let lastReasoning = "";
+    const thinking = (reasoningId: string, text: string) => {
+      queue.push({ type: "thinking_delta", requestId, text: `${lastReasoning && lastReasoning !== reasoningId ? "\n\n" : ""}${text}` });
+      lastReasoning = reasoningId;
+    };
     const unsubscribe = state.session.on(event => {
       if (event.agentId || ("parentToolCallId" in event.data && event.data.parentToolCallId)) return;
       switch (event.type) {
+        case "assistant.reasoning_delta":
+          reasoningStreamed.add(event.data.reasoningId);
+          if (event.data.deltaContent) thinking(event.data.reasoningId, event.data.deltaContent);
+          break;
+        case "assistant.reasoning":
+          // Without streaming, the whole block arrives here instead.
+          if (!reasoningStreamed.has(event.data.reasoningId) && event.data.content) thinking(event.data.reasoningId, event.data.content);
+          break;
         case "assistant.message_delta":
           streamed.add(event.data.messageId);
           pending += event.data.deltaContent;

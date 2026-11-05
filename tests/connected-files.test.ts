@@ -75,6 +75,21 @@ describe("connected files", () => {
     expect(thereSent).toEqual([{ tool: "read_range", args: expect.objectContaining({ address: "A1:B2" }), requestId: "no-turn" }]);
   });
 
+  it("hands back the range it read as a link ready to paste, never one that could point somewhere else", async () => {
+    const { gateway, here, there } = setup();
+    here.beginTurn("req-1");
+    const link = async (tool: string, args: unknown) => ((await read(gateway, here, there.fileId, tool, args)) as { data: Record<string, unknown> }).data.link;
+    expect(await link("read_range", { sheet: { name: "Q1" }, address: "A1:B2" })).toBe("[A1:B2](cell:?file=Actuals.xlsx&sheet=Q1&range=A1:B2)");
+    expect(await link("read_range", { sheet: { name: "Sales 2026" }, address: "$A$1" })).toBe("[A1](cell:?file=Actuals.xlsx&sheet=Sales%202026&range=A1)");
+    // No sheet asked for: the file's open sheet was read, and the link opens that sheet too.
+    expect(await link("read_range", { address: "C3" })).toBe("[C3](cell:?file=Actuals.xlsx&range=C3)");
+    // Nothing to name, or a sheet that only has an id: no link rather than a wrong one.
+    expect(await link("get_sheets", {})).toBeUndefined();
+    expect(await link("read_range", { sheet: { id: "{123}" }, address: "A1" })).toBeUndefined();
+    // A range that is not one is refused before anything is read, so there is nothing to link.
+    expect(await read(gateway, here, there.fileId, "read_range", { sheet: { name: "Q1" }, address: "not a range" })).toMatchObject({ ok: false });
+  });
+
   it("asks once per message, then again for the next message", async () => {
     const { gateway, here, there, hereSent } = setup();
     here.beginTurn("req-1");

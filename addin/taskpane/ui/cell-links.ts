@@ -1,10 +1,16 @@
 /// <reference lib="dom" />
-import { columnToNumber } from "../../../protocol/src/index.js";
+import { isCellAddress, isOrderedRange, isWholeLine, workbookStem, type CellTarget } from "../../../protocol/src/index.js";
 
 /**
- * Turns cell and range mentions in the assistant's text ("F10:F16", "Data!B2", "'Test Cases'!A1:D9") into links
- * that select them in Excel. Only what is unmistakably a reference becomes a link: plain words that merely look like
- * one (Q4, H2, MP3) are left alone unless they carry a sheet name or sit in `code`.
+ * Cell and range mentions in the assistant's replies become links that select them in Excel.
+ *
+ * Two kinds, and only the first is certain:
+ *  - A markdown link the assistant wrote with its target spelled out, `[A1:E8](cell:?file=Book2.xlsx&sheet=Sheet1&range=A1:E8)`
+ *    (see protocol/src/cell-link.ts). It goes exactly where it says; markdown.ts turns it into a badge with `cellBadge`.
+ *  - A reference written in plain words ("F10:F16", "Data!B2", "'Test Cases'!A1:D9"), found here. Only what is unmistakably
+ *    a reference becomes a link: plain words that merely look like one (Q4, H2, MP3) are left alone unless they carry a
+ *    sheet name or sit in `code`. It names no file, so it goes to a sheet of the workbook the chat is in: never guessed
+ *    from the sentence around it, and not offered at all when the reply is about another file (see `mentionsFile`).
  */
 
 export interface CellRef {
@@ -26,22 +32,8 @@ const WHOLE = String.raw`\$?[A-Z]{1,3}:\$?[A-Z]{1,3}|\$?\d{1,7}:\$?\d{1,7}`;
 // leads into another reference (a sheet named A1) -- a closing "G1!" at the end of a sentence still counts.
 const PATTERN = String.raw`(?<![\p{L}\p{N}_$.'!:#])(?:(${SHEET})!)?(${CELL}(?::${CELL})?|${WHOLE})(?![\p{L}\p{N}_(:]|!(?=[\p{L}\p{N}_'$]))`;
 
-const MAX_ROW = 1_048_576;
-const MAX_COLUMN = 16_384;
 /** Quarters, half-years and fiscal years read as words, not cells. */
 const LOOKS_LIKE_A_WORD = /^(?:Q[1-4]|H[12]|FY\d{2,4})$/;
-
-function validCell(cell: string): boolean {
-  const match = /^\$?([A-Z]{1,3})\$?(\d{1,7})$/.exec(cell);
-  if (!match) return false;
-  return columnToNumber(match[1]!) <= MAX_COLUMN && Number(match[2]) >= 1 && Number(match[2]) <= MAX_ROW;
-}
-
-function validWhole(part: string): boolean {
-  const [from = "", to = ""] = part.replace(/\$/g, "").split(":");
-  if (/^\d+$/.test(from)) return Number(from) >= 1 && Number(to) <= MAX_ROW && Number(from) <= Number(to);
-  return columnToNumber(from) <= MAX_COLUMN && columnToNumber(to) <= MAX_COLUMN && columnToNumber(from) <= columnToNumber(to);
-}
 
 /** Every reference in `text`, in order. In `code` a lone cell such as Q4 counts, because code is rarely prose. */
 export function findCellRefs(text: string, context: "text" | "code" = "text"): CellRef[] {
@@ -50,10 +42,10 @@ export function findCellRefs(text: string, context: "text" | "code" = "text"): C
     const [whole, rawSheet, rawRef] = match as unknown as [string, string | undefined, string];
     const sheet = rawSheet?.startsWith("'") ? rawSheet.slice(1, -1).replace(/''/g, "'") : rawSheet;
     const parts = rawRef.split(":");
-    const isCells = parts.every(validCell);
+    const isCells = parts.every(isCellAddress);
     if (!isCells) {
-      if (!sheet || !validWhole(rawRef)) continue; // whole rows/columns need a sheet
-    } else if (parts.length === 2 && !validRange(parts as [string, string])) {
+      if (!sheet || !isWholeLine(rawRef)) continue; // whole rows/columns need a sheet
+    } else if (parts.length === 2 && !isOrderedRange(parts[0]!, parts[1]!)) {
       continue;
     }
     // A lone cell in running text could be a word (Q4); with a sheet or in code it is a cell.
@@ -76,28 +68,52 @@ export function isRefList(text: string, refs: CellRef[]): boolean {
   return /^[\s,;]*$/.test(rest.replace(/(?<![\p{L}\p{N}_])(?:và|and|or|hoặc)(?![\p{L}\p{N}_])/giu, ""));
 }
 
-function validRange([from, to]: [string, string]): boolean {
-  const a = /^\$?([A-Z]{1,3})\$?(\d+)$/.exec(from)!;
-  const b = /^\$?([A-Z]{1,3})\$?(\d+)$/.exec(to)!;
-  return columnToNumber(a[1]!) <= columnToNumber(b[1]!) && Number(a[2]) <= Number(b[2]);
+/**
+ * True when `text` names one of the workbooks in `names` (a whole word, any case, with or without the extension). A reply
+ * that talks about another file cannot have its bare cell references linked: they could be that file's, and a link into
+ * the wrong file is worse than no link. Used only to hold links back, never to decide where one goes.
+ */
+export function mentionsFile(text: string, names: readonly string[]): boolean {
+  return mentionsName(text, names.map(workbookStem));
 }
 
-function makeLink(ref: CellRef, sheet: string | undefined): HTMLAnchorElement {
+/**
+ * True when `text` names one of the sheets in `names` (a whole word, any case). A bare "C5" in a reply that also says
+ * "sheet2/C5" is not the open sheet's: it could be the named sheet's, and the page cannot tell which, so it is left unlinked.
+ */
+export function mentionsSheet(text: string, names: readonly string[]): boolean {
+  return mentionsName(text, names);
+}
+
+function mentionsName(text: string, names: readonly string[]): boolean {
+  for (const name of names) {
+    // One letter would match the article "a" in a sentence; such a name is too short to tell from ordinary words.
+    if (name.length < 2) continue;
+    const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    if (new RegExp(String.raw`(?<![\p{L}\p{N}_])${escaped}(?![\p{L}\p{N}_])`, "iu").test(text)) return true;
+  }
+  return false;
+}
+
+/** The badge for a reference: it carries where it goes, and the click handler in main.ts does the rest. */
+export function cellBadge(text: string, target: CellTarget): HTMLAnchorElement {
   const link = document.createElement("a");
   link.className = "cell-link";
   link.href = "#";
-  link.textContent = ref.text;
-  link.dataset.address = ref.address;
-  if (sheet) link.dataset.sheet = sheet;
-  link.title = `Select ${sheet ? `${sheet}!` : ""}${ref.address} in Excel${sheet ? "" : " (on the sheet that is open)"}`;
+  link.textContent = text;
+  link.dataset.address = target.address;
+  if (target.file) link.dataset.file = target.file;
+  if (target.sheet) link.dataset.sheet = target.sheet;
+  const where = `${target.file ? `${target.file} → ` : ""}${target.sheet ? `${target.sheet}!` : ""}${target.address}`;
+  link.title = `Select ${where} in Excel${target.sheet || target.file ? "" : " (on the sheet that is open)"}`;
   return link;
 }
 
 const SKIP = new Set(["A", "PRE", "SCRIPT", "STYLE", "BUTTON"]);
 
 /**
- * Replace references inside `root` with links. A reference without a sheet name goes to the last sheet named earlier
- * in the same text, or else to whichever sheet is open when it is clicked.
+ * Replace plain-word references inside `root` with links. A reference without a sheet name goes to the last sheet named
+ * earlier in the same text, or else to whichever sheet is open when it is clicked.
  */
 export function linkifyCells(root: HTMLElement): void {
   let current: string | undefined;
@@ -120,7 +136,8 @@ export function linkifyCells(root: HTMLElement): void {
     let at = 0;
     for (const ref of refs) {
       if (ref.sheet) current = ref.sheet;
-      pieces.push(node.data.slice(at, ref.start), makeLink(ref, ref.sheet ?? current));
+      const sheet = ref.sheet ?? current;
+      pieces.push(node.data.slice(at, ref.start), cellBadge(ref.text, { ...(sheet ? { sheet } : {}), address: ref.address }));
       at = ref.end;
     }
     pieces.push(node.data.slice(at));

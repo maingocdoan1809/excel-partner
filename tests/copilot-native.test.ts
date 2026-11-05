@@ -97,6 +97,18 @@ describe("Copilot native question transport", () => {
     const shown = (await turn(id)).filter(e => e.type === "message_delta").map(e => (e as { text: string }).text).join("");
     expect(shown).toBe("Hello world");
   });
+  it("streams reasoning as thinking, one paragraph per block, and shows an unstreamed block whole", async () => {
+    const id = await manager.start(ctx, process.execPath, process.env);
+    sdk.run = async () => {
+      for (const chunk of ["Check ", "the sheet."]) sdk.handler({ type: "assistant.reasoning_delta", data: { reasoningId: "a", deltaContent: chunk } });
+      sdk.handler({ type: "assistant.reasoning", data: { reasoningId: "a", content: "Check the sheet." } });
+      sdk.handler({ type: "assistant.reasoning", data: { reasoningId: "b", content: "Then sort." } });
+      sdk.handler({ type: "assistant.message", data: { messageId: "x", content: "Done" } });
+    };
+    const events = await turn(id);
+    expect(events.flatMap(e => e.type === "thinking_delta" ? [e.text] : [])).toEqual(["Check ", "the sheet.", "\n\nThen sort."]);
+    expect(events.findIndex(e => e.type === "thinking_delta")).toBeLessThan(events.findIndex(e => e.type === "message_delta"));
+  });
   it("shows a final message that was never streamed", async () => {
     const id = await manager.start(ctx, process.execPath, process.env);
     sdk.run = async () => { sdk.handler({ type: "assistant.message", data: { messageId: "x", content: "Short answer" } }); };

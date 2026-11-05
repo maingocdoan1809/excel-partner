@@ -103,7 +103,9 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
     title: "Get selection",
     description:
       "READ. Current cell range with values/headers, or activeShape with ID, name, text and connector endpoints (ExcelApi 1.19+). On Windows, selectedShapes lists the full native selection when selectedShapesStatus=complete; use names for Office.js tools, as nativeId is a COM ID. If unavailable, activeShape identifies only one object. " +
-      "Call this first to understand what the user is pointing at.",
+      "Call this first to understand what the user is pointing at. " +
+      "POINTING AT CELLS: when your reply mentions cells, write each as a link that names its sheet, [C5](cell:?sheet=Sheet2&range=C5) (a space in a name is %20): one click opens exactly that sheet and range. " +
+      "The result of a tool that works on a range carries a ready-made `link`: paste it as it is. A bare C5 is not linked when the reply also names a sheet, because the page does not guess.",
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
     annotations: READ,
   },
@@ -119,7 +121,8 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
     title: "Read range",
     description:
       "READ. Values (and optionally formulas and displayed text) of an A1 range. Use format `csv` for large ranges: " +
-      "it is much more compact than the default 2D array. Page big ranges with maxRows / offset.",
+      "it is much more compact than the default 2D array. Page big ranges with maxRows / offset. " +
+      "The result has a `link` for the range: paste it when you point the user at those cells.",
     inputSchema: {
       type: "object",
       properties: {
@@ -176,7 +179,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
       "WRITE. Write a 2D array of values (strings starting with `=` become formulas). `address` must be a " +
       "single cell or exactly match the size of `values`; with mode `top_left` it is only the anchor. " +
       "Refuses to overwrite non-empty cells unless allowOverwrite is true. `notes` attaches cell notes " +
-      "(e.g. a data source) in the same call.",
+      "(e.g. a data source) in the same call. The result has a `link` for the range written: paste it when you tell the user where.",
     inputSchema: {
       type: "object",
       properties: {

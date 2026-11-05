@@ -31,8 +31,19 @@ export const ProviderEventSchema = z.discriminatedUnion("type", [
     usage: TokenUsageSchema,
   }),
   z.object({
+    /** The provider CLI is being opened for this request; `turn_started` follows once it is ready. */
+    type: z.literal("session_starting"),
+    requestId: z.string(),
+  }),
+  z.object({
     type: z.literal("turn_started"),
     requestId: z.string(),
+  }),
+  z.object({
+    /** What the model reasons before answering (full text or the provider's summary of it), shown while the turn runs. */
+    type: z.literal("thinking_delta"),
+    requestId: z.string(),
+    text: z.string(),
   }),
   z.object({
     type: z.literal("message_delta"),

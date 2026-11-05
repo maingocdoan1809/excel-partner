@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from "vitest";
-import { findCellRefs, isRefList, linkifyCells } from "../addin/taskpane/ui/cell-links.js";
+import { findCellRefs, isRefList, linkifyCells, mentionsFile, mentionsSheet } from "../addin/taskpane/ui/cell-links.js";
+import { cellLinkMarkdown } from "../protocol/src/index.js";
 import { renderMarkdown } from "../addin/taskpane/ui/markdown.js";
 
 const refs = (text: string, context: "text" | "code" = "text") => findCellRefs(text, context).map((r) => `${r.sheet ?? ""}|${r.address}`);
@@ -166,5 +167,120 @@ describe("renderMarkdown with cellLinks", () => {
     expect(links(root)).toEqual([["F10:F16", "", "F10:F16"], ["Data!B2", "Data", "B2"]]);
     expect(root.querySelector('a[href^="https://example.com"]')!.getAttribute("rel")).toBe("noopener noreferrer");
     expect(html).not.toContain("javascript:");
+  });
+});
+
+describe("links the assistant spells out", () => {
+  const draw = (markdown: string, cellLinks: boolean | { plain?: boolean } = true) => {
+    const root = document.createElement("div");
+    root.innerHTML = renderMarkdown(markdown, { cellLinks });
+    return root;
+  };
+  const where = (root: HTMLElement) => Array.from(root.querySelectorAll<HTMLAnchorElement>("a.cell-link"))
+    .map((a) => `${a.textContent} -> ${a.dataset.file ?? "-"} | ${a.dataset.sheet ?? "-"} | ${a.dataset.address}`);
+
+  it("goes exactly where the link says: the sentence that was wrong before", () => {
+    const root = draw("Mình đã nhập dữ liệu vào **Book2 → Sheet1**, vùng [A1:E8](cell:?file=Book2.xlsx&sheet=Sheet1&range=A1:E8) (bảng bán hàng mẫu):");
+    expect(where(root)).toEqual(["A1:E8 -> Book2.xlsx | Sheet1 | A1:E8"]);
+    expect(root.querySelector<HTMLAnchorElement>("a.cell-link")!.title).toBe("Select Book2.xlsx → Sheet1!A1:E8 in Excel");
+    expect(root.textContent?.trim()).toBe("Mình đã nhập dữ liệu vào Book2 → Sheet1, vùng A1:E8 (bảng bán hàng mẫu):");
+  });
+
+  it("keeps the file, sheet and range intact through the markdown and back, whatever the names hold", () => {
+    for (const target of [
+      { file: "Sales (2026) báo cáo.xlsx", sheet: "Bảng tổng hợp [Q1]", address: "B2:C3" },
+      { file: "Book 2.xlsx", sheet: "Sheet's & more", address: "D:D" },
+      { sheet: "Dữ liệu", address: "3:5" },
+      { address: "AB12" },
+    ]) {
+      const link = draw(cellLinkMarkdown(target.address, target)).querySelector<HTMLAnchorElement>("a.cell-link")!;
+      expect({ file: link.dataset.file, sheet: link.dataset.sheet, address: link.dataset.address }).toEqual({ file: target.file, sheet: target.sheet, address: target.address });
+    }
+  });
+
+  it("reads a name the assistant wrote with accents and no percent-encoding", () => {
+    expect(where(draw("[x](cell:?sheet=Bảng%20tổng&range=a1)"))).toEqual(["x -> - | Bảng tổng | A1"]);
+  });
+
+  it("leaves a link without a file in this workbook", () => {
+    expect(where(draw("[B2](cell:?sheet=Data&range=B2) và [C3](cell:?range=C3)"))).toEqual(["B2 -> - | Data | B2", "C3 -> - | - | C3"]);
+  });
+
+  it("shows only the words of a cell link that names no real range, and of one that is not a cell link at all", () => {
+    for (const href of ["cell:?range=ZZZZ1", "cell:?sheet=Data", "cell:?range=A1;DROP", "cell:?range=B5:A1", "cell:?range=A1:B2:C3", "cell:", "cell:?range=A0"]) {
+      const root = draw(`See [here](${href}) now.`);
+      expect(root.querySelector("a"), href).toBeNull();
+      expect(root.textContent?.trim(), href).toBe("See here now.");
+    }
+    const unsafe = draw("[x](javascript:alert(1)) and [y](data:text/html,<b>) and [z](https://example.com)");
+    expect(unsafe.querySelectorAll("a")).toHaveLength(1);
+    expect(unsafe.querySelector("a")!.getAttribute("href")).toBe("https://example.com");
+  });
+
+  it("is text when links are off", () => {
+    const root = draw("Xem [A1:E8](cell:?file=Book2.xlsx&sheet=Sheet1&range=A1:E8)", false);
+    expect(root.querySelector("a")).toBeNull();
+    expect(root.textContent?.trim()).toBe("Xem A1:E8");
+  });
+
+  it("does not link a second time inside a badge it made", () => {
+    const root = draw("[see B2:C3](cell:?range=B2:C3)");
+    expect(where(root)).toEqual(["see B2:C3 -> - | - | B2:C3"]);
+    expect(root.querySelectorAll("a")).toHaveLength(1);
+  });
+
+  it("guesses nothing from the words around bare references when it is told the reply may be about another file", () => {
+    const text = "Mình đã nhập dữ liệu vào **Book2 → Sheet1**, vùng A1:E8, và Sheet1!B2 nữa; xem [C3](cell:?file=Book2.xlsx&sheet=Sheet1&range=C3).";
+    expect(where(draw(text, { plain: false }))).toEqual(["C3 -> Book2.xlsx | Sheet1 | C3"]);
+    // Otherwise bare references link as before: a file is never part of one.
+    expect(where(draw(text, { plain: true }))).toEqual(["A1:E8 -> - | - | A1:E8", "Sheet1!B2 -> - | Sheet1 | B2", "C3 -> Book2.xlsx | Sheet1 | C3"]);
+  });
+});
+
+describe("mentionsFile", () => {
+  const files = ["Book2.xlsx", "Sales (2026).xlsx"];
+
+  it("finds a file by its name, any case, with or without the extension", () => {
+    expect(mentionsFile("Đã nhập vào Book2 → Sheet1", files)).toBe(true);
+    expect(mentionsFile("saved in BOOK2.XLSX", files)).toBe(true);
+    expect(mentionsFile("see Sales (2026) for it", files)).toBe(true);
+  });
+
+  it("does not take part of another word for a file", () => {
+    expect(mentionsFile("Book20 and Notebook2", files)).toBe(false);
+    expect(mentionsFile("nothing here", files)).toBe(false);
+    expect(mentionsFile("Book2", [])).toBe(false);
+  });
+
+  it("ignores names too short to tell from ordinary words", () => {
+    expect(mentionsFile("a b c", ["A.xlsx", ""])).toBe(false);
+  });
+});
+
+describe("mentionsSheet", () => {
+  const sheets = ["Sheet1", "Sheet2", "Tổng hợp", "Data (2026)", "A"];
+
+  it("finds a sheet by its name, any case, wherever the sentence puts it", () => {
+    expect(mentionsSheet("mình chưa đụng gì vào workbook Excel — sheet2/C5 vẫn nguyên", sheets)).toBe(true);
+    expect(mentionsSheet("Trong Tổng hợp, ô B2 sai", sheets)).toBe(true);
+    expect(mentionsSheet("xem DATA (2026): C3", sheets)).toBe(true);
+  });
+
+  it("does not take part of another word, or a one-letter name, for a sheet", () => {
+    expect(mentionsSheet("Sheet20 and MySheet2", sheets)).toBe(false);
+    expect(mentionsSheet("a total in a cell, C5", sheets)).toBe(false);
+    expect(mentionsSheet("ô C5 vẫn nguyên", sheets)).toBe(false);
+    expect(mentionsSheet("anything", [])).toBe(false);
+  });
+
+  it("is what keeps a bare C5 from being linked to the open sheet when the sentence says sheet2", () => {
+    const text = "mình chưa đụng gì vào workbook Excel — sheet2/C5 vẫn nguyên.";
+    const draw = (plain: boolean) => {
+      const root = document.createElement("div");
+      root.innerHTML = renderMarkdown(text, { cellLinks: { plain } });
+      return root.querySelectorAll("a.cell-link").length;
+    };
+    expect(draw(true)).toBe(1); // what the page used to do: C5 on whatever sheet is open
+    expect(draw(!mentionsSheet(text, sheets))).toBe(0);
   });
 });

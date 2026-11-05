@@ -107,6 +107,21 @@ describe("editable settings and pending user prompts", () => {
     expect(adapter.contexts[2]!.mcp.env.EXCEL_PLAYWRIGHT).toBeUndefined();
   });
 
+  it("tells the pane when the provider session is opening, before the turn starts and only when it opens", async () => {
+    const { pane, adapter } = await setup();
+    adapter.useTool = false;
+    adapter.release();
+    pane.send({ type: "prompt", requestId: "first", prompt: "Hello", selection: null });
+    await pane.waitFor(message => message.type === "turn_finished" && message.requestId === "first");
+    const order = pane.received.map(message => `${message.type}:${"requestId" in message ? message.requestId : ""}`);
+    expect(order.indexOf("session_starting:first")).toBeGreaterThanOrEqual(0);
+    expect(order.indexOf("session_starting:first")).toBeLessThan(order.indexOf("turn_started:first"));
+    pane.send({ type: "prompt", requestId: "second", prompt: "Again", selection: null });
+    await pane.waitFor(message => message.type === "turn_finished" && message.requestId === "second");
+    expect(adapter.contexts).toHaveLength(1);
+    expect(pane.received.some(message => message.type === "session_starting" && message.requestId === "second")).toBe(false);
+  });
+
   it("authenticates skill editing, rejects stale and non-owned files, and refreshes skill metadata", async () => {
     const { url, headers } = await setup();
     expect((await fetch(url + "/session/skills?name=report")).status).toBe(401);

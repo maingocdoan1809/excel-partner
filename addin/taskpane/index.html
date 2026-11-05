@@ -104,7 +104,7 @@
           </section>
           <section class="settings-section settings-links" aria-label="Workspace settings">
             <button type="button" data-settings-panel="changes">Workbook changes <span>›</span></button>
-            <button id="menu-references" type="button">Reference files <span>›</span></button>
+            <button id="menu-references" type="button">References <span>›</span></button>
             <button id="menu-testing" type="button">Testing: sign-ins, notes, scripts <span>›</span></button>
             <button id="menu-skills" type="button">Manage skills <span>›</span></button>
             <button id="menu-templates" type="button">Skill templates <span>›</span></button>
@@ -217,26 +217,26 @@
         <div id="history-list" class="panel-body"></div>
       </section>
 
-      <section id="panel-references" class="panel" hidden aria-label="Reference files">
+      <section id="panel-references" class="panel" hidden aria-label="References">
         <header class="panel-head">
           <button type="button" class="back" data-close="references" aria-label="Back to chat">←</button>
-          <h2>Reference files</h2>
+          <h2>References</h2>
         </header>
-        <p class="template-help">Register shared common or knowledge files for any skill. Only the name, path and description are saved. The assistant reads the original file when needed.</p>
-        <button id="reference-add" type="button" class="secondary">Add reference file</button>
+        <p class="template-help">Register shared common or knowledge files or folders for any skill. Only the name, path and description are saved. The assistant reads the original when needed; a folder lets it list and read what is inside.</p>
+        <button id="reference-add" type="button" class="secondary">Add Reference</button>
         <p id="reference-status" class="template-help" role="status" aria-live="polite"></p>
         <div id="reference-list" class="panel-body"></div>
       </section>
       <dialog id="reference-dialog" class="reference-dialog" aria-labelledby="reference-heading">
         <form id="reference-form">
-          <h2 id="reference-heading">Reference file</h2>
+          <h2 id="reference-heading">Reference</h2>
           <label for="reference-name">Name</label>
           <input id="reference-name" maxlength="200" required />
-          <label for="reference-path">File path</label>
-          <input id="reference-path" placeholder="C:\\Folder\\file.xlsx" autocomplete="off" spellcheck="false" required />
-          <p class="template-help">Paste the full path. In Explorer: select the file, then Shift + right-click &gt; Copy as path. The file is not copied or uploaded.</p>
+          <label for="reference-path">File or folder path</label>
+          <input id="reference-path" placeholder="C:\\Folder\\file.xlsx or C:\\Folder" autocomplete="off" spellcheck="false" required />
+          <p class="template-help">Paste the full path of a file or a folder. In Explorer: select it, then Shift + right-click &gt; Copy as path. Nothing is copied or uploaded. For a folder, the assistant can read every file inside it, and nothing outside it.</p>
           <label for="reference-description">Description</label>
-          <textarea id="reference-description" maxlength="4000" rows="4" placeholder="What does this file contain, and when should it be used?"></textarea>
+          <textarea id="reference-description" maxlength="4000" rows="4" placeholder="What does it contain, and when should it be used?"></textarea>
           <p id="reference-dialog-status" class="template-help" role="status" aria-live="polite"></p>
           <div class="reference-actions">
             <button id="reference-cancel" type="button" class="secondary">Cancel</button>

@@ -146,4 +146,78 @@ describe("Delegations", () => {
   });
 });
 
+describe("Delegations: what the other file really changed", () => {
+  const wrote = (sheet: string, address: string) => ({ ok: true as const, data: { sheet, address, rowsWritten: 1, columnsWritten: 1 } });
+
+  /** A request that is running in the target's turn r1, so that its tools count for it. */
+  function running(name: string | null = "Book2.xlsx") {
+    const world = setup();
+    world.target.session.workbookName = name;
+    const result = world.delegations.run(world.target.session, from, "fill A1:E8");
+    world.delegations.accept(world.target.session, world.delivered().delegationId, "r1");
+    world.target.session.beginTurn("r1");
+    return { ...world, result };
+  }
+
+  it("hands back the ranges its tools changed, with links ready to paste, read from the tool results", async () => {
+    const { delegations, target, result } = running();
+    delegations.recordChange(target.session, "write_range", wrote("Sheet1", "A1:E8"));
+    delegations.recordChange(target.session, "format_range", wrote("Sheet1", "A1:E1"));
+    delegations.recordChange(target.session, "set_formula", wrote("Tổng hợp", "B10"));
+    delegations.observe(target.session, "r1", text("Đã nhập dữ liệu vào Book2 → Sheet1, vùng A1:E8."));
+    delegations.finish(target.session, "r1", "completed");
+    const data = ((await result) as { data: { changed: unknown[]; changedNote: string } }).data;
+    expect(data.changed).toEqual([
+      { file: "Book2.xlsx", sheet: "Sheet1", address: "A1:E8", link: "[A1:E8](cell:?file=Book2.xlsx&sheet=Sheet1&range=A1:E8)" },
+      { file: "Book2.xlsx", sheet: "Sheet1", address: "A1:E1", link: "[A1:E1](cell:?file=Book2.xlsx&sheet=Sheet1&range=A1:E1)" },
+      { file: "Book2.xlsx", sheet: "Tổng hợp", address: "B10", link: "[B10](cell:?file=Book2.xlsx&sheet=T%E1%BB%95ng%20h%E1%BB%A3p&range=B10)" },
+    ]);
+    expect(data.changedNote).toContain("paste these links");
+  });
+
+  it("counts a range once, and only what a successful tool that names its range changed", async () => {
+    const { delegations, target, result } = running();
+    delegations.recordChange(target.session, "write_range", wrote("Sheet1", "A1"));
+    delegations.recordChange(target.session, "write_range", wrote("Sheet1", "A1"));
+    delegations.recordChange(target.session, "write_range", wrote("Sheet1", "$A$1"));
+    delegations.recordChange(target.session, "read_range", wrote("Sheet1", "B2"));
+    delegations.recordChange(target.session, "write_range", { ok: false, error: { code: "office_error", message: "no" } });
+    delegations.recordChange(target.session, "write_range", { ok: true, data: { rowsWritten: 1 } });
+    delegations.recordChange(target.session, "write_range", wrote("", "B2"));
+    delegations.recordChange(target.session, "write_range", wrote("Sheet1", "not a range"));
+    delegations.finish(target.session, "r1", "completed");
+    expect(((await result) as { data: { changed: Array<{ address: string }> } }).data.changed.map((c) => c.address)).toEqual(["A1"]);
+  });
+
+  it("keeps at most thirty ranges", async () => {
+    const { delegations, target, result } = running();
+    for (let row = 1; row <= 40; row++) delegations.recordChange(target.session, "write_range", wrote("S", `A${row}`));
+    delegations.finish(target.session, "r1", "completed");
+    expect(((await result) as { data: { changed: unknown[] } }).data.changed).toHaveLength(30);
+  });
+
+  it("ignores tools of another turn, of another pane and of no request, and says nothing when nothing changed", async () => {
+    const { delegations, target, sessions, result } = running();
+    const other = connected(sessions, "other");
+    other.session.beginTurn("r1");
+    delegations.recordChange(other.session, "write_range", wrote("Sheet1", "A1"));
+    target.session.endTurn("r1");
+    delegations.recordChange(target.session, "write_range", wrote("Sheet1", "A2"));
+    target.session.beginTurn("r2");
+    delegations.recordChange(target.session, "write_range", wrote("Sheet1", "A3"));
+    delegations.finish(target.session, "r1", "completed");
+    const data = ((await result) as { data: Record<string, unknown> }).data;
+    expect(data).not.toHaveProperty("changed");
+    expect(data).not.toHaveProperty("changedNote");
+    expect(data.reply).toBeDefined();
+  });
+
+  it("gives no links for a file that has no name yet: nothing could find it from another chat", async () => {
+    const { delegations, target, result } = running(null);
+    delegations.recordChange(target.session, "write_range", wrote("Sheet1", "A1:E8"));
+    delegations.finish(target.session, "r1", "completed");
+    expect(((await result) as { data: Record<string, unknown> }).data).not.toHaveProperty("changed");
+  });
+});
+
 vi.useRealTimers();
