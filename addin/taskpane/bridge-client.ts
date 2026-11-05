@@ -1,12 +1,16 @@
 import {
   PROTOCOL_VERSION,
   MAX_SKILL_UPLOAD_BYTES,
+  MAX_DELEGATED_TEXT,
+  WORKBOOK_NAME_REQUEST,
   decodeServerMessage,
   encodeMessage,
   type ProviderEvent,
   type ProviderId,
   type ToolCapabilities,
   type BrowserFrameMessage,
+  type ConnectedFile,
+  type DelegatedPromptMessage,
   type ProviderStatusMessage,
   type SelectionSnapshot,
   type ServerMessage,
@@ -44,6 +48,8 @@ export interface TestingOverview {
 }
 export interface ModelCatalog { models: Array<{ id: string; name: string }>; defaultModelId: string | null }
 
+interface ConnectedFileApproval { fileId?: string; name?: string; action?: "message"; text?: string }
+
 export interface BridgeClientHandlers {
   onUserInput?(request: UserInputRequest, signal: AbortSignal, requestId: string): Promise<UserInputResponse>;
   onState(state: BridgeState, detail?: string): void;
@@ -52,6 +58,12 @@ export interface BridgeClientHandlers {
   onProviderEvent(event: ProviderEvent): void;
   /** A picture of the assistant's browser; shown to the person only. */
   onBrowserFrame?(frame: BrowserFrameMessage): void;
+  /** The bridge asks what this workbook is called now. Null when Excel cannot say. */
+  readWorkbookName?(): Promise<string | null>;
+  /** The workbooks open with this add-in changed (one opened, closed or renamed). The current file is first. */
+  onConnectedFiles?(files: ConnectedFile[]): void;
+  /** Another workbook's assistant asked this one to do something. Run it as a turn, or call declineDelegation. */
+  onDelegatedPrompt?(request: DelegatedPromptMessage): void;
   onError(message: string): void;
   /** Wraps every workbook tool run, so edits can be recorded for undo. Reads pass straight through. */
   runTool?(context: { callId: string; requestId: string }, tool: string, args: unknown, execute: (tool: string, args: unknown) => Promise<ToolResult>): Promise<ToolResult>;
@@ -133,12 +145,28 @@ export class BridgeClient {
     this.setState("closed");
   }
 
+  /** This pane cannot take a request another workbook's assistant sent. */
+  declineDelegation(delegationId: string, reason: string): void {
+    this.send({ type: "delegation_declined", delegationId, reason: reason.slice(0, 200) });
+  }
+
+  /** The list of connected files is about to be looked at: have the bridge read every workbook's name again and resend it. */
+  refreshConnectedFiles(): void {
+    this.send({ type: "refresh_connected_files" });
+  }
+
+  /** Tell the bridge what this workbook is called, so other open workbooks can list it. Safe to call before connecting. */
+  sendWorkbookInfo(name: string): void {
+    const trimmed = name.trim();
+    if (trimmed) this.send({ type: "workbook_info", name: trimmed.slice(0, 255) });
+  }
+
   setProvider(provider: ProviderId): void {
     this.send({ type: "set_provider", provider });
   }
 
-  sendPrompt(requestId: string, prompt: string, selection: SelectionSnapshot | null, context?: string, attachmentIds?: string[], model?: string | null, referencePaths?: string[], effort: "low" | "medium" | "high" = "medium", chatSessionId?: string, resumeSessionId?: string, capabilities?: ToolCapabilities, command?: boolean): void {
-    this.send({ type: "prompt", requestId, prompt, selection, chatSessionId, resumeSessionId, capabilities, command, model: model ?? null, effort, ...(context ? { context } : {}), ...(attachmentIds?.length ? { attachmentIds } : {}), ...(referencePaths?.length ? { referencePaths } : {}) });
+  sendPrompt(requestId: string, prompt: string, selection: SelectionSnapshot | null, context?: string, attachmentIds?: string[], model?: string | null, referencePaths?: string[], effort: "low" | "medium" | "high" = "medium", chatSessionId?: string, resumeSessionId?: string, capabilities?: ToolCapabilities, command?: boolean, delegationId?: string): void {
+    this.send({ type: "prompt", requestId, prompt, selection, chatSessionId, resumeSessionId, capabilities, command, model: model ?? null, effort, ...(delegationId ? { delegationId } : {}), ...(context ? { context } : {}), ...(attachmentIds?.length ? { attachmentIds } : {}), ...(referencePaths?.length ? { referencePaths } : {}) });
   }
 
   async listCommands(provider: ProviderId): Promise<import("../../protocol/src/commands.js").ProviderCommand[]> {
@@ -355,6 +383,12 @@ export class BridgeClient {
       case "browser_frame":
         this.handlers.onBrowserFrame?.(message);
         return;
+      case "connected_files":
+        this.handlers.onConnectedFiles?.(message.files);
+        return;
+      case "delegated_prompt":
+        this.handlers.onDelegatedPrompt?.(message);
+        return;
       default:
         if (message.type === "turn_finished") this.closeQuestions(message.requestId);
         this.handlers.onProviderEvent(message);
@@ -380,6 +414,13 @@ export class BridgeClient {
         result: { ok: true, data: controller.signal.aborted ? CANCELLED_USER_INPUT : response } });
       return;
     }
+    if (message.tool === WORKBOOK_NAME_REQUEST) {
+      // Not a workbook tool: no card, no change record. If Excel cannot say, the bridge keeps the name it has.
+      let name: string | null = null;
+      try { name = await this.handlers.readWorkbookName?.() ?? null; } catch { /* keep null */ }
+      this.send({ type: "tool_result", callId: message.callId, result: { ok: true, data: { name } } });
+      return;
+    }
     const result = message.tool === "__authorize_provider_tool"
       ? { ok: true as const, data: { approved: this.permissionMode === "auto" || await this.askPermission(
         "Allow OpenCode tool?", "OpenCode requests permission to run this tool on your computer.", "Allow tool", message.timeoutMs,
@@ -402,6 +443,8 @@ export class BridgeClient {
         (detail, target) => this.askPermission("Allow skill script?", detail, "Run script", message.timeoutMs, target))
       : message.tool === "__authorize_site_knowledge"
       ? await this.authorizeSiteKnowledge(message.args as SiteKnowledgeApproval, message.timeoutMs)
+      : message.tool === "__authorize_connected_file"
+      ? { ok: true as const, data: { approved: this.permissionMode === "auto" || await this.authorizeConnectedFile(message.args as ConnectedFileApproval, message.timeoutMs) } }
       : message.tool === "__authorize_test_browser"
       ? await this.authorizeTestBrowser(message.args as TestBrowserApproval, message.timeoutMs)
       : message.tool === "__authorize_reference_path"
@@ -425,6 +468,22 @@ export class BridgeClient {
     for (const question of this.questions.values()) {
       if (!requestId || question.requestId === requestId) question.controller.abort();
     }
+  }
+
+  /** Reading another open workbook, or sending its assistant a request (which may change that file). Auto mode allows both. */
+  private authorizeConnectedFile(args: ConnectedFileApproval, timeoutMs: number): Promise<boolean> {
+    const name = String(args.name ?? "").slice(0, 300);
+    if (args.action === "message") {
+      // The person must see every character that is sent: show all of it, and refuse what cannot be shown whole.
+      const text = String(args.text ?? "");
+      if (text.length > MAX_DELEGATED_TEXT) return Promise.resolve(false);
+      return this.askPermission("Send a request to another file?",
+        "The assistant wants the assistant of another open workbook to do this. It works in that file with that file's own tools and permission setting, so changes may be approved in that window. What it does can include changing that file.",
+        "Send request", timeoutMs, `${name}\n\n${text}`);
+    }
+    return this.askPermission("Let the assistant read another file?",
+      "The assistant wants to read another workbook open in Excel. It can only read it, never change it. What it reads is sent to your AI provider like the rest of this chat.",
+      "Allow read", timeoutMs, name);
   }
 
   /** Notes about a system steer later sessions, so Ask mode shows the text; Auto mode saves without asking. */

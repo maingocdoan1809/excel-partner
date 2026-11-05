@@ -1,5 +1,6 @@
 import { cleanSessionTitle } from "../../protocol/src/session-title.js";
 import { TestSessions } from "./test-sessions.js";
+import { Delegations } from "./delegations.js";
 import { SiteKnowledge } from "./site-knowledge.js";
 import { TestScripts } from "./test-scripts.js";
 import { BackupError, MAX_BACKUP_BYTES, WorkbookBackups } from "./workbook-backups.js";
@@ -19,6 +20,7 @@ import { WebSocketServer, type WebSocket, type RawData } from "ws";
 import {
   PROTOCOL_VERSION,
   ProviderIdSchema,
+  WorkbookInfoMessageSchema,
   providerSessionKey,
   type ClientMessage,
   type ProviderId,
@@ -80,6 +82,7 @@ export class Bridge {
   readonly logger: Logger;
   readonly sessions: SessionManager;
   readonly gateway: ToolGateway;
+  private readonly delegations: Delegations;
   readonly providers: ProviderRegistry;
   private readonly providerSessions: ProviderSessionManager<WorkbookSession>;
   private readonly references: ReferenceFiles;
@@ -134,6 +137,7 @@ export class Bridge {
           gatewayDir: process.env.AGENT_GATEWAY_HOME ?? path.join(process.env.LOCALAPPDATA || path.join(os.homedir(), ".config"), "Agent Gateway"),
         })
       : options.updater;
+    this.delegations = new Delegations((session, requestId) => void this.onCancel(session, requestId));
     this.gateway = new ToolGateway(
       this.sessions,
       config.limits,
@@ -147,6 +151,7 @@ export class Bridge {
       testSessions,
       siteKnowledge,
       testScripts,
+      this.delegations,
     );
 
     const runtime = {
@@ -575,10 +580,14 @@ export class Bridge {
       return this.sendJson(res, 400, { error: "missing_tool" });
     }
 
+    // A call that waits on another file can outlive the MCP process that made it; stop it when that process hangs up.
+    const callerGone = new AbortController();
+    res.on("close", () => { if (!res.writableFinished) callerGone.abort(); });
     const result = await this.gateway.invoke({
       sessionId: session.id,
       tool: body.tool,
       args: body.args,
+      signal: callerGone.signal,
     });
     return this.sendJson(res, 200, result);
   }
@@ -874,8 +883,10 @@ export class Bridge {
         this.logins.forget(state.session.id);
         void this.gateway.externalTools.closeSession(state.session.id);
         state.session.detachSocket(ws);
+        this.delegations.sessionClosed(state.session);
         state.session.abortTurn();
         this.closeProviderProcess(state.session, "socket_closed").catch(() => undefined);
+        this.broadcastConnectedFiles();
       }
       this.logger.debug("socket closed");
     });
@@ -921,10 +932,23 @@ export class Bridge {
 
     const session = state.session;
     switch (message.type) {
+      case "workbook_info": {
+        const info = WorkbookInfoMessageSchema.safeParse(message);
+        if (!info.success) return;
+        session.workbookName = info.data.name;
+        this.broadcastConnectedFiles();
+        return;
+      }
+      case "refresh_connected_files":
+        void this.refreshConnectedFiles();
+        return;
       case "set_provider":
         return this.onSetProvider(session, message.provider);
       case "prompt":
-        return this.onPrompt(session, message.requestId, message.prompt, message.selection, message.context, message.attachmentIds, message.model, message.referencePaths, message.effort, message.chatSessionId, message.resumeSessionId, message.capabilities, message.command);
+        return this.onPrompt(session, message.requestId, message.prompt, message.selection, message.context, message.attachmentIds, message.model, message.referencePaths, message.effort, message.chatSessionId, message.resumeSessionId, message.capabilities, message.command, message.delegationId);
+      case "delegation_declined":
+        this.delegations.decline(session, message.delegationId, typeof message.reason === "string" ? message.reason.slice(0, 200) : "");
+        return;
       case "followup": {
         const respond = (state: "pending" | "next_turn" | "rejected", detail?: string) => session.send({ type: "followup_status", requestId: message.requestId, id: message.id, state, message: detail });
         if (session.activeRequestId !== message.requestId || session.turnController?.signal.aborted) { respond("next_turn"); return; }
@@ -983,6 +1007,24 @@ export class Bridge {
       serverTime: new Date().toISOString(),
       addinBuildId: this.addinBuildId(),
     });
+    this.broadcastConnectedFiles();
+  }
+
+  private refreshingFiles: Promise<void> | null = null;
+
+  /** Read every pane's workbook name now, then tell every pane. Requests that arrive meanwhile share the same round. */
+  private refreshConnectedFiles(): Promise<void> {
+    this.refreshingFiles ??= this.sessions.refreshNames()
+      .then(() => this.broadcastConnectedFiles())
+      .catch((error) => this.logger.warn("could not refresh connected files", { error: String(error) }))
+      .finally(() => { this.refreshingFiles = null; });
+    return this.refreshingFiles;
+  }
+
+  /** Tell every connected task pane which workbooks are open, each with itself first. Called whenever the list or a name changes. */
+  private broadcastConnectedFiles(): void {
+    const connected = this.sessions.connected();
+    for (const session of connected) session.send({ type: "connected_files", files: this.sessions.connectedFiles(session) });
   }
 
   /** Changes whenever the task pane bundle is rebuilt (its modification time). */
@@ -1030,8 +1072,9 @@ export class Bridge {
     resumeSessionId?: string,
     capabilities: ToolCapabilities = { webSearch: false, playwright: false },
     isCommand = false,
+    delegationId?: string,
   ): Promise<void> {
-    return this.runPrompt(session, requestId, prompt, selection, context, attachmentIds, model, referencePaths, effort, chatSessionId, resumeSessionId, capabilities, isCommand);
+    return this.runPrompt(session, requestId, prompt, selection, context, attachmentIds, model, referencePaths, effort, chatSessionId, resumeSessionId, capabilities, isCommand, delegationId);
   }
 
   private async runPrompt(
@@ -1048,9 +1091,11 @@ export class Bridge {
     resumeSessionId?: string,
     capabilities: ToolCapabilities = { webSearch: false, playwright: false },
     isCommand = false,
+    delegationId?: string,
   ): Promise<void> {
     const userPrompt = prompt;
     if (!session.provider) {
+      if (delegationId) this.delegations.decline(session, delegationId, "That file has no AI provider selected yet.");
       return void session.send({
         type: "error",
         requestId,
@@ -1059,6 +1104,7 @@ export class Bridge {
       });
     }
     if (session.isBusy) {
+      if (delegationId) this.delegations.decline(session, delegationId, "That file is busy with another request.");
       return void session.send({
         type: "error",
         requestId,
@@ -1100,6 +1146,12 @@ export class Bridge {
     const selectedModel = model ?? null;
     const promptSettings = this.systemPrompt.read();
     const adapter = this.providers.require(session.provider);
+    if (delegationId && !this.delegations.accept(session, delegationId, requestId)) {
+      // Nobody waits for this any more (it timed out, the asker stopped, or it was never asked): do not change the file for no one.
+      session.send({ type: "error", requestId, code: "cancelled", message: "The other file's request is no longer waiting for an answer, so it was not run." });
+      session.send({ type: "turn_finished", requestId, reason: "cancelled" });
+      return;
+    }
     const controller = session.beginTurn(requestId);
     this.activeUsage.set(`${session.id}:${requestId}`, {
       sessionId: resumeSessionId ? providerSessionKey(session.provider, resumeSessionId) : chatSessionId ?? session.id,
@@ -1159,6 +1211,7 @@ export class Bridge {
         if (event.type === "turn_finished") {
           this.finishTurn(session, requestId, event.reason);
         } else if (!session.hasFinished(requestId)) {
+          this.delegations.observe(session, requestId, event);
           if (event.type === "session_info" && event.requestId === requestId && event.provider === session.provider) {
             const record = this.activeUsage.get(`${session.id}:${requestId}`);
             if (record) {
@@ -1177,12 +1230,16 @@ export class Bridge {
       this.finishTurn(session, requestId, controller.signal.aborted ? "cancelled" : "completed");
     } catch (error) {
       const aborted = controller.signal.aborted;
-      if (!session.hasFinished(requestId)) session.send({
-        type: "error",
-        requestId,
-        code: aborted ? "cancelled" : resumeSessionId && !session.providerSessionId ? "resume_failed" : "provider_error",
-        message: aborted ? "turn cancelled" : `${resumeSessionId && !session.providerSessionId ? "Could not resume the saved CLI session. No replacement session was created. " : ""}${String(error instanceof Error ? error.message : error)}`,
-      });
+      if (!session.hasFinished(requestId)) {
+        const failure = {
+          type: "error" as const,
+          requestId,
+          code: aborted ? "cancelled" : resumeSessionId && !session.providerSessionId ? "resume_failed" : "provider_error",
+          message: aborted ? "turn cancelled" : `${resumeSessionId && !session.providerSessionId ? "Could not resume the saved CLI session. No replacement session was created. " : ""}${String(error instanceof Error ? error.message : error)}`,
+        };
+        this.delegations.observe(session, requestId, failure);
+        session.send(failure);
+      }
       this.finishTurn(session, requestId, aborted ? "cancelled" : "error");
     } finally {
       session.endTurn(requestId);
@@ -1197,6 +1254,7 @@ export class Bridge {
     reason: "completed" | "cancelled" | "error",
   ): void {
     if (!session.markFinished(requestId)) return;
+    this.delegations.finish(session, requestId, reason);
     const key = `${session.id}:${requestId}`;
     const record = this.activeUsage.get(key);
     if (record) {

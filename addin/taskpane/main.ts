@@ -44,6 +44,9 @@ import { leadingCommand, slashBadgeRange } from "./ui/slash.js";
 import { parseNativeCommand, type ProviderCommand } from "../../protocol/src/commands.js";
 import { activeFileMention, atomicBadgeDeletion, fileMentionRanges } from "./ui/file-mentions.js";
 import { filesFromClipboard, filesFromDrop, isFileDrag } from "./ui/transfer-files.js";
+import { setupConnectedFiles } from "./ui/connected-files.js";
+import { delegatedPrompt } from "./ui/delegation.js";
+import { renderReceivedMessage } from "./ui/received-message.js";
 
 const els = {
   usageStats: byId<HTMLElement>("usage-stats"),
@@ -176,7 +179,10 @@ const pendingPrompts = new Map<string, PendingPrompt>();
 let autoQueueAllowed = true;
 let live: { element: HTMLElement; message: StoredMessage } | null = null;
 const liveTools = new Map<string, { card: HTMLElement; tool: StoredTool }>();
-const workbookToolNames = new Set<string>(exposedToolNames(true, { playwright: true, webSearch: true }));
+// Tools the bridge answers by itself reach the pane only as provider events, never as a tool request, so they must keep
+// their own card: the person sees which other file was read or sent a request.
+const bridgeAnsweredTools: ReadonlySet<string> = new Set(["list_connected_files", "read_connected_file", "send_to_connected_file"]);
+const workbookToolNames = new Set<string>(exposedToolNames(true, { playwright: true, webSearch: true }).filter((name) => !bridgeAnsweredTools.has(name)));
 const browserView = new BrowserView({
   dock: byId("browser-dock"), dockLabel: byId("browser-dock-label"), dockStep: byId("browser-dock-step"), dockUrl: byId("browser-dock-url"),
   dockImage: byId<HTMLImageElement>("browser-dock-image"), dockOpen: byId<HTMLButtonElement>("browser-dock-open"),
@@ -248,6 +254,7 @@ const slash = createSlashMenu({
   loadCommands: () => client.listCommands(provider),
   onUnavailable: reason => append({ kind: "note", text: reason }),
 });
+const connectedFiles = setupConnectedFiles({ onOpen: () => client?.refreshConnectedFiles() });
 const savedReferences = setupSavedReferences(() => client);
 const userSkills = setupUserSkills(() => client, () => slash.reload());
 const testingPanel = setupTestingPanel(() => client);
@@ -289,6 +296,7 @@ Office.onReady((info) => {
     },
     onState: renderState,
     onHello: ({ addinBuildId }) => {
+      void publishWorkbookName();
       slash.reload();
       client.setProvider(provider);
       void refreshUsage();
@@ -313,6 +321,16 @@ Office.onReady((info) => {
     onProviderEvent: handleEvent,
     runTool: (context, tool, args, execute) => journal.run(context, tool, args, execute),
     onBrowserFrame: (frame) => { if (frame.requestId === currentRequestId) browserView.push(frame); },
+    readWorkbookName,
+    onConnectedFiles: (files) => connectedFiles.render(files),
+    onDelegatedPrompt: (request) => {
+      // The other assistant's request is a turn like any other here, so it waits its turn: refuse while this chat is busy.
+      if (currentRequestId || cancelRequested || resolvingCommand) {
+        client.declineDelegation(request.delegationId, "That file is busy with its own request.");
+        return;
+      }
+      void submit(undefined, { delegationId: request.delegationId, from: request.from.name, text: request.text });
+    },
     onError: (message) => append({ kind: "error", text: message }),
     onToolExecuted: (tool, args, result, context) => {
       if (tool === "create_artifact") {
@@ -545,6 +563,7 @@ function renderMessage(container: HTMLElement, message: StoredMessage): HTMLElem
   let element: HTMLElement;
   switch (message.kind) {
     case "user": {
+      if (message.from !== undefined) { element = renderReceivedMessage(message.from, message.text); break; }
       element = bubble("user");
       const lead = leadingCommand(message.text);
       if (lead) {
@@ -737,10 +756,14 @@ async function runClientCommand(command: ProviderCommand, args: string): Promise
   }
 }
 
-async function submit(queued?: PendingPrompt): Promise<void> {
-  const prompt = queued?.prompt ?? (els.input.value.trim() || (pendingAttachments.length ? "Please inspect the attached files." : ""));
-  if (!prompt || !client.connected) return;
-  if (prompt.length > 32_000) { append({ kind: "error", text: "Messages must be 32,000 characters or fewer." }); return; }
+/** `delegated`: another open workbook's assistant sent this request; it runs as a normal turn here and its reply goes back. */
+async function submit(queued?: PendingPrompt, delegated?: { delegationId: string; from: string; text: string }): Promise<void> {
+  // Whoever sent a delegated request waits for an answer: every way out of here that does not start the turn must say so.
+  const decline = (reason: string) => { if (delegated) client.declineDelegation(delegated.delegationId, reason); };
+  const prompt = delegated ? delegatedPrompt(delegated.from, delegated.text)
+    : queued?.prompt ?? (els.input.value.trim() || (pendingAttachments.length ? "Please inspect the attached files." : ""));
+  if (!prompt || !client.connected) { decline("That file is not connected right now."); return; }
+  if (prompt.length > 32_000) { decline("The request is too long for that file."); append({ kind: "error", text: "Messages must be 32,000 characters or fewer." }); return; }
   let nativeCommand = false;
   if (parseNativeCommand(prompt)) {
     if (resolvingCommand) return;
@@ -761,13 +784,14 @@ async function submit(queued?: PendingPrompt): Promise<void> {
     } catch (error) { append({ kind: "error", text: error instanceof Error ? error.message : String(error) }); return; }
     finally { resolvingCommand = false; }
   }
-  const turnAttachments = queued?.attachments ?? pendingAttachments.slice();
-  if (!turnAttachments.length && /(?:^|\s)@[^\n]*\.(?:xlsx|xlsm|xltx|xltm|png|jpe?g|gif|webp|md|txt|json|csv|ya?ml|zip)(?=\s|$)/i.test(prompt)) {
+  const turnAttachments = delegated ? [] as typeof pendingAttachments : queued?.attachments ?? pendingAttachments.slice();
+  if (!delegated && !turnAttachments.length && /(?:^|\s)@[^\n]*\.(?:xlsx|xlsm|xltx|xltm|png|jpe?g|gif|webp|md|txt|json|csv|ya?ml|zip)(?=\s|$)/i.test(prompt)) {
     append({ kind: "error", text: "The @ file is only text. Choose it from a workspace or the local file picker so I can read it." });
     updateMentionMenu();
     return;
   }
   if (currentRequestId) {
+    if (delegated) { decline("That file is busy with its own request."); return; }
     if (queued || cancelRequested) return;
     if (pendingPrompts.size >= 20) { append({ kind: "error", text: "Wait for pending messages to be sent before adding more." }); return; }
     const id = randomId();
@@ -787,6 +811,7 @@ async function submit(queued?: PendingPrompt): Promise<void> {
     return;
   }
   if (!session.identityVersion && !session.providerSessionId && session.messages.some(message => message.kind === "user")) {
+    decline("The chat open in that file is an older chat that cannot take requests. Ask the user to start a new chat in that window.");
     append({ kind: "error", text: "This legacy chat has no saved CLI session ID, so it cannot be resumed reliably. Its history is preserved. Start a new chat to create a native session." });
     return;
   }
@@ -807,7 +832,7 @@ async function submit(queued?: PendingPrompt): Promise<void> {
   requestSession = session;
   browserView.reset();
   setBusy(true);
-  if (!queued) els.input.value = "";
+  if (!queued && !delegated) els.input.value = "";
   renderComposerPreview();
   showPanel(null);
   const context = !nativeCommand && (needsContext || (activeModel !== undefined && activeModel !== model) || (activeEffort !== undefined && activeEffort !== effort))
@@ -822,31 +847,33 @@ async function submit(queued?: PendingPrompt): Promise<void> {
     for (const element of els.messages.querySelectorAll<HTMLElement>(".bubble.user[data-queue-id]")) {
       if (element.dataset.queueId === queued.id) renderDelivery(element, queued.message);
     }
-  } else append({ kind: "user", text: prompt, attachments: turnAttachments.map((item) => ({ name: item.name })) });
-  if (!queued) clearAttachment();
+  } else append(delegated ? { kind: "user", text: delegated.text, from: delegated.from }
+    : { kind: "user", text: prompt, attachments: turnAttachments.map((item) => ({ name: item.name })) });
+  if (!queued && !delegated) clearAttachment();
   showThinking();
   persistNow();
 
   const result = nativeCommand ? null : await executeTool("get_selection", {});
-  if (currentRequestId !== requestId || requestSession !== session) return;
+  if (currentRequestId !== requestId || requestSession !== session) { decline("The chat open in that file changed before the request could start."); return; }
   const selection = result?.ok ? (result.data as never) : null;
-  if (cancelRequested) return finishLocalCancel(requestId);
+  if (cancelRequested) return finishLocalCancel(requestId, delegated?.delegationId);
   try {
     const attachmentIds = turnAttachments.flatMap((item) => item.reference.id ? [item.reference.id] : []);
     const referencePaths = turnAttachments.flatMap((item) => item.reference.id ? [] : [item.reference.path]);
-    if (cancelRequested) return finishLocalCancel(requestId);
+    if (cancelRequested) return finishLocalCancel(requestId, delegated?.delegationId);
     client.sendPrompt(requestId, prompt, selection, context, attachmentIds, model, referencePaths, effort, session.id,
-      session.provider === provider ? session.providerSessionId : undefined, toolSettings.value(), nativeCommand || undefined);
+      session.provider === provider ? session.providerSessionId : undefined, toolSettings.value(), nativeCommand || undefined, delegated?.delegationId);
     promptDispatched = true;
     activeModel = model;
     activeEffort = effort;
   } catch (error) {
-    if (cancelRequested) return finishLocalCancel(requestId);
+    if (cancelRequested) return finishLocalCancel(requestId, delegated?.delegationId);
+    decline("The request could not be sent in that file.");
     clearThinking();
     currentRequestId = null;
     setBusy(false);
     if (queued) { queued.state = "held"; pendingPrompts.set(queued.id, queued); updateDelivery(queued); }
-    else els.input.value = prompt;
+    else if (!delegated) els.input.value = prompt;
     renderComposerPreview();
     append({ kind: "error", text: error instanceof Error ? error.message : String(error) });
   }
@@ -863,18 +890,26 @@ function stopCurrentTurn(): void {
   if (promptDispatched) client.cancel(currentRequestId);
 }
 
-function finishLocalCancel(requestId: string): void {
+/** `delegationId`: the stopped turn answered another file's request, which is told it will not be done. */
+function finishLocalCancel(requestId: string, delegationId?: string): void {
   if (currentRequestId !== requestId) return;
+  if (delegationId) client.declineDelegation(delegationId, "The user stopped the request in that file before it started.");
   clearThinking();
   currentRequestId = null;
   holdPendingPrompts();
   const last = session.messages[session.messages.length - 1];
   if (last?.kind === "user" && pendingPrompts.size === 0) {
     session.messages.pop();
-    const bubbles = els.messages.querySelectorAll(".bubble.user");
-    bubbles[bubbles.length - 1]?.remove();
-    els.input.value = last.text;
-    renderComposerPreview();
+    if (last.from !== undefined) {
+      // Another assistant's request is not the person's own text: drop its block and leave the composer alone.
+      const received = els.messages.querySelectorAll(".received");
+      received[received.length - 1]?.remove();
+    } else {
+      const bubbles = els.messages.querySelectorAll(".bubble.user");
+      bubbles[bubbles.length - 1]?.remove();
+      els.input.value = last.text;
+      renderComposerPreview();
+    }
   }
   needsContext = session.messages.length > 0;
   setBusy(false);
@@ -2102,10 +2137,35 @@ function watchSelection(): void {
 }
 
 /* -------------------------------------------------------------------------- */
+/* Workbook name, so other open workbooks can list this one                    */
+/* -------------------------------------------------------------------------- */
+
+/** What Excel calls this workbook now (it changes on Save As), or null when it cannot be read. Excel has no event for a rename. */
+async function readWorkbookName(): Promise<string | null> {
+  try {
+    return await Excel.run(async (context) => {
+      context.workbook.load("name");
+      await context.sync();
+      return context.workbook.name || null;
+    });
+  } catch { return null; }
+}
+
+/**
+ * Tell the bridge the name once on connect, so the file is listed with its name at once. After that the bridge asks
+ * (`readWorkbookName`) when someone looks at the list, so nothing here runs on a timer.
+ */
+async function publishWorkbookName(): Promise<void> {
+  const name = await readWorkbookName();
+  if (name && client?.connected) client.sendWorkbookInfo(name);
+}
+
+/* -------------------------------------------------------------------------- */
 /* Small helpers                                                               */
 /* -------------------------------------------------------------------------- */
 
 function renderState(state: string): void {
+  connectedFiles.setConnected(state === "open");
   els.statusLabel.textContent = ({ open: "Connected to Excel", connecting: "Connecting…", closed: "Reconnecting…", idle: "Waiting for Excel" } as Record<string, string>)[state] ?? state;
   els.status.dataset.state = state;
   els.send.disabled = state !== "open" || els.send.dataset.stopping === "true";

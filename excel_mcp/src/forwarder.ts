@@ -1,4 +1,4 @@
-import type { ToolResult } from "../../protocol/src/index.js";
+import { SEND_TO_CONNECTED_FILE_MAX_MS, type ToolResult } from "../../protocol/src/index.js";
 
 /** Forwards a validated Excel tool call to the bridge that owns the workbook. */
 export interface ToolForwarder {
@@ -21,8 +21,12 @@ export class HttpToolForwarder implements ToolForwarder {
 
   async call(tool: string, args: unknown): Promise<ToolResult> {
     const controller = new AbortController();
-    // A first read may wait for the user to approve access in the pane (up to two minutes).
-    const timeout = setTimeout(() => controller.abort(), this.options.timeoutMs ?? 130_000);
+    // A first read may wait for the user to approve access in the pane (up to two minutes). Asking another file's
+    // assistant to do something waits for that assistant to finish, which takes far longer.
+    const timeoutMs = tool === "send_to_connected_file"
+      ? Math.max(this.options.timeoutMs ?? 0, SEND_TO_CONNECTED_FILE_MAX_MS)
+      : this.options.timeoutMs ?? 130_000;
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
     try {
       const res = await fetch(`${this.options.bridgeUrl}/internal/tool`, {
         method: "POST",

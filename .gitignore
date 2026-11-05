@@ -19,3 +19,6 @@ excel-partner.config.json
 
 # Workbook copies saved before changes Undo cannot reverse (when the data folder is the repo)
 /backups/
+
+# A copy of the excel-report skill bundle, not part of the add-in
+/excel-report.zip

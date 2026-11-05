@@ -1,9 +1,10 @@
 import { randomUUID } from "node:crypto";
-import type {
-  ProviderCapabilities,
-  ProviderConnectionStatus,
-  ProviderEvent,
-  ProviderId,
+import {
+  SEND_TO_CONNECTED_FILE_MAX_MS,
+  type ProviderCapabilities,
+  type ProviderConnectionStatus,
+  type ProviderEvent,
+  type ProviderId,
 } from "../../protocol/src/index.js";
 import { AsyncQueue } from "./async-queue.js";
 import { BaseCliAdapter, cliEnvironment, execCli, type CliProbe } from "./base.js";
@@ -152,7 +153,8 @@ export class CodexAdapter extends BaseCliAdapter {
               env: ctx.mcp.env,
               startup_timeout_sec: 20,
               default_tools_approval_mode: "approve",
-              tool_timeout_sec: 120,
+              // Must outlast send_to_connected_file, which waits for another file's assistant; other tools are bounded by the bridge.
+              tool_timeout_sec: Math.ceil(SEND_TO_CONNECTED_FILE_MAX_MS / 1000),
             },
           },
           web_search: ctx.mcp.env.EXCEL_WEB_SEARCH === "1" ? "live" : "disabled",
