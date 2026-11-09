@@ -87,7 +87,7 @@ export function describeSiteKnowledgeApproval(args: SiteKnowledgeApproval): { ti
   return {
     title: args.replaces ? "Replace a saved note?" : "Save a note about this system?",
     detail: `The assistant wants to keep a ${args.kind ?? "note"} note "${args.name}" about ${args.origin} on this computer, so later sessions start with it: ${args.summary ?? ""} `
-      + "It is plain text you can read or delete in the knowledge folder (excel-partner knowledge). It must not hold passwords or tokens.",
+      + "It is plain text you can read or delete in the knowledge folder (office-partner knowledge). It must not hold passwords or tokens.",
     confirm: args.replaces ? "Replace note" : "Save note", target: (args.content ?? "").slice(0, 8000),
   };
 }

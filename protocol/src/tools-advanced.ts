@@ -621,6 +621,14 @@ export const ReadAttachedFileInputSchema = z.object({
 });
 export type ReadAttachedFileInput = z.infer<typeof ReadAttachedFileInputSchema>;
 
+export const ReadDocumentFileInputSchema = z.object({
+  path: z.string().min(1).max(500).describe("Path of a closed .docx or .pptx (Windows or WSL path), or an attachment:// path. Use list_reference_files to find files."),
+  from: z.number().int().min(1).default(1).describe("Word: the first paragraph/table (counted from 1) to return. PowerPoint: the first slide (counted from 1)."),
+  count: z.number().int().min(1).max(500).optional().describe("How many paragraphs/tables or slides to return at most (default 200 for Word, 40 for PowerPoint). The character limit may stop earlier; the answer then says where to continue."),
+  maxChars: z.number().int().min(500).max(30_000).default(20_000).describe("Character budget for the answer."),
+});
+export type ReadDocumentFileInput = z.infer<typeof ReadDocumentFileInputSchema>;
+
 export const InsertSheetsFromFileInputSchema = z.object({
   path: z.string().min(1).max(500).describe("Closed .xlsx whose sheets are copied into the OPEN workbook (formatting, merges, shapes included)."),
   sheets: z.array(z.string().min(1).max(255)).min(1).max(30).optional().describe("Sheet names to copy; omit for all."),
@@ -652,6 +660,17 @@ export type CreateArtifactInput = z.infer<typeof CreateArtifactInputSchema>;
 export const CONNECTED_READ_TOOLS = ["get_sheets", "read_range", "get_cell_ranges", "search_data", "find_errors", "check_formula_consistency", "get_objects"] as const;
 export type ConnectedReadTool = (typeof CONNECTED_READ_TOOLS)[number];
 
+/**
+ * The same, per kind of file. Another file may be a workbook, a Word document or a presentation, and only its own
+ * application's tools can read it. Reading the text of a file never changes it; writing is never allowed across files.
+ */
+export const CONNECTED_READ_TOOLS_BY_HOST = {
+  excel: CONNECTED_READ_TOOLS,
+  word: ["get_doc_outline", "read_doc_section", "search_doc_text", "read_comments", "read_tracked_changes"],
+  powerpoint: ["get_presentation_metadata", "list_slide_shapes", "read_slide_text"],
+} as const satisfies Record<"excel" | "word" | "powerpoint", readonly string[]>;
+export const ALL_CONNECTED_READ_TOOLS = [...CONNECTED_READ_TOOLS, ...CONNECTED_READ_TOOLS_BY_HOST.word, ...CONNECTED_READ_TOOLS_BY_HOST.powerpoint] as const;
+
 /** Longest request one workbook's assistant may send to another's (the tool input and the `delegated_prompt` message share it). */
 export const MAX_DELEGATED_TEXT = 8_000;
 
@@ -664,6 +683,8 @@ export const SEND_TO_CONNECTED_FILE_MAX_MS = 13 * 60_000;
 
 /** How a workbook with no known name is called, for the assistant and for the person alike. */
 export const UNNAMED_WORKBOOK = "Untitled workbook";
+/** How a file with no known name is called, by the application it is open in. */
+export const UNNAMED_FILE = { excel: UNNAMED_WORKBOOK, word: "Untitled document", powerpoint: "Untitled presentation" } as const;
 
 export const ListConnectedFilesInputSchema = z.object({});
 export type ListConnectedFilesInput = z.infer<typeof ListConnectedFilesInputSchema>;
@@ -671,7 +692,7 @@ export type ListConnectedFilesInput = z.infer<typeof ListConnectedFilesInputSche
 // Strict: a `sheet` or `address` passed next to `tool` must fail loudly, not be dropped so that the other file is scanned whole.
 export const ReadConnectedFileInputSchema = z.object({
   file: z.string().min(1).max(64).describe("`id` of the file from list_connected_files, e.g. f2."),
-  tool: z.enum(CONNECTED_READ_TOOLS).describe("The read tool to run in that file."),
+  tool: z.enum(ALL_CONNECTED_READ_TOOLS).describe("The read tool to run in that file. It must be one of that file's own application (list_connected_files says which), e.g. read_range for a workbook, read_doc_section for a Word document, read_slide_text for a presentation."),
   arguments: z.record(z.unknown()).default({}).describe("Arguments for that tool, exactly as you would pass them to it for the current workbook. `sheet`, `address` and the rest go inside `arguments`."),
 }).strict();
 export type ReadConnectedFileInput = z.infer<typeof ReadConnectedFileInputSchema>;

@@ -1,7 +1,8 @@
 import { z } from "zod";
 import { ProviderIdSchema, ProviderDetectionSchema } from "./providers.js";
 import { ProviderEventSchema } from "./events.js";
-import { SelectionSnapshotSchema, ToolResultSchema } from "./tool-results.js";
+import { AnySelectionSnapshotSchema, ToolResultSchema } from "./tool-results.js";
+import { HostIdSchema } from "./host.js";
 import { MAX_DELEGATED_TEXT } from "./tools-advanced.js";
 
 /* -------------------------------------------------------------------------- */
@@ -15,8 +16,12 @@ export const ClientInfoSchema = z.object({
   addinVersion: z.string().nullable().optional(),
   /** The pane is open in a browser tab, not in Excel: there is no workbook behind it. */
   standalone: z.boolean().optional(),
+  /** The Office application the pane runs in. Panes that predate multi-host support are Excel. */
+  host: HostIdSchema.default("excel"),
 });
 export type ClientInfo = z.infer<typeof ClientInfoSchema>;
+/** What a pane may send: `host` can be left out and is then Excel. */
+export type ClientInfoInput = z.input<typeof ClientInfoSchema>;
 
 export const HelloMessageSchema = z.object({
   type: z.literal("hello"),
@@ -80,14 +85,14 @@ export const PromptMessageSchema = z.object({
   effort: z.enum(["low", "medium", "high"]).optional(),
   capabilities: ToolCapabilitiesSchema.optional(),
   /** Snapshot of the live selection captured when the user hit send. */
-  selection: SelectionSnapshotSchema.nullable(),
+  selection: AnySelectionSnapshotSchema.nullable(),
   /** Earlier conversation replayed as context when a past chat is continued (the provider has no memory of it). */
   context: z.string().max(24_000).optional(),
   /** Legacy in-memory attachments; the task pane uses referencePaths for new selections. */
   attachmentIds: z.array(z.string().uuid()).max(10).optional(),
   /** Exact local files chosen by the user; the bridge validates each path against session grants. */
   referencePaths: z.array(z.string().min(1).max(500)).max(10).optional(),
-  /** Set when this turn answers a request another workbook's assistant sent (see `delegated_prompt`). */
+  /** Set when this turn answers a request another file's assistant sent (see `delegated_prompt`). */
   delegationId: z.string().min(1).max(64).optional(),
 });
 
@@ -135,6 +140,8 @@ export const ClientMessageSchema = z.discriminatedUnion("type", [
   ClientPongSchema,
 ]);
 export type ClientMessage = z.infer<typeof ClientMessageSchema>;
+/** A client message as a pane may build it: `clientInfo.host` and `selection.host` can be left out (they mean Excel). */
+export type ClientMessageInput = z.input<typeof ClientMessageSchema>;
 
 /* -------------------------------------------------------------------------- */
 /* Bridge -> Client                                                            */
@@ -197,10 +204,12 @@ export const BrowserFrameMessageSchema = z.object({
 });
 export type BrowserFrameMessage = z.infer<typeof BrowserFrameMessageSchema>;
 
-/** One workbook open in Excel with this add-in. `id` is what the assistant uses to point at it; it is not a credential. */
+/** One file open in Word, Excel or PowerPoint with this add-in. `id` is what the assistant uses to point at it; it is not a credential. */
 export const ConnectedFileSchema = z.object({
   id: z.string().min(1).max(64),
   name: z.string().max(255),
+  /** Which application the file is open in. Panes and bridges from before Word and PowerPoint omit it: Excel. */
+  host: HostIdSchema.default("excel"),
   /** True for the workbook this task pane belongs to. */
   current: z.boolean(),
 });
@@ -221,7 +230,8 @@ export type ConnectedFilesMessage = z.infer<typeof ConnectedFilesMessageSchema>;
 export const DelegatedPromptMessageSchema = z.object({
   type: z.literal("delegated_prompt"),
   delegationId: z.string().min(1).max(64),
-  from: z.object({ id: z.string().min(1).max(64), name: z.string().max(255) }),
+  /** Who asked: the file's id and name, and the application it is open in (Excel when an older bridge omits it). */
+  from: z.object({ id: z.string().min(1).max(64), name: z.string().max(255), host: HostIdSchema.optional() }),
   text: z.string().min(1).max(MAX_DELEGATED_TEXT),
 });
 export type DelegatedPromptMessage = z.infer<typeof DelegatedPromptMessageSchema>;
@@ -245,7 +255,7 @@ export const ServerMessageSchema = z.union([
 ]);
 export type ServerMessage = z.infer<typeof ServerMessageSchema>;
 
-export function encodeMessage(message: ClientMessage | ServerMessage): string {
+export function encodeMessage(message: ClientMessageInput | ServerMessage): string {
   return JSON.stringify(message);
 }
 

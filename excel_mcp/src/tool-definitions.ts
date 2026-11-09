@@ -445,6 +445,8 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
 ];
 
 import { ADVANCED_TOOL_DEFINITIONS } from "./tool-definitions-advanced.js";
+import { PPT_TOOL_DEFINITIONS } from "./tool-definitions-ppt.js";
+import { WORD_TOOL_DEFINITIONS } from "./tool-definitions-word.js";
 
-/** Every tool definition: the hand-written core set plus the generated advanced set. */
-export const ALL_TOOL_DEFINITIONS: ToolDefinition[] = [...TOOL_DEFINITIONS, ...ADVANCED_TOOL_DEFINITIONS];
+/** Every tool definition of every host: the hand-written Excel core set, the generated advanced set, then Word and PowerPoint. */
+export const ALL_TOOL_DEFINITIONS: ToolDefinition[] = [...TOOL_DEFINITIONS, ...ADVANCED_TOOL_DEFINITIONS, ...WORD_TOOL_DEFINITIONS, ...PPT_TOOL_DEFINITIONS];

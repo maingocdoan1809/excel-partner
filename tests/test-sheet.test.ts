@@ -148,7 +148,7 @@ describe("open_test_browser", () => {
     expect(parseToolInput("open_test_browser", { session: "admin" })).toMatchObject({ session: "admin" });
   });
 
-  describe("saved sessions (excel-partner login)", () => {
+  describe("saved sessions (office-partner login)", () => {
     const withStore = () => {
       const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ep-sessions-"));
       const store = new TestSessions(dir);
@@ -184,7 +184,7 @@ describe("open_test_browser", () => {
       expect(result).toMatchObject({ ok: false, error: { code: "invalid_arguments" } });
       expect((result as any).error.message).toContain("admin");
       expect((result as any).error.message).toContain("Settings > Testing");
-      expect((result as any).error.message).toContain("excel-partner login");
+      expect((result as any).error.message).toContain("office-partner login");
       expect(ask).not.toHaveBeenCalled();
       expect(use).not.toHaveBeenCalled();
     });

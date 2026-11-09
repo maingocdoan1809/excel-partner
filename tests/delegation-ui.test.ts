@@ -48,7 +48,7 @@ describe("a request from another file's assistant", () => {
     expect(document.querySelector(".received img, .received b")).toBeNull();
     expect(document.querySelector(".received-source")!.textContent).toBe("From Excel · <img src=x onerror=alert(1)>");
     document.body.replaceChildren(renderReceivedMessage("  ", "x"));
-    expect(document.querySelector(".received-source")!.textContent).toBe("From Excel · another workbook");
+    expect(document.querySelector(".received-source")!.textContent).toBe("From Excel · another file");
   });
 
   it("replays a received request to the assistant as coming from another assistant, not from the user", () => {

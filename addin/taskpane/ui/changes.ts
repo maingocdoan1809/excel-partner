@@ -26,6 +26,8 @@ export function describeChange(
   const a0 = (args ?? {}) as Record<string, any>;
   // Some tools double as readers: listing/inspecting is not a change.
   if (tool === "find_replace" && !a0.apply) return null;
+  if (((tool === "edit_table" || tool === "edit_slide_table" || tool === "manage_headers_footers") && a0.operation === "read")
+    || (tool === "manage_content_controls" && a0.operation === "list") || (tool === "collapse_blank_paragraphs" && a0.preview === true)) return null;
   if ((tool === "conditional_format" && a0.operation === "list") || (tool === "data_validation" && a0.operation === "get") || (tool === "manage_names" && a0.operation === "list")) {
     return null;
   }
@@ -99,7 +101,8 @@ export function describeChange(
     case "record_test_results":
       return { tool, ok: true, target: null, summary: `Test results written to ${d.sheet}: ${d.rowsUpdated} row(s), ${d.cellsWritten} cell(s)${Array.isArray(d.addedColumns) && d.addedColumns.length ? `, added column(s) ${d.addedColumns.join(", ")}` : ""}` };
     default:
-      return { tool, ok: true, target, summary: tool };
+      // Word and PowerPoint tools report their own one-line summary.
+      return { tool, ok: true, target, summary: typeof d.summary === "string" && d.summary ? d.summary : tool };
   }
 }
 

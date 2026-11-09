@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { hostFromEnv } from "../../protocol/src/index.js";
 import { HttpToolForwarder } from "./forwarder.js";
 import { createExcelMcpServer } from "./server.js";
 
@@ -11,6 +12,8 @@ import { createExcelMcpServer } from "./server.js";
  *   EXCEL_BRIDGE_URL      e.g. https://127.0.0.1:8765
  *   EXCEL_SESSION_ID      workbook session id
  *   EXCEL_SESSION_TOKEN   per-session bearer token
+ * Optional:
+ *   OFFICE_HOST           excel (default), word or powerpoint: which host's tools are listed
  */
 async function main(): Promise<void> {
   const bridgeUrl = process.env.EXCEL_BRIDGE_URL;
@@ -24,8 +27,16 @@ async function main(): Promise<void> {
     process.exit(2);
   }
 
+  let host;
+  try {
+    host = hostFromEnv(process.env);
+  } catch (error) {
+    process.stderr.write(`excel-mcp: ${error instanceof Error ? error.message : error}\n`);
+    process.exit(2);
+  }
+
   const forwarder = new HttpToolForwarder({ bridgeUrl, sessionId, token });
-  const server = createExcelMcpServer(forwarder, { allowOptInTools: process.env.EXCEL_ALLOW_OFFICE_JS === "1", capabilities: { webSearch: process.env.EXCEL_WEB_SEARCH === "1", playwright: process.env.EXCEL_PLAYWRIGHT === "1" } });
+  const server = createExcelMcpServer(forwarder, { host, allowOptInTools: process.env.EXCEL_ALLOW_OFFICE_JS === "1", capabilities: { webSearch: process.env.EXCEL_WEB_SEARCH === "1", playwright: process.env.EXCEL_PLAYWRIGHT === "1" } });
   const transport = new StdioServerTransport();
   await server.connect(transport);
 }

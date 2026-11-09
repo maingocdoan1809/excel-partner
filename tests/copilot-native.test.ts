@@ -145,6 +145,18 @@ describe("Copilot native question transport", () => {
     await manager.start(ctx, process.execPath, process.env);
     expect(sdk.config.reasoningEffort).toBe("high");
   });
+  it.each([["word", false], ["powerpoint", false], ["excel", true]])("exposes only %s tools through the host fallback (Excel tools allowed: %s)", async (host, excel) => {
+    ctx.mcp.env = { OFFICE_HOST: host };
+    await manager.start(ctx, process.execPath, process.env);
+    const tools = sdk.config.availableTools.toArray();
+    expect(tools).toContain("builtin:ask_user");
+    expect(tools).toContain("mcp:excel-get_selection");
+    expect(tools.includes("mcp:excel-read_range")).toBe(excel);
+  });
+  it("refuses to start for a host it does not know", async () => {
+    ctx.mcp.env = { OFFICE_HOST: "outlook" };
+    await expect(manager.start(ctx, process.execPath, process.env)).rejects.toThrow(/OFFICE_HOST/);
+  });
   it("rejects requests outside a running turn and resolves PATH commands", async () => {
     await manager.start(ctx, process.execPath, process.env);
     await expect(sdk.config.onUserInputRequest({ question: "Stale?" })).rejects.toThrow("cancelled");

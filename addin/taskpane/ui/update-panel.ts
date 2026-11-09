@@ -25,6 +25,8 @@ export interface UpdatePanelDeps {
   storage?: Pick<Storage, "getItem" | "setItem" | "removeItem"> | null;
   /** Called with a sentence once an update that was started here has finished, after the pane reloaded. */
   announce?(text: string): void;
+  /** The Office application the pane runs in, for "Keep Word open". Defaults to Excel. */
+  appName?(): string;
   pollMs?: number;
   /** Give up waiting for the bridge to come back after this long. */
   waitMs?: number;
@@ -33,8 +35,9 @@ export interface UpdatePanelDeps {
 
 const MARKER = "excelPartner.updating";
 
-/** Settings > Updates: show the version, look for a newer one, and replace the installation without closing Excel. */
+/** Settings > Updates: show the version, look for a newer one, and replace the installation without closing the Office app. */
 export function setupUpdatePanel(deps: UpdatePanelDeps) {
+  const app = (): string => deps.appName?.() || "Excel";
   const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
   const version = $("update-version");
   const status = $("update-status");
@@ -76,7 +79,7 @@ export function setupUpdatePanel(deps: UpdatePanelDeps) {
     } else if (info.updateAvailable && !info.canUpdate) {
       say(`Version ${info.latest} is available. ${info.reason ?? ""}`.trim());
     } else if (info.updateAvailable) {
-      say(`Version ${info.latest} is available. Excel stays open: the connection restarts for about a minute and this pane reloads by itself.`);
+      say(`Version ${info.latest} is available. ${app()} stays open: the connection restarts for about a minute and this pane reloads by itself.`);
     } else if (info.latest) {
       say("You have the latest version.", "ok");
     } else {
@@ -109,7 +112,7 @@ export function setupUpdatePanel(deps: UpdatePanelDeps) {
     updating = true;
     check.disabled = true;
     run.hidden = true;
-    say(`${initial}… Keep Excel open.`);
+    say(`${initial}… Keep ${app()} open.`);
     const started = Date.now();
     if (polling !== null) window.clearInterval(polling);
     polling = window.setInterval(async () => {
@@ -118,12 +121,12 @@ export function setupUpdatePanel(deps: UpdatePanelDeps) {
         info = await deps.getClient().updateInfo(false);
       } catch {
         // The bridge is down while it is replaced.
-        if (Date.now() - started > waitMs) finish("The bridge did not come back. Run excel-partner start in a terminal, or see update.log in the Excel Partner folder.", "error");
-        else say("Restarting the connection… Keep Excel open.");
+        if (Date.now() - started > waitMs) finish("The bridge did not come back. Run office-partner start in a terminal, or see update.log in the Excel Partner folder.", "error");
+        else say(`Restarting the connection… Keep ${app()} open.`);
         return;
       }
       const s = info.status;
-      if (s.state === "running") say(`${s.message ?? "Updating"}… Keep Excel open.`);
+      if (s.state === "running") say(`${s.message ?? "Updating"}… Keep ${app()} open.`);
       else if (s.state === "done") {
         // The marker stays: the reloaded pane reads it and says in the chat which version it is now on.
         finish(`Updated to ${s.to ?? info.current}. Reloading…`, "ok");

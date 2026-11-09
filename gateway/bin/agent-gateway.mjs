@@ -62,7 +62,7 @@ async function doctor() {
   try { config = loadConfig(dir); line(true, `Configuration valid (port ${config.port})`); }
   catch (error) { line(false, `Configuration invalid: ${error.message.split("\n")[0]}. Fix ${configFile}`); return; }
   const hasFiles = fs.existsSync(cert) && fs.existsSync(key) && fs.existsSync(tokenFile);
-  line(hasFiles, hasFiles ? "Certificate and token present" : "Not set up. Run: excel-partner setup gateway");
+  line(hasFiles, hasFiles ? "Certificate and token present" : "Not set up. Run: office-partner setup gateway");
   if (!hasFiles) return;
   const x509 = new X509Certificate(fs.readFileSync(cert));
   const days = Math.floor((new Date(x509.validTo).getTime() - Date.now()) / 86400000);
@@ -70,22 +70,22 @@ async function doctor() {
   if (process.platform === "win32") {
     const store = spawnSync("certutil.exe", ["-user", "-store", "Root"], { encoding: "utf8", windowsHide: true, maxBuffer: 64 * 1024 * 1024 });
     const trusted = (store.stdout ?? "").toLowerCase().includes(x509.fingerprint.replaceAll(":", "").toLowerCase());
-    line(trusted, trusted ? "Certificate trusted for this Windows user" : "Certificate not trusted. Run: excel-partner setup gateway");
+    line(trusted, trusted ? "Certificate trusted for this Windows user" : "Certificate not trusted. Run: office-partner setup gateway");
     const run = spawnSync("reg.exe", ["query", runKey, "/v", runName], { stdio: "ignore", windowsHide: true });
-    line(run.status === 0 ? true : null, run.status === 0 ? "Starts automatically at Windows sign-in" : "No sign-in startup entry. Run: excel-partner gateway autostart on");
+    line(run.status === 0 ? true : null, run.status === 0 ? "Starts automatically at Windows sign-in" : "No sign-in startup entry. Run: office-partner gateway autostart on");
   }
   const h = await health();
-  line(h?.ready === true, h ? `Gateway running at https://localhost:${config.port}` : "Gateway not running. Run: excel-partner start gateway");
+  line(h?.ready === true, h ? `Gateway running at https://localhost:${config.port}` : "Gateway not running. Run: office-partner start gateway");
   if (!h) return;
   try {
     const status = await request("GET", "/gateway/status", true);
     for (const p of status.providers) line(p.status === "ready" ? true : p.installed ? null : false, `${p.provider}: ${p.status}${p.hint ? ` - ${p.hint}` : ""}`);
-  } catch (error) { line(false, `Authenticated request failed: ${error.message}. Check the token with: excel-partner info`); }
+  } catch (error) { line(false, `Authenticated request failed: ${error.message}. Check the token with: office-partner info`); }
 }
 async function uninstall() {
   await stop();
   autostart(false);
-  console.log(`Gateway stopped and its startup entry removed. Configuration, token and certificate remain in ${dir}.\nTo remove the program: npm uninstall -g excel-partner`);
+  console.log(`Gateway stopped and its startup entry removed. Configuration, token and certificate remain in ${dir}.\nTo remove the program: npm uninstall -g office-partner`);
 }
 // Reuse the Excel Partner add-in's localhost certificate so the user trusts one certificate only.
 function adoptCertificate(from) {
@@ -184,8 +184,8 @@ async function main() {
   else if (command === "stop") await stop();
   else if (command === "restart") { await stop(); await start(); }
   else if (command === "status") {
-    if (!fs.existsSync(tokenFile)) { console.log("Gateway is not set up. Run: excel-partner setup gateway"); return; }
-    const h = await health(); console.log(h ? `Gateway running at https://localhost:${loadConfig(dir).port} (${h.sessions} active sessions)` : "Gateway stopped or unhealthy. Run: excel-partner doctor gateway");
+    if (!fs.existsSync(tokenFile)) { console.log("Gateway is not set up. Run: office-partner setup gateway"); return; }
+    const h = await health(); console.log(h ? `Gateway running at https://localhost:${loadConfig(dir).port} (${h.sessions} active sessions)` : "Gateway stopped or unhealthy. Run: office-partner doctor gateway");
   }
   else if (command === "info") info(copyToken);
   else if (command === "token") { console.log(token()); if (copyToken) console.error(copy(token()) ? "Copied to the clipboard." : "Could not copy."); }
@@ -193,7 +193,7 @@ async function main() {
   else if (command === "doctor") await doctor();
   else if (command === "uninstall") await uninstall();
   else if (command === "update") {
-    const result = spawnSync(process.execPath, [path.join(root, "..", "bin", "excel-partner.mjs"), "update"], { stdio: "inherit" });
+    const result = spawnSync(process.execPath, [path.join(root, "..", "bin", "office-partner.mjs"), "update"], { stdio: "inherit" });
     process.exitCode = result.status ?? 1;
   }
   else if (command === "autostart" && ["on", "off"].includes(a)) autostart(a === "on");

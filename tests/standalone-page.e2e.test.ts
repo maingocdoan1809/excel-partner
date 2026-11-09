@@ -101,7 +101,7 @@ describe("the task pane in a browser tab", () => {
     expect(files(tab).map((f) => [f.name, f.current])).toEqual([["", true], ["Budget.xlsx", false]]);
     // Give the bridge time to announce the new connection to everyone; Excel's list must not have changed.
     await new Promise((resolve) => setTimeout(resolve, 150));
-    expect(files(excel)).toEqual([{ id: "f1", name: "Budget.xlsx", current: true }]);
+    expect(files(excel)).toEqual([{ id: "f1", name: "Budget.xlsx", host: "excel", current: true }]);
 
     await tab.close();
     await excel.close();

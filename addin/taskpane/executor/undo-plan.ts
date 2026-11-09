@@ -89,9 +89,23 @@ function toA1(box: { top: number; left: number; bottom: number; right: number })
   return `${col(box.left)}${box.top}:${col(box.right)}${box.bottom}`;
 }
 
+/** Word / PowerPoint calls that only read: operations named `read` or `list`, and read-style flags. */
+function isDocumentReadOnlyCall(tool: string, args: Args): boolean {
+  switch (tool) {
+    case "edit_table": case "edit_slide_table": return args.operation === "read";
+    case "manage_content_controls": return args.operation === "list";
+    case "manage_headers_footers": return args.operation === "read";
+    case "collapse_blank_paragraphs": return args.preview === true;
+    default: return false;
+  }
+}
+
 export function planUndo(tool: string, input: unknown): UndoPlan {
   const args = (input && typeof input === "object" ? input : {}) as Args;
   const sheet = args.sheet as SheetRef | undefined;
+
+  // Word and PowerPoint edits are not photographed (a copy of the file is saved instead). Calls that only look do nothing.
+  if (isDocumentReadOnlyCall(tool, args)) return { kind: "none" };
 
   switch (tool) {
     case "write_range": {

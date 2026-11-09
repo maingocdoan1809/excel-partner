@@ -5,8 +5,9 @@ import {
   type CallToolResult,
 } from "@modelcontextprotocol/sdk/types.js";
 import { ZodError } from "zod";
-import { exposedToolNames, isExcelToolName, parseToolInput, type ToolError } from "../../protocol/src/index.js";
+import { DEFAULT_HOST, exposedToolNamesForHost, isKnownToolName, parseToolInputForHost, type HostId, type ToolError } from "../../protocol/src/index.js";
 import type { ToolForwarder } from "./forwarder.js";
+import { definitionForHost } from "./host-overrides.js";
 import { ALL_TOOL_DEFINITIONS } from "./tool-definitions.js";
 
 export const SERVER_INFO = { name: "excel-ai-addin", version: "0.1.0" } as const;
@@ -36,6 +37,8 @@ export interface ExcelMcpOptions {
   /** Expose opt-in tools such as execute_office_js. */
   allowOptInTools?: boolean;
   capabilities?: { webSearch?: boolean; playwright?: boolean };
+  /** The Office app the session belongs to (OFFICE_HOST); only that host's tools are listed and callable. Defaults to Excel. */
+  host?: HostId;
 }
 
 function fail(error: ToolError): CallToolResult {
@@ -51,11 +54,12 @@ function fail(error: ToolError): CallToolResult {
  * pane holding the live workbook.
  */
 export function createExcelMcpServer(forwarder: ToolForwarder, options: ExcelMcpOptions = {}): Server {
-  const exposed = new Set<string>(exposedToolNames(options.allowOptInTools ?? false, options.capabilities));
+  const host = options.host ?? DEFAULT_HOST;
+  const exposed = new Set<string>(exposedToolNamesForHost(host, options.allowOptInTools ?? false, options.capabilities));
   const server = new Server(SERVER_INFO, { capabilities: { tools: {} } });
 
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
-    tools: ALL_TOOL_DEFINITIONS.filter((tool) => exposed.has(tool.name)).map((tool) => ({
+    tools: ALL_TOOL_DEFINITIONS.filter((tool) => exposed.has(tool.name)).map((tool) => definitionForHost(host, tool)).map((tool) => ({
       name: tool.name,
       description: tool.description,
       inputSchema: tool.inputSchema as Record<string, unknown>,
@@ -65,13 +69,13 @@ export function createExcelMcpServer(forwarder: ToolForwarder, options: ExcelMcp
 
   server.setRequestHandler(CallToolRequestSchema, async (request): Promise<CallToolResult> => {
     const name = request.params.name;
-    if (!isExcelToolName(name) || !exposed.has(name)) {
+    if (!isKnownToolName(name) || !exposed.has(name)) {
       return fail({ code: "unknown_tool", message: `unknown tool '${name}'` });
     }
 
     let parsed: unknown;
     try {
-      parsed = parseToolInput(name, request.params.arguments);
+      parsed = parseToolInputForHost(host, name, request.params.arguments);
     } catch (error) {
       if (error instanceof ZodError) {
         return fail({

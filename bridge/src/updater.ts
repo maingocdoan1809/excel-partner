@@ -74,10 +74,21 @@ export interface UpdateServiceOptions {
   cacheMs?: number;
 }
 
-const REGISTRY_URL = "https://registry.npmjs.org/excel-partner/latest";
+/** The name the package is published under; the one in the installed package.json wins, so a rename needs no code change. */
+export const DEFAULT_PACKAGE_NAME = "office-partner";
 
-export async function fetchLatestFromRegistry(fetchImpl: typeof fetch = fetch, signal?: AbortSignal): Promise<string> {
-  const response = await fetchImpl(REGISTRY_URL, { headers: { accept: "application/json" }, signal: signal ?? AbortSignal.timeout(8000) });
+/** The name in `<root>/package.json`, or the default when it cannot be read. */
+export function packageNameOf(packageRoot: string): string {
+  try {
+    const name = (JSON.parse(fs.readFileSync(path.join(packageRoot, "package.json"), "utf8")) as { name?: unknown }).name;
+    return typeof name === "string" && /^(?:@[a-z0-9-~][a-z0-9-._~]*\/)?[a-z0-9-~][a-z0-9-._~]*$/.test(name) ? name : DEFAULT_PACKAGE_NAME;
+  } catch {
+    return DEFAULT_PACKAGE_NAME;
+  }
+}
+
+export async function fetchLatestFromRegistry(fetchImpl: typeof fetch = fetch, signal?: AbortSignal, name: string = DEFAULT_PACKAGE_NAME): Promise<string> {
+  const response = await fetchImpl(`https://registry.npmjs.org/${name.replace("/", "%2f")}/latest`, { headers: { accept: "application/json" }, signal: signal ?? AbortSignal.timeout(8000) });
   if (!response.ok) throw new Error(`the npm registry answered HTTP ${response.status}`);
   const body = (await response.json()) as { version?: unknown };
   if (typeof body.version !== "string" || compareVersions(body.version, "0.0.0") === null) throw new Error("the npm registry sent no version");
@@ -92,12 +103,17 @@ export class UpdateService {
   constructor(options: UpdateServiceOptions) {
     this.opts = {
       platform: process.platform,
-      spec: process.env.EXCEL_PARTNER_UPDATE_SPEC || "excel-partner@latest",
+      spec: process.env.OFFICE_PARTNER_UPDATE_SPEC || process.env.EXCEL_PARTNER_UPDATE_SPEC || `${packageNameOf(options.packageRoot)}@latest`,
       now: Date.now,
       staleAfterMs: 15 * 60_000,
       cacheMs: 10 * 60_000,
       ...options,
     };
+  }
+
+  /** What this installation is called on npm (and so the folder it lives in under the global node_modules). */
+  get packageName(): string {
+    return packageNameOf(this.opts.packageRoot);
   }
 
   get version(): string {
@@ -153,8 +169,8 @@ export class UpdateService {
   unsupportedReason(): string | null {
     if (this.opts.platform !== "win32") return "Updating from the task pane works on Windows with Excel desktop.";
     const root = this.globalRoot();
-    if (!root) return "npm was not found. Install Node.js, or run excel-partner update from a terminal.";
-    if (path.resolve(root, "excel-partner").toLowerCase() !== path.resolve(this.opts.packageRoot).toLowerCase()) {
+    if (!root) return "npm was not found. Install Node.js, or run office-partner update from a terminal.";
+    if (path.resolve(root, this.packageName).toLowerCase() !== path.resolve(this.opts.packageRoot).toLowerCase()) {
       return "This copy was not installed with npm install -g, so it cannot replace itself. From a source checkout run scripts\\update.ps1.";
     }
     return null;
@@ -164,7 +180,7 @@ export class UpdateService {
     const now = this.opts.now();
     if (refresh || !this.cached || now - this.cached.at > this.opts.cacheMs) {
       try {
-        this.cached = { at: now, latest: await (this.opts.fetchLatest ?? (() => fetchLatestFromRegistry()))() };
+        this.cached = { at: now, latest: await (this.opts.fetchLatest ?? (() => fetchLatestFromRegistry(fetch, undefined, this.packageName)))() };
       } catch (error) {
         this.cached = { at: now, latest: null, error: error instanceof Error ? error.message : String(error) };
       }

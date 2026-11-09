@@ -3,7 +3,7 @@ import { TestSessions } from "./test-sessions.js";
 import { Delegations } from "./delegations.js";
 import { SiteKnowledge } from "./site-knowledge.js";
 import { TestScripts } from "./test-scripts.js";
-import { BackupError, MAX_BACKUP_BYTES, WorkbookBackups } from "./workbook-backups.js";
+import { BackupError, DocumentBackups, MAX_BACKUP_BYTES, backupExtensionFor } from "./document-backups.js";
 import { UpdateError, UpdateService } from "./updater.js";
 import { TestingAdmin, TestingAdminError, type FolderKind } from "./testing-admin.js";
 import { parseNativeCommand, type NativeCommand, type ProviderCommand } from "../../protocol/src/commands.js";
@@ -20,6 +20,7 @@ import type { Duplex } from "node:stream";
 import { WebSocketServer, type WebSocket, type RawData } from "ws";
 import {
   GO_TO_REQUEST,
+  HostIdSchema,
   PROTOCOL_VERSION,
   ProviderIdSchema,
   UNNAMED_WORKBOOK,
@@ -28,9 +29,11 @@ import {
   providerSessionKey,
   type ClientMessage,
   type ProviderId,
-  type SelectionSnapshot,
+  type AnySelectionSnapshot,
   type ServerMessage,
 } from "../../protocol/src/index.js";
+import { createHash } from "node:crypto";
+import { hostSystemPrompt } from "../../providers/src/host-prompts.js";
 import { PROJECT_ROOT, type BridgeConfig } from "./config.js";
 import { UsageStore, type UsageRecord } from "./usage.js";
 import { Logger } from "./logger.js";
@@ -44,6 +47,7 @@ import { ProviderSessionManager } from "./provider-session-manager.js";
 import { SystemPromptStore, PromptSettingsError, PromptSettingsConflict } from "./system-prompt.js";
 import { WorkbookSession } from "./session.js";
 import { ToolGateway } from "./tool-gateway.js";
+import { enrichSelectionForHost, normalizePromptSelection } from "./selection.js";
 import { enrichWindowsSelection, type SelectionEnricher } from "./windows-selection.js";
 import { activateWorkbook, activeWorkbookPath, pickWorkspaceFolder } from "./windows-workspace.js";
 import { MockAdapter, ProviderRegistry, createDefaultRegistry } from "../../providers/src/index.js";
@@ -105,7 +109,7 @@ export class Bridge {
   private readonly userSkills: UserSkills;
   private readonly systemPrompt: SystemPromptStore;
   private readonly testingAdmin: TestingAdmin;
-  private readonly backups: WorkbookBackups;
+  private readonly backups: DocumentBackups;
   private readonly updater: UpdateService | null;
   private readonly activateWorkbook: (workbookName: string) => Promise<unknown>;
 
@@ -136,7 +140,7 @@ export class Bridge {
     const siteKnowledge = new SiteKnowledge(path.join(dataDir, "knowledge"));
     const testScripts = new TestScripts(path.join(dataDir, "scripts"));
     this.testingAdmin = new TestingAdmin(testSessions, siteKnowledge, testScripts);
-    this.backups = new WorkbookBackups(path.join(dataDir, "backups"));
+    this.backups = new DocumentBackups(path.join(dataDir, "backups"));
     this.activateWorkbook = options.activateWorkbook ?? activateWorkbook;
     this.updater = options.updater === undefined
       ? new UpdateService({
@@ -254,7 +258,7 @@ export class Bridge {
   private async handleRequest(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
     if (!this.isTrustedRequest(req)) {
       this.logger.warn("rejected request from untrusted origin or host", { origin: req.headers.origin, host: req.headers.host,
-        hint: "to reach the bridge by another hostname, run: excel-partner allow-host <name>" });
+        hint: "to reach the bridge by another hostname, run: office-partner allow-host <name>" });
       res.writeHead(403, { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" });
       res.end(JSON.stringify({ error: "forbidden_origin" }));
       return;
@@ -449,7 +453,7 @@ export class Bridge {
     }
   }
 
-  /** Sign-ins, notes and regression scripts for the testing workflow: what the `excel-partner login/knowledge/scripts` commands do, for buttons. */
+  /** Sign-ins, notes and regression scripts for the testing workflow: what the `office-partner login/knowledge/scripts` commands do, for buttons. */
   private async handleTesting(req: http.IncomingMessage, res: http.ServerResponse, url: URL): Promise<void> {
     if (!this.workspaceSession(req)) return this.sendJson(res, 401, { error: "unauthorized" });
     res.setHeader("cache-control", "no-store");
@@ -653,7 +657,7 @@ export class Bridge {
     }
   }
 
-  /** A copy of the open workbook, taken by the task pane before something the undo journal cannot reverse. */
+  /** A copy of the open file (workbook, document or presentation), taken by the task pane before something the undo journal cannot reverse. */
   private async handleBackup(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
     const session = this.sessions.getByToken(bearerToken(req.headers.authorization) ?? "");
     if (!session?.isConnected) return this.sendJson(res, 401, { error: "unauthorized" });
@@ -663,7 +667,7 @@ export class Bridge {
     try {
       const bytes = await readBinaryBody(req, MAX_BACKUP_BYTES);
       session.touch();
-      return this.sendJson(res, 200, { ...this.backups.save(name, bytes), folder: this.backups.dir });
+      return this.sendJson(res, 200, { ...this.backups.save(name, bytes, backupExtensionFor(session.host)), folder: this.backups.dir });
     } catch (error) {
       if (error instanceof BackupError || error instanceof AttachmentError) return this.sendJson(res, 400, { error: error.message });
       throw error;
@@ -689,7 +693,7 @@ export class Bridge {
     }
     session.touch();
     await this.sessions.refreshNames(); // a rename (Save As) has no event: names are read when someone needs them
-    const matches = this.sessions.connected().filter((item) => item.id !== session.id && sameWorkbookName(item.workbookName ?? "", file));
+    const matches = this.sessions.connected().filter((item) => item.host === "excel" && item.id !== session.id && sameWorkbookName(item.workbookName ?? "", file));
     if (matches.length === 0) return this.sendJson(res, 200, { ok: false, error: `"${file}" is not open in Excel with this add-in.` });
     if (matches.length > 1) return this.sendJson(res, 200, { ok: false, error: `More than one open file is called "${file}", so it is not clear which one to show.` });
     const target = matches[0]!;
@@ -903,7 +907,7 @@ export class Bridge {
   private handleUpgrade(req: http.IncomingMessage, socket: Duplex, head: Buffer): void {
     if (!this.isTrustedRequest(req)) {
       this.logger.warn("rejected websocket from untrusted origin or host", { origin: req.headers.origin, host: req.headers.host,
-        hint: "to reach the bridge by another hostname, run: excel-partner allow-host <name>" });
+        hint: "to reach the bridge by another hostname, run: office-partner allow-host <name>" });
       socket.end("HTTP/1.1 403 Forbidden\r\nConnection: close\r\nContent-Length: 0\r\n\r\n");
       return;
     }
@@ -997,8 +1001,11 @@ export class Bridge {
         return;
       case "set_provider":
         return this.onSetProvider(session, message.provider);
-      case "prompt":
-        return this.onPrompt(session, message.requestId, message.prompt, message.selection, message.context, message.attachmentIds, message.model, message.referencePaths, message.effort, message.chatSessionId, message.resumeSessionId, message.capabilities, message.command, message.delegationId);
+      case "prompt": {
+        const picked = normalizePromptSelection(message.selection, session.host);
+        if (!picked.ok) return void session.send({ type: "error", requestId: message.requestId, code: "bad_message", message: picked.message });
+        return this.onPrompt(session, message.requestId, message.prompt, picked.selection, message.context, message.attachmentIds, message.model, message.referencePaths, message.effort, message.chatSessionId, message.resumeSessionId, message.capabilities, message.command, message.delegationId);
+      }
       case "delegation_declined":
         this.delegations.decline(session, message.delegationId, typeof message.reason === "string" ? message.reason.slice(0, 200) : "");
         return;
@@ -1044,9 +1051,13 @@ export class Bridge {
       });
     }
 
+    const host = HostIdSchema.safeParse(message.clientInfo?.host ?? "excel");
+    if (!host.success) {
+      return this.sendTo(ws, { type: "hello_error", code: "invalid_hello", message: "clientInfo.host must be excel, word or powerpoint" });
+    }
     const session = this.sessions.create(
       message.workbookConnectionId,
-      message.clientInfo ?? null,
+      { ...message.clientInfo, host: host.data },
     );
     session.attachSocket(ws);
     state.session = session;
@@ -1115,7 +1126,7 @@ export class Bridge {
     session: WorkbookSession,
     requestId: string,
     prompt: string,
-    selection: SelectionSnapshot | null,
+    selection: AnySelectionSnapshot | null,
     context?: string,
     attachmentIds?: string[],
     model?: string | null,
@@ -1134,7 +1145,7 @@ export class Bridge {
     session: WorkbookSession,
     requestId: string,
     prompt: string,
-    selection: SelectionSnapshot | null,
+    selection: AnySelectionSnapshot | null,
     context?: string,
     attachmentIds?: string[],
     model?: string | null,
@@ -1198,7 +1209,10 @@ export class Bridge {
 
     capabilities = { ...capabilities, webSearch: capabilities.webSearch && supportsNativeWebSearch(session.provider) };
     const selectedModel = model ?? null;
-    const promptSettings = this.systemPrompt.read();
+    const stored = this.systemPrompt.read();
+    // Excel keeps the user's prompt as it is; Word and PowerPoint add their own rules (and a new revision, so a running session restarts with them).
+    const promptSettings = session.host === "excel" ? stored
+      : { ...stored, content: hostSystemPrompt(session.host, stored.content), revision: createHash("sha256").update(`${stored.revision}:${session.host}:${hostSystemPrompt(session.host, stored.content)}`).digest("hex") };
     const adapter = this.providers.require(session.provider);
     if (delegationId && !this.delegations.accept(session, delegationId, requestId)) {
       // Nobody waits for this any more (it timed out, the asker stopped, or it was never asked): do not change the file for no one.
@@ -1218,7 +1232,7 @@ export class Bridge {
     prompt = isCommand ? userPrompt : [resumeSessionId ? undefined : context, projectTemplateReminder(this.skills), this.savedReferences.prompt(), expanded.prompt].filter(Boolean).join("\n\n");
 
     try {
-      if (!isCommand && selection) selection = await this.enrichSelection(selection, controller.signal);
+      if (!isCommand && selection) selection = await enrichSelectionForHost(session.host, selection, this.enrichSelection, controller.signal);
       controller.signal.throwIfAborted();
       const detection = await adapter.detect();
       if (!detection.installed) throw new Error(detection.hint ?? "Provider CLI is not installed.");
@@ -1369,6 +1383,7 @@ export class Bridge {
         EXCEL_BRIDGE_URL: this.config.publicBaseUrl,
         EXCEL_SESSION_ID: session.id,
         EXCEL_SESSION_TOKEN: session.sessionToken,
+        OFFICE_HOST: session.host,
         ...(session.capabilities.webSearch ? { EXCEL_WEB_SEARCH: "1" } : {}),
         ...(session.capabilities.playwright ? { EXCEL_PLAYWRIGHT: "1" } : {}),
         ...(this.config.allowOfficeJs ? { EXCEL_ALLOW_OFFICE_JS: "1" } : {}),

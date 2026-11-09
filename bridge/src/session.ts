@@ -4,7 +4,11 @@ import type { ProviderSessionState } from "../../providers/src/session-manager.j
 import type { SessionAttachment } from "./attachments.js";
 import {
   encodeMessage,
-  type ClientInfo,
+  DEFAULT_HOST,
+  HOST_IDS,
+  isHostId,
+  type ClientInfoInput,
+  type HostId,
   type ProviderId,
   type ServerMessage,
   type ToolResult,
@@ -37,11 +41,25 @@ export interface WorkbookSessionState {
   lastActivityAt: number;
 }
 
-/** Shown to the model when the pane drops mid-call, which usually means Excel itself crashed on that call. */
-export const DISCONNECTED_MID_CALL =
-  "Excel/task pane disconnected while this tool call was running; Excel may have crashed on it. " +
-  "Do NOT repeat the same call with the same arguments. Tell the user, wait until the workbook is reopened, " +
-  "then retry only a smaller step (for example one sheet or a smaller range) or a different approach.";
+const HOST_APP_NAMES: Record<HostId, string> = { excel: "Excel", word: "Word", powerpoint: "PowerPoint" };
+
+/** Shown to the model when the pane drops mid-call, which usually means the Office app itself crashed on that call. */
+export function disconnectedMidCall(host: HostId): string {
+  const app = HOST_APP_NAMES[host];
+  const progress = host === "excel" ? "one sheet or a smaller range" : host === "word" ? "one section or a smaller range" : "one slide or a smaller change";
+  const reopened = host === "excel" ? "workbook" : host === "word" ? "document" : "presentation";
+  return `${app}/task pane disconnected while this tool call was running; ${app} may have crashed on it. ` +
+    `Do NOT repeat the same call with the same arguments. Tell the user, wait until the ${reopened} is reopened, ` +
+    `then retry only a smaller step (for example ${progress}) or a different approach.`;
+}
+
+/** The Excel wording; kept as the value Excel sessions use. */
+export const DISCONNECTED_MID_CALL = disconnectedMidCall("excel");
+
+/** Whether `message` is the "pane dropped mid-call" error of any host. */
+export function isDisconnectedMidCall(message: string): boolean {
+  return HOST_IDS.some((host) => message === disconnectedMidCall(host));
+}
 
 /**
  * One workbook <-> one chat session <-> one provider at a time.
@@ -58,7 +76,9 @@ export class WorkbookSession implements ProviderSessionState {
   /** Short name the assistant uses to point at this file (`f1`, `f2`, ...). Not a credential; see list_connected_files. */
   readonly fileId: string;
   readonly createdAt: number;
-  readonly clientInfo: ClientInfo | null;
+  readonly clientInfo: ClientInfoInput | null;
+  /** The Office app this pane runs in, fixed at `hello`. Every tool gate reads it from here. Standalone panes are "excel". */
+  readonly host: HostId;
 
   socket: WebSocket | null = null;
 
@@ -115,12 +135,13 @@ export class WorkbookSession implements ProviderSessionState {
   private toolChain: Promise<unknown> = Promise.resolve();
   private readonly pending = new Map<string, PendingToolCall>();
 
-  constructor(workbookConnectionId: string, clientInfo: ClientInfo | null = null, fileId = "f1") {
+  constructor(workbookConnectionId: string, clientInfo: ClientInfoInput | null = null, fileId = "f1") {
     this.id = randomUUID();
     this.fileId = fileId;
     this.sessionToken = randomBytes(32).toString("base64url");
     this.workbookConnectionId = workbookConnectionId;
     this.clientInfo = clientInfo;
+    this.host = isHostId(clientInfo?.host) ? clientInfo.host : DEFAULT_HOST;
     this.createdAt = Date.now();
     this.lastActivityAt = this.createdAt;
   }
@@ -211,7 +232,7 @@ export class WorkbookSession implements ProviderSessionState {
     }
     this.rejectAllPending({
       code: "disconnected",
-      message: DISCONNECTED_MID_CALL,
+      message: disconnectedMidCall(this.host),
     });
     this.activeRequestId = null;
   }

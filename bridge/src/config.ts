@@ -42,7 +42,7 @@ export interface LocalConfig {
   /** Extra folders searched for skills. */
   skillDirs?: string[];
   allowOfficeJs?: boolean;
-  /** Extra hostnames the bridge answers to (e.g. a WSL IP); `excel-partner allow-host` edits this. */
+  /** Extra hostnames the bridge answers to (e.g. a WSL IP); `office-partner allow-host` edits this. */
   allowedHosts?: string[];
 }
 

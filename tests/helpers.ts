@@ -3,7 +3,7 @@ import WebSocket from "ws";
 import {
   decodeServerMessage,
   encodeMessage,
-  type ClientMessage,
+  type ClientMessageInput,
   type ServerMessage,
 } from "../protocol/src/index.js";
 
@@ -53,7 +53,7 @@ export class PaneClient {
     });
   }
 
-  send(message: ClientMessage): void {
+  send(message: ClientMessageInput): void {
     this.ws.send(encodeMessage(message));
   }
 

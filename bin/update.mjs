@@ -35,7 +35,7 @@ export function stopPackageProcesses({ root, keep = [], run = spawnSync, platfor
   const literal = (text) => `'${String(text).replace(/'/g, "''")}'`;
   const script = [
     CSHARP_BLOCK,
-    `$root = ${literal(path.resolve(root))}`,
+    `$root = ${literal(path.win32.resolve(root))}`, // a Windows path; path.resolve on Linux would glue the cwd in front
     `$spared = @(${spared.join(",")})`,
     "$self = $PID",
     "$all = @(Get-CimInstance Win32_Process)",
@@ -61,7 +61,18 @@ export function stopPackageProcesses({ root, keep = [], run = spawnSync, platfor
 }
 
 /** Run setup from the newly installed package, after npm has replaced this one. */
-export async function updatePackage({ root, dataDir, nodePath, stop, wasRunning, run = spawnSync, spec = "excel-partner@latest", report = () => {} }) {
+/** What the installed package is called on npm: the name in its own package.json, so a rename needs no change here. */
+export function packageNameOf(root) {
+  try {
+    const name = JSON.parse(readFileSync(path.join(root, "package.json"), "utf8")).name;
+    if (typeof name === "string" && /^[a-z0-9-~][a-z0-9-._~]*$/.test(name)) return name;
+  } catch { /* fall through */ }
+  return "office-partner";
+}
+
+export async function updatePackage({ root, dataDir, nodePath, stop, wasRunning, run = spawnSync, spec, report = () => {} }) {
+  const packageName = packageNameOf(root);
+  spec ??= `${packageName}@latest`;
   mkdirSync(dataDir, { recursive: true });
   // npm.cmd needs the Windows command shell. Every argument is a fixed literal, except `spec`, which only the CLI
   // (`update --from`) and the bridge's own configuration can set.
@@ -70,27 +81,27 @@ export async function updatePackage({ root, dataDir, nodePath, stop, wasRunning,
   if (location.error || location.status !== 0 || !location.stdout?.trim()) {
     throw new Error("Could not locate the global npm installation. Check npm is available on PATH.");
   }
-  const installedRoot = path.resolve(location.stdout.trim(), "excel-partner");
+  const installedRoot = path.resolve(location.stdout.trim(), packageName);
   if (installedRoot.toLowerCase() !== path.resolve(root).toLowerCase()) {
-    throw new Error("Update supports the global npm installation. For a source checkout, run scripts/update.ps1 or scripts/update.sh; for npx, rerun npx with excel-partner@latest.");
+    throw new Error("Update supports the global npm installation. For a source checkout, run scripts/update.ps1 or scripts/update.sh; for npx, rerun npx with office-partner@latest.");
   }
-  console.log(`Updating Excel Partner (${spec})…`);
+  console.log(`Updating Office Partner (${spec})…`);
   report("stopping");
   await stop();
   report("installing");
   const installed = run("npm.cmd", ["install", "--global", /\s/.test(spec) ? `"${spec}"` : spec], { ...npmOptions, stdio: "inherit" });
-  const cli = path.join(installedRoot, "bin", "excel-partner.mjs");
+  const cli = path.join(installedRoot, "bin", "office-partner.mjs");
   if (installed.error || installed.status !== 0) {
     report("recovering");
     if (wasRunning) {
       const recovery = run(nodePath, [cli, "start"], { cwd: dataDir, stdio: "inherit", windowsHide: true });
-      if (recovery.error || recovery.status !== 0) console.error("Could not restart the bridge. After fixing npm, run excel-partner setup.");
+      if (recovery.error || recovery.status !== 0) console.error("Could not restart the bridge. After fixing npm, run office-partner setup.");
     }
-    throw new Error("Update failed during npm install. Check the npm error above and retry excel-partner update.");
+    throw new Error("Update failed during npm install. Check the npm error above and retry office-partner update.");
   }
   report("starting");
   const setup = run(nodePath, [cli, "setup"], { cwd: dataDir, stdio: "inherit", windowsHide: true });
-  if (setup.error || setup.status !== 0) throw new Error("Package updated, but setup failed. Run excel-partner setup to finish registration and restart the bridge.");
+  if (setup.error || setup.status !== 0) throw new Error("Package updated, but setup failed. Run office-partner setup to finish registration and restart the bridge.");
   console.log("Update complete. Reopen Excel to load the updated add-in.");
   return { cli, installedRoot, version: installedVersion(installedRoot) };
 }

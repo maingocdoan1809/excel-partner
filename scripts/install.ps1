@@ -81,7 +81,7 @@ if ($Mode -eq 'wsl') {
   Write-Info $cmd
   wsl.exe bash -lc $cmd
   if ($LASTEXITCODE -ne 0) { Fail "WSL install failed." }
-  Write-Host "`nDone (WSL mode). In Excel: Home > Excel Partner." -ForegroundColor Green
+  Write-Host "`nDone (WSL mode). In Word, Excel or PowerPoint: Home > Office Partner." -ForegroundColor Green
   exit 0
 }
 
@@ -113,7 +113,7 @@ Write-Step "starting the bridge"
 Stop-Bridge $Root
 Start-Bridge $Root
 
-Write-Step "sideloading into Excel"
+Write-Step "sideloading into Word, Excel and PowerPoint"
 Invoke-Sideload $Root
 
 if ($Open) {
@@ -122,8 +122,8 @@ if ($Open) {
 }
 
 Write-Host ""
-Write-Host "Done. In Excel: Home > Excel Partner." -ForegroundColor Green
-Write-Host "Restart any Excel window that was already open before this install."
+Write-Host "Done. In Word, Excel or PowerPoint: Home > Office Partner." -ForegroundColor Green
+Write-Host "Restart any Word, Excel or PowerPoint window that was already open before this install."
 Write-Host ""
 Write-Host "The bridge is running now but does not auto-start on reboot."
 Write-Host "To update later:  powershell -File scripts\update.ps1"

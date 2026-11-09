@@ -16,7 +16,7 @@ export const ListTestSessionsInputSchema = z.object({}).strict();
 
 export const OpenTestBrowserInputSchema = z.object({
   session: z.string().regex(TEST_SESSION_NAME_PATTERN).optional()
-    .describe("Name of a session the user saved with `excel-partner login` (see list_test_sessions). The browser starts already signed in and may reach the sites saved with it."),
+    .describe("Name of a session the user saved with `office-partner login` (see list_test_sessions). The browser starts already signed in and may reach the sites saved with it."),
   origins: z.array(z.string().min(1).max(300)).min(1).max(5).optional()
     .refine(list => !list || list.every(item => normalizeOrigin(item) !== null), "Every origin must be a plain http(s) address such as https://staging.example.com.")
     .describe("Sites the browser may open (scheme + host, port if any). Required without a session; with a session, extra sites on top of the saved ones."),

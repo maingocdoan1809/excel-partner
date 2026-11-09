@@ -22,7 +22,7 @@ export type FolderKind = "sessions" | "knowledge" | "scripts";
 export const SIGN_IN_TIMEOUT_MS = 10 * 60_000;
 
 /**
- * What the `excel-partner login/sessions/logout/knowledge/scripts` commands do, behind buttons: list, sign in with a
+ * What the `office-partner login/sessions/logout/knowledge/scripts` commands do, behind buttons: list, sign in with a
  * visible browser, view and delete. It touches only the three folders next to the configuration; nothing here takes a path.
  */
 export class TestingAdmin {

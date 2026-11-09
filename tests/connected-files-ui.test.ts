@@ -32,7 +32,7 @@ describe("Connected files button", () => {
   it("lists each file with its full name on hover, marks the current one, and truncates in CSS not in text", () => {
     const files = setupConnectedFiles();
     const long = "AstraLink_データ移行マッピング_最終版_v12_2026-11-05.xlsx";
-    files.render([{ id: "f2", name: long, current: true }, { id: "f1", name: "Budget.xlsx", current: false }]);
+    files.render([{ id: "f2", name: long, host: "excel", current: true }, { id: "f1", name: "Budget.xlsx", host: "excel", current: false }]);
     const rows = Array.from(document.querySelectorAll<HTMLElement>("#files-list .files-row"));
     expect(rows.map((row) => row.querySelector(".files-name")!.textContent)).toEqual([long, "Budget.xlsx"]);
     expect(rows[0]!.title).toBe(long);
@@ -46,9 +46,23 @@ describe("Connected files button", () => {
 
   it("shows how to connect another file when only this one is open, and a placeholder for an unnamed file", () => {
     const files = setupConnectedFiles();
-    files.render([{ id: "f1", name: "  ", current: true }]);
+    files.render([{ id: "f1", name: "  ", host: "excel", current: true }]);
     expect(document.querySelector("#files-list .files-name")!.textContent).toBe("Untitled workbook");
-    expect(element("files-hint").textContent).toContain("Open another workbook");
+    expect(element("files-hint").textContent).toContain("Open another file");
+  });
+
+  it("shows which application each file is open in, with a placeholder name that fits the kind of file", () => {
+    const files = setupConnectedFiles();
+    files.render([
+      { id: "f1", name: "Plan.docx", host: "word", current: true },
+      { id: "f2", name: "", host: "powerpoint", current: false },
+      { id: "f3", name: "Budget.xlsx", host: "excel", current: false },
+    ]);
+    const rows = Array.from(document.querySelectorAll<HTMLElement>("#files-list .files-row"));
+    expect(rows.map((row) => row.dataset.host)).toEqual(["word", "powerpoint", "excel"]);
+    expect(rows.map((row) => row.querySelector(".files-app")!.textContent)).toEqual(["Word", "PowerPoint", "Excel"]);
+    expect(rows.map((row) => row.querySelector(".files-name")!.textContent)).toEqual(["Plan.docx", "Untitled presentation", "Budget.xlsx"]);
+    expect(new Set(rows.map((row) => row.querySelector("svg")!.innerHTML)).size).toBe(3);
   });
 
   it("closes when a button that stops the click (like Settings) is pressed, and does not hold the Settings menu open", () => {

@@ -13,7 +13,7 @@ import {
   type ConnectedFile,
   type DelegatedPromptMessage,
   type ProviderStatusMessage,
-  type SelectionSnapshot,
+  type PromptSelectionSnapshot,
   type ServerMessage,
   type ToolRequestMessage,
   type ToolResult,
@@ -23,7 +23,7 @@ import {
   type UserInputRequest,
   type UserInputResponse,
 } from "../../protocol/src/index.js";
-import { executeTool } from "./executor/index.js";
+import { activeHost, detectHost } from "./host/index.js";
 import { authorizeSkillScript, describeSiteKnowledgeApproval, describeTestBrowserApproval, executeWithPermission, type PermissionMode, type SiteKnowledgeApproval, type TestBrowserApproval } from "./permissions.js";
 import type { ProviderLoginStatus } from "../../protocol/src/provider-login.js";
 
@@ -49,7 +49,10 @@ export interface TestingOverview {
 }
 export interface ModelCatalog { models: Array<{ id: string; name: string }>; defaultModelId: string | null }
 
-interface ConnectedFileApproval { fileId?: string; name?: string; action?: "message"; text?: string }
+interface ConnectedFileApproval { fileId?: string; name?: string; host?: string; action?: "message"; text?: string }
+
+/** What a file open in each Office application is called, for the permission questions. */
+const FILE_KINDS: Record<string, string> = { excel: "workbook", word: "document", powerpoint: "presentation" };
 
 export interface BridgeClientHandlers {
   onUserInput?(request: UserInputRequest, signal: AbortSignal, requestId: string): Promise<UserInputResponse>;
@@ -122,6 +125,7 @@ export class BridgeClient {
         protocolVersion: PROTOCOL_VERSION,
         workbookConnectionId: this.workbookConnectionId,
         clientInfo: {
+          host: detectHost(),
           platform: Office.context?.platform ? String(Office.context.platform) : null,
           locale: Office.context?.displayLanguage ?? null,
           ...((window as { __EXCEL_PARTNER_STANDALONE__?: boolean }).__EXCEL_PARTNER_STANDALONE__ ? { standalone: true } : {}),
@@ -169,7 +173,7 @@ export class BridgeClient {
     this.send({ type: "set_provider", provider });
   }
 
-  sendPrompt(requestId: string, prompt: string, selection: SelectionSnapshot | null, context?: string, attachmentIds?: string[], model?: string | null, referencePaths?: string[], effort: "low" | "medium" | "high" = "medium", chatSessionId?: string, resumeSessionId?: string, capabilities?: ToolCapabilities, command?: boolean, delegationId?: string): void {
+  sendPrompt(requestId: string, prompt: string, selection: PromptSelectionSnapshot | null, context?: string, attachmentIds?: string[], model?: string | null, referencePaths?: string[], effort: "low" | "medium" | "high" = "medium", chatSessionId?: string, resumeSessionId?: string, capabilities?: ToolCapabilities, command?: boolean, delegationId?: string): void {
     this.send({ type: "prompt", requestId, prompt, selection, chatSessionId, resumeSessionId, capabilities, command, model: model ?? null, effort, ...(delegationId ? { delegationId } : {}), ...(context ? { context } : {}), ...(attachmentIds?.length ? { attachmentIds } : {}), ...(referencePaths?.length ? { referencePaths } : {}) });
   }
 
@@ -483,9 +487,9 @@ export class BridgeClient {
         message.args,
         this.permissionMode,
         (tool, args) => this.handlers.runTool
-          ? this.handlers.runTool({ callId: message.callId, requestId: message.requestId }, tool, args, executeTool)
-          : executeTool(tool, args),
-        (detail) => this.askPermission("Allow workbook change?", detail, "Allow change", message.timeoutMs),
+          ? this.handlers.runTool({ callId: message.callId, requestId: message.requestId }, tool, args, (name, input) => activeHost().execute(name, input))
+          : activeHost().execute(tool, args),
+        (detail) => this.askPermission(`Allow ${activeHost().noun} change?`, detail, "Allow change", message.timeoutMs),
       );
     this.send({ type: "tool_result", callId: message.callId, result });
     if (!message.tool.startsWith("__authorize_")) this.handlers.onToolExecuted?.(message.tool, message.args, result, { callId: message.callId, requestId: message.requestId });
@@ -497,19 +501,20 @@ export class BridgeClient {
     }
   }
 
-  /** Reading another open workbook, or sending its assistant a request (which may change that file). Auto mode allows both. */
+  /** Reading another open file, or sending its assistant a request (which may change that file). Auto mode allows both. */
   private authorizeConnectedFile(args: ConnectedFileApproval, timeoutMs: number): Promise<boolean> {
     const name = String(args.name ?? "").slice(0, 300);
+    const kind = FILE_KINDS[String(args.host ?? "excel")] ?? "file";
     if (args.action === "message") {
       // The person must see every character that is sent: show all of it, and refuse what cannot be shown whole.
       const text = String(args.text ?? "");
       if (text.length > MAX_DELEGATED_TEXT) return Promise.resolve(false);
       return this.askPermission("Send a request to another file?",
-        "The assistant wants the assistant of another open workbook to do this. It works in that file with that file's own tools and permission setting, so changes may be approved in that window. What it does can include changing that file.",
+        `The assistant wants the assistant of another open ${kind} to do this. It works in that file with that file's own tools and permission setting, so changes may be approved in that window. What it does can include changing that file.`,
         "Send request", timeoutMs, `${name}\n\n${text}`);
     }
     return this.askPermission("Let the assistant read another file?",
-      "The assistant wants to read another workbook open in Excel. It can only read it, never change it. What it reads is sent to your AI provider like the rest of this chat.",
+      `The assistant wants to read another ${kind} open with this add-in. It can only read it, never change it. What it reads is sent to your AI provider like the rest of this chat.`,
       "Allow read", timeoutMs, name);
   }
 

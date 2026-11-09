@@ -2,7 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { UpdateError, UpdateService, compareVersions, fetchLatestFromRegistry, type UpdateServiceOptions } from "../bridge/src/updater.js";
+import { DEFAULT_PACKAGE_NAME, UpdateError, UpdateService, compareVersions, fetchLatestFromRegistry, packageNameOf, type UpdateServiceOptions } from "../bridge/src/updater.js";
 
 describe("compareVersions", () => {
   it("orders versions by number, not by text", () => {
@@ -27,9 +27,17 @@ describe("compareVersions", () => {
 describe("fetchLatestFromRegistry", () => {
   const reply = (body: unknown, ok = true, status = 200) => vi.fn(async () => ({ ok, status, json: async () => body })) as unknown as typeof fetch;
   it("reads the version of the latest release", async () => {
-    const fetchImpl = reply({ name: "excel-partner", version: "0.1.20" });
+    const fetchImpl = reply({ name: "office-partner", version: "0.1.20" });
     expect(await fetchLatestFromRegistry(fetchImpl)).toBe("0.1.20");
-    expect(vi.mocked(fetchImpl).mock.calls[0]![0]).toBe("https://registry.npmjs.org/excel-partner/latest");
+    expect(vi.mocked(fetchImpl).mock.calls[0]![0]).toBe("https://registry.npmjs.org/office-partner/latest");
+  });
+  it("asks for the package under whatever name the installed copy has, scoped names included", async () => {
+    const legacy = reply({ version: "0.1.21" });
+    await fetchLatestFromRegistry(legacy, undefined, "excel-partner");
+    expect(vi.mocked(legacy).mock.calls[0]![0]).toBe("https://registry.npmjs.org/excel-partner/latest");
+    const scoped = reply({ version: "1.0.0" });
+    await fetchLatestFromRegistry(scoped, undefined, "@acme/office-partner");
+    expect(vi.mocked(scoped).mock.calls[0]![0]).toBe("https://registry.npmjs.org/@acme%2foffice-partner/latest");
   });
   it("fails clearly when the registry is down or answers nonsense", async () => {
     await expect(fetchLatestFromRegistry(reply({}, false, 503))).rejects.toThrow("HTTP 503");
@@ -56,6 +64,24 @@ describe("UpdateService", () => {
   const service = (extra: Partial<UpdateServiceOptions> = {}) =>
     new UpdateService({ packageRoot, dataDir, platform: "win32", globalRoot: () => path.join(dir, "global"), fetchLatest: async () => "0.1.20", launch: vi.fn(() => 4242), ...extra });
   const writeStatus = (status: object) => { fs.mkdirSync(dataDir, { recursive: true }); fs.writeFileSync(path.join(dataDir, "update-status.json"), JSON.stringify(status)); };
+
+  it("takes the package name from the installed package.json, so a rename needs no change here", async () => {
+    expect(packageNameOf(packageRoot)).toBe("excel-partner");
+    expect(packageNameOf(path.join(dir, "missing"))).toBe(DEFAULT_PACKAGE_NAME);
+    expect(DEFAULT_PACKAGE_NAME).toBe("office-partner");
+    fs.writeFileSync(path.join(packageRoot, "package.json"), JSON.stringify({ name: "../../evil", version: "1" }));
+    expect(packageNameOf(packageRoot)).toBe(DEFAULT_PACKAGE_NAME); // never a path
+    const renamed = path.join(dir, "global", "office-partner");
+    fs.mkdirSync(path.join(renamed, "bin"), { recursive: true });
+    for (const file of ["update.mjs", "update-runner.mjs"]) fs.copyFileSync(path.join(binSource, file), path.join(renamed, "bin", file));
+    fs.writeFileSync(path.join(renamed, "package.json"), JSON.stringify({ name: "office-partner", version: "0.2.0" }));
+    const current = new UpdateService({ packageRoot: renamed, dataDir, platform: "win32", globalRoot: () => path.join(dir, "global"), fetchLatest: async () => "0.2.1", launch: vi.fn(() => 1) });
+    expect(current.unsupportedReason()).toBeNull();
+    expect(await current.check()).toMatchObject({ current: "0.2.0", latest: "0.2.1", updateAvailable: true, canUpdate: true });
+    // A copy whose folder does not match its own name was not installed by npm under that name.
+    fs.writeFileSync(path.join(renamed, "package.json"), JSON.stringify({ name: "excel-partner", version: "0.2.0" }));
+    expect(new UpdateService({ packageRoot: renamed, dataDir, platform: "win32", globalRoot: () => path.join(dir, "global") }).unsupportedReason()).toMatch(/not installed with npm/);
+  });
 
   it("reports the installed version from package.json and whether a newer one is out", async () => {
     const check = await service().check();
@@ -101,14 +127,14 @@ describe("UpdateService", () => {
     const launch = vi.fn(() => 4242);
     fs.mkdirSync(path.join(dir, "gw"), { recursive: true });
     fs.writeFileSync(path.join(dir, "gw", "token.txt"), "x");
-    const status = service({ launch, gatewayDir: path.join(dir, "gw"), spec: "excel-partner@latest" }).start({ busy: false });
+    const status = service({ launch, gatewayDir: path.join(dir, "gw"), spec: "office-partner@latest" }).start({ busy: false });
     expect(status).toMatchObject({ state: "running", from: "0.1.19" });
     const [runner, env, log] = launch.mock.calls[0] as unknown as [string, NodeJS.ProcessEnv, string];
     expect(path.basename(runner)).toBe("update-runner.mjs");
     expect(runner.startsWith(packageRoot)).toBe(false); // it must not run from the folder being replaced
     expect(fs.existsSync(path.join(path.dirname(runner), "update.mjs"))).toBe(true);
     expect(fs.readFileSync(runner, "utf8")).toBe(fs.readFileSync(path.join(packageRoot, "bin", "update-runner.mjs"), "utf8"));
-    expect(env).toMatchObject({ EP_ROOT: packageRoot, EP_DATA: dataDir, EP_SPEC: "excel-partner@latest", EP_FROM: "0.1.19", EP_GATEWAY: "1" });
+    expect(env).toMatchObject({ EP_ROOT: packageRoot, EP_DATA: dataDir, EP_SPEC: "office-partner@latest", EP_FROM: "0.1.19", EP_GATEWAY: "1" });
     expect(log).toBe(path.join(dataDir, "update.log"));
     expect(JSON.parse(fs.readFileSync(path.join(dataDir, "update-status.json"), "utf8"))).toMatchObject({ state: "running" });
     fs.rmSync(path.dirname(runner), { recursive: true, force: true });

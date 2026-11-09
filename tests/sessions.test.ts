@@ -7,6 +7,8 @@ import {
   newSession,
   titleFrom,
   bindProviderSession,
+  inferHost,
+  type SessionHost,
   type StoredMessage,
   type StoredSession,
 } from "../addin/taskpane/ui/sessions.js";
@@ -199,5 +201,77 @@ describe("formatWhen", () => {
     expect(formatWhen(new Date(2026, 9, 14, 8, 5).getTime(), now)).toBe("Today 08:05");
     expect(formatWhen(new Date(2026, 9, 13, 14, 5).getTime(), now)).toBe("Yesterday 14:05");
     expect(formatWhen(new Date(2026, 9, 1, 9, 30).getTime(), now)).toBe("1 Oct 09:30");
+  });
+});
+
+describe("history by app", () => {
+  const chat = (id: string, text: string, at: number, tool?: string): StoredSession => {
+    const session = newSession("claude", at);
+    session.id = id;
+    session.messages = [{ kind: "user", text }, ...(tool ? [{ kind: "tool" as const, text: "", tool: { name: tool, args: "", state: "ok" as const, error: null } }] : []), { kind: "assistant", text: "ok" }];
+    session.updatedAt = at;
+    return session;
+  };
+  /** One storage shared by three panes, as in real life: Word, Excel and PowerPoint load the same add-in address. */
+  function panes() {
+    const storage = new MemoryStorage();
+    const open = (host: SessionHost) => new SessionStore(storage, undefined, () => host);
+    return { storage, excel: open("excel"), word: open("word"), powerpoint: open("powerpoint") };
+  }
+
+  it("shows each app only the chats held in it", () => {
+    const { excel, word, powerpoint } = panes();
+    excel.save(chat("e1", "sum column B", 3));
+    word.save(chat("w1", "shorten the intro", 2));
+    powerpoint.save(chat("p1", "tidy slide 4", 1));
+    expect(excel.list().map((s) => s.id)).toEqual(["e1"]);
+    expect(word.list().map((s) => s.id)).toEqual(["w1"]);
+    expect(powerpoint.list().map((s) => s.id)).toEqual(["p1"]);
+    expect(word.get("e1")).toBeNull();
+    expect(word.get("w1")?.host).toBe("word");
+  });
+
+  it("brings back the latest chat of the same app only", () => {
+    const { excel, word } = panes();
+    word.save(chat("w1", "older word chat", 1_000));
+    excel.save(chat("e1", "newer excel chat", 2_000));
+    expect(word.latest(10_000, 3_000)?.id).toBe("w1");
+    expect(excel.latest(10_000, 3_000)?.id).toBe("e1");
+    const { word: lonely } = panes();
+    expect(lonely.latest(10_000, 3_000)).toBeNull();
+  });
+
+  it("deletes and clears only the chats of its own app", () => {
+    const { storage, excel, word } = panes();
+    excel.save(chat("e1", "one", 3));
+    excel.save(chat("e2", "two", 2));
+    word.save(chat("w1", "three", 1));
+    word.delete("e1"); // an id from another app is not its to delete
+    expect(excel.list()).toHaveLength(2);
+    word.clear();
+    expect(word.list()).toEqual([]);
+    expect(excel.list()).toHaveLength(2);
+    excel.clear();
+    expect(storage.getItem("excelPartner.sessions.v1")).toBeNull();
+  });
+
+  it("keeps the limit per app, so a long Excel history does not push out a Word chat", () => {
+    const { excel, word } = panes();
+    word.save(chat("w1", "the one Word chat", 1));
+    for (let i = 0; i < LIMITS.sessions + 5; i++) excel.save(chat(`e${i}`, `excel chat ${i}`, 100 + i));
+    expect(excel.list()).toHaveLength(LIMITS.sessions);
+    expect(word.list().map((s) => s.id)).toEqual(["w1"]);
+  });
+
+  it("files chats saved before apps were recorded by what they used: Word or PowerPoint tools, otherwise Excel", () => {
+    const { storage, excel, word, powerpoint } = panes();
+    const legacy = [chat("old-e", "no tools at all", 4), chat("old-e2", "sheet work", 3, "read_range"), chat("old-w", "doc work", 2, "edit_doc_text"), chat("old-p", "deck work", 1, "read_slide_text")];
+    storage.setItem("excelPartner.sessions.v1", JSON.stringify(legacy.map((s) => { const { host, ...rest } = s; return rest; })));
+    expect(excel.list().map((s) => s.id)).toEqual(["old-e", "old-e2"]);
+    expect(word.list().map((s) => s.id)).toEqual(["old-w"]);
+    expect(powerpoint.list().map((s) => s.id)).toEqual(["old-p"]);
+    expect(inferHost(legacy[0]!)).toBe("excel");
+    // Tools every app has say nothing about the app.
+    expect(inferHost(chat("x", "y", 1, "get_selection"))).toBe("excel");
   });
 });

@@ -90,7 +90,7 @@ export class SiteKnowledge {
     return entries.sort((a, b) => a.kind.localeCompare(b.kind) || a.name.localeCompare(b.name));
   }
 
-  /** Every system that has notes, for `excel-partner knowledge` with no address. */
+  /** Every system that has notes, for `office-partner knowledge` with no address. */
   sites(): string[] {
     try { return fs.readdirSync(this.dir, { withFileTypes: true }).filter(item => item.isDirectory()).map(item => item.name).sort(); } catch { return []; }
   }

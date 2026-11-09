@@ -74,7 +74,7 @@ describe("two workbooks talking to each other over the wire", () => {
     // The Actuals task pane does what main.ts does: run the request as its own turn, tagged with the delegation id.
     handle(actuals, (m) => {
       if (m.type !== "delegated_prompt") return;
-      expect(m.from).toEqual({ id: from.fileId, name: "Budget.xlsx" });
+      expect(m.from).toEqual({ id: from.fileId, name: "Budget.xlsx", host: "excel" });
       actuals.send({ type: "prompt", requestId: "actuals-turn-1", prompt: m.text, selection: null, model: null, effort: "medium", delegationId: m.delegationId });
     });
 

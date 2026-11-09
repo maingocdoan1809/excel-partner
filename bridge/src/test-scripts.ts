@@ -77,7 +77,7 @@ export class TestScripts {
     return entries.sort((a, b) => a.caseId.localeCompare(b.caseId, undefined, { numeric: true }));
   }
 
-  /** Every system that has scripts, for `excel-partner scripts` with no address. */
+  /** Every system that has scripts, for `office-partner scripts` with no address. */
   sites(): string[] {
     try { return fs.readdirSync(this.dir, { withFileTypes: true }).filter(item => item.isDirectory()).map(item => item.name).sort(); } catch { return []; }
   }
@@ -94,7 +94,7 @@ export class TestScripts {
     validateScript(origin, input.script);
     const existing = this.list(origin);
     if (!existing.some(item => item.caseId === input.caseId) && existing.length >= MAX_SCRIPTS_PER_SITE) {
-      throw new TestScriptError(`This site already has ${MAX_SCRIPTS_PER_SITE} scripts. Delete some (excel-partner scripts delete) before adding more.`);
+      throw new TestScriptError(`This site already has ${MAX_SCRIPTS_PER_SITE} scripts. Delete some (office-partner scripts delete) before adding more.`);
     }
   }
 

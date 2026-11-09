@@ -1,4 +1,6 @@
 import { z } from "zod";
+import { PptToolInputSchemas } from "./tools-ppt.js";
+import { WordToolInputSchemas } from "./tools-word.js";
 import {
   ClearRangeInputSchema,
   FormatRangeInputSchema,
@@ -41,6 +43,7 @@ import {
   ReadWorkbookFileInputSchema,
   ReadAttachedImageInputSchema,
   ReadAttachedFileInputSchema,
+  ReadDocumentFileInputSchema,
   ReadSkillInputSchema,
   RunSkillScriptInputSchema,
   RunPythonInputSchema,
@@ -67,8 +70,8 @@ import {
   FinishTestRunInputSchema,
 } from "./tools-testing.js";
 
-/** Every tool the Excel MCP server can expose, with its input schema. */
-export const ToolInputSchemas = {
+/** The Excel catalog: every tool an Excel session can use, with its input schema. */
+export const ExcelToolInputSchemas = {
   // read
   get_selection: GetSelectionInputSchema,
   get_sheets: GetSheetsInputSchema,
@@ -125,6 +128,7 @@ export const ToolInputSchemas = {
   read_workbook_file: ReadWorkbookFileInputSchema,
   read_attached_image: ReadAttachedImageInputSchema,
   read_attached_file: ReadAttachedFileInputSchema,
+  read_document_file: ReadDocumentFileInputSchema,
   insert_sheets_from_file: InsertSheetsFromFileInputSchema,
   // other workbooks open in Excel with this add-in: listed and read (never written) by the bridge
   list_connected_files: ListConnectedFilesInputSchema,
@@ -144,21 +148,26 @@ export const ToolInputSchemas = {
   execute_office_js: ExecuteOfficeJsInputSchema,
 } as const satisfies Record<string, z.ZodTypeAny>;
 
-export type ExcelToolName = keyof typeof ToolInputSchemas;
-export const EXCEL_TOOL_NAMES = Object.keys(ToolInputSchemas) as ExcelToolName[];
+export type ExcelToolName = keyof typeof ExcelToolInputSchemas;
+export const EXCEL_TOOL_NAMES = Object.keys(ExcelToolInputSchemas) as ExcelToolName[];
+
+/** Every tool of every host (Excel, Word, PowerPoint). Names are unique across hosts. */
+export const ToolInputSchemas = { ...ExcelToolInputSchemas, ...WordToolInputSchemas, ...PptToolInputSchemas } as const;
+export type ToolName = keyof typeof ToolInputSchemas;
+export const ALL_TOOL_NAMES = Object.keys(ToolInputSchemas) as ToolName[];
 
 /** Tools the bridge answers itself instead of forwarding to the task pane. */
-export const SERVER_TOOLS: readonly ExcelToolName[] = ["playwright_browser", "list_skills", "read_skill", "save_skill", "update_skill", "run_skill_script", "run_python", "list_reference_files", "read_workbook_file", "read_attached_image", "read_attached_file", "list_connected_files", "read_connected_file", "send_to_connected_file", "list_test_sessions", "open_test_browser", "read_site_knowledge", "save_site_knowledge", "delete_site_knowledge", "save_test_script", "finish_test_run"];
+export const SERVER_TOOLS: readonly ExcelToolName[] = ["playwright_browser", "list_skills", "read_skill", "save_skill", "update_skill", "run_skill_script", "run_python", "list_reference_files", "read_workbook_file", "read_attached_image", "read_attached_file", "read_document_file", "list_connected_files", "read_connected_file", "send_to_connected_file", "list_test_sessions", "open_test_browser", "read_site_knowledge", "save_site_knowledge", "delete_site_knowledge", "save_test_script", "finish_test_run"];
 
 /** Tools that need the user to have switched on the browser (Playwright) in Tools. */
 export const BROWSER_TOOLS: readonly ExcelToolName[] = ["playwright_browser", "list_test_sessions", "open_test_browser", "save_test_script", "finish_test_run"];
 
 /** Tools controlled by allowOfficeJs (enabled by default; BRIDGE_ALLOW_OFFICE_JS=0 disables them). */
-export const OPT_IN_TOOLS: readonly ExcelToolName[] = ["execute_office_js"];
+export const OPT_IN_TOOLS: readonly ToolName[] = ["execute_office_js", "edit_slide_xml"];
 
-/** Tool names a session exposes, given whether the opt-in tools are enabled. */
+/** Excel tool names a session exposes, given whether the opt-in tools are enabled. */
 export function exposedToolNames(allowOptIn: boolean, capabilities: { webSearch?: boolean; playwright?: boolean } = {}): ExcelToolName[] {
-  return EXCEL_TOOL_NAMES.filter((name) => (allowOptIn || !OPT_IN_TOOLS.includes(name))
+  return EXCEL_TOOL_NAMES.filter((name) => (allowOptIn || !(OPT_IN_TOOLS as readonly string[]).includes(name))
     && (!BROWSER_TOOLS.includes(name) || capabilities.playwright));
 }
 
@@ -166,7 +175,12 @@ export function isExcelToolName(name: string): name is ExcelToolName {
   return (EXCEL_TOOL_NAMES as readonly string[]).includes(name);
 }
 
+/** Whether `name` is a tool of any host. */
+export function isKnownToolName(name: string): name is ToolName {
+  return Object.prototype.hasOwnProperty.call(ToolInputSchemas, name);
+}
+
 /** Parse and validate tool arguments, returning a typed result or a Zod error. */
-export function parseToolInput<T extends ExcelToolName>(tool: T, args: unknown): z.infer<(typeof ToolInputSchemas)[T]> {
+export function parseToolInput<T extends ToolName>(tool: T, args: unknown): z.infer<(typeof ToolInputSchemas)[T]> {
   return (ToolInputSchemas[tool] as z.ZodTypeAny).parse(args ?? {}) as z.infer<(typeof ToolInputSchemas)[T]>;
 }

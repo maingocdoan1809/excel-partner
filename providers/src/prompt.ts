@@ -1,4 +1,4 @@
-import type { SelectionSnapshot } from "../../protocol/src/index.js";
+import type { PromptSelectionSnapshot, SelectionSnapshot } from "../../protocol/src/index.js";
 
 /** No add-in instructions by default; providers retain their own native instructions. */
 export const SYSTEM_PROMPT = "";
@@ -43,15 +43,26 @@ export const RECOMMENDED_SYSTEM_PROMPT = `You are an AI assistant working inside
 
 const MAX_PROMPT_VALUES = 400;
 
-/** Combine the user's request with the selection snapshot taken when they hit send. */
-export function buildTurnPrompt(prompt: string, selection: SelectionSnapshot | null): string {
-  if (!selection) return prompt;
+/** Wrap a snapshot object and the user's request the way every host does. */
+function withSnapshot(context: object, prompt: string): string {
+  return [
+    "<selection_snapshot>",
+    // The snapshot carries text from the file (cells, document prose, slide text). "<" is written as \u003c so that
+    // text like "</selection_snapshot>" inside a file cannot close the block and pass for the user's own words.
+    JSON.stringify(context).replace(/</g, "\\u003c"),
+    "</selection_snapshot>",
+    "(The snapshot was taken when the user sent this message; call get_selection for the live state.)",
+    "",
+    prompt,
+  ].join("\n");
+}
 
+function excelSnapshotContext(selection: SelectionSnapshot): object {
   const values = selection.values.flat().length > MAX_PROMPT_VALUES
     ? selection.values.slice(0, Math.max(1, Math.floor(MAX_PROMPT_VALUES / Math.max(1, selection.columnCount))))
     : selection.values;
 
-  const context = {
+  return {
     workbook: selection.workbookName,
     sheet: selection.sheet,
     address: selection.address,
@@ -68,12 +79,14 @@ export function buildTurnPrompt(prompt: string, selection: SelectionSnapshot | n
     ...(selection.shapeSelectionStatus ? { shapeSelectionStatus: selection.shapeSelectionStatus } : {}),
     ...(selection.note ? { note: selection.note } : {}),
   };
-  return [
-    "<selection_snapshot>",
-    JSON.stringify(context),
-    "</selection_snapshot>",
-    "(The snapshot was taken when the user sent this message; call get_selection for the live state.)",
-    "",
-    prompt,
-  ].join("\n");
+}
+
+/**
+ * Combine the user's request with the selection snapshot taken when they hit send. A snapshot without a `host` is
+ * Excel's; Word and PowerPoint snapshots carry no cell values, so they are passed on as the pane sent them.
+ */
+export function buildTurnPrompt(prompt: string, selection: PromptSelectionSnapshot | null): string {
+  if (!selection) return prompt;
+  if ("workbookName" in selection) return withSnapshot(excelSnapshotContext(selection), prompt);
+  return withSnapshot(selection, prompt);
 }
