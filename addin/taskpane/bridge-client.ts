@@ -489,7 +489,8 @@ export class BridgeClient {
         (tool, args) => this.handlers.runTool
           ? this.handlers.runTool({ callId: message.callId, requestId: message.requestId }, tool, args, (name, input) => activeHost().execute(name, input))
           : activeHost().execute(tool, args),
-        (detail) => this.askPermission(`Allow ${activeHost().noun} change?`, detail, "Allow change", message.timeoutMs),
+        (detail) => this.askPermission(`Allow ${activeHost().noun} change?`, detail, "Allow change", message.timeoutMs,
+          JSON.stringify(message.args, null, 2).slice(0, 8000)),
       );
     this.send({ type: "tool_result", callId: message.callId, result });
     if (!message.tool.startsWith("__authorize_")) this.handlers.onToolExecuted?.(message.tool, message.args, result, { callId: message.callId, requestId: message.requestId });

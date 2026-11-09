@@ -11,7 +11,7 @@ interface SettingsOptions {
 }
 
 /** Pane preferences are local; instructions use the existing revisioned bridge API. */
-export function setupSettings(options: SettingsOptions): { open(): Promise<void> } {
+export function setupSettings(options: SettingsOptions): { open(preserveScroll?: boolean): Promise<void> } {
   const get = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
   const input = get<HTMLTextAreaElement>("settings-instructions");
   const save = get<HTMLButtonElement>("settings-save-instructions");
@@ -21,7 +21,12 @@ export function setupSettings(options: SettingsOptions): { open(): Promise<void>
   let loaded: SkillTextFile | undefined;
   let busy = false;
   const dirty = () => loaded !== undefined && input.value !== loaded.content;
-  const updateSave = () => { save.disabled = busy || !dirty(); };
+  const updateSave = () => {
+    save.disabled = busy || !dirty();
+    recommended.disabled = busy || !loaded;
+    input.setAttribute("aria-busy", String(busy));
+  };
+  const setStatus = (message: string, state = "idle") => { status.textContent = message; status.dataset.state = state; };
   const history = () => {
     const count = options.historyCount();
     get("settings-history-count").textContent = `${count} saved chat${count === 1 ? "" : "s"}`;
@@ -45,34 +50,33 @@ export function setupSettings(options: SettingsOptions): { open(): Promise<void>
   get("text-size-increase").addEventListener("click", () => { scale = Math.min(150, scale + 10); applySize(); });
   size.addEventListener("click", () => { scale = 100; applySize(); });
   applySize();
-  input.addEventListener("input", () => { status.textContent = "Unsaved changes"; updateSave(); });
+  input.addEventListener("input", () => { setStatus(dirty() ? "Unsaved changes" : ""); updateSave(); });
   const recommended = get<HTMLButtonElement>("settings-recommended-instructions");
   recommended.addEventListener("click", () => {
     if (!loaded || busy) return;
     input.value = recommendedPromptFor(activeHost().id);
-    status.textContent = "Recommended instructions loaded. Press Save to apply them.";
+    setStatus("Recommended instructions loaded. Save to apply them.");
     updateSave();
   });
   save.addEventListener("click", async () => {
     if (!loaded || busy || !dirty()) return;
-    busy = true; input.disabled = true; updateSave(); status.textContent = "Saving…";
+    busy = true; input.disabled = true; save.textContent = "Saving…"; updateSave(); setStatus("Saving…");
     try {
       loaded = await options.saveInstructions(input.value, loaded.revision);
       input.value = loaded.content;
-      status.textContent = "Saved. Applies to your next message; use a new chat to replace earlier instructions.";
-    } catch (error) { status.textContent = error instanceof Error ? error.message : "Could not save instructions."; }
-    finally { busy = false; input.disabled = false; updateSave(); }
+      setStatus("Saved. Applies to your next message; use a new chat to replace earlier instructions.", "saved");
+    } catch (error) { setStatus(error instanceof Error ? error.message : "Could not save instructions.", "error"); }
+    finally { busy = false; input.disabled = false; save.textContent = "Save instructions"; updateSave(); }
   });
   updateSave();
-  return { async open() {
+  return { async open(preserveScroll = false) {
     const body = document.querySelector<HTMLElement>(".settings-body")!;
-    body.scrollTop = 0;
-    get("settings-heading").focus({ preventScroll: true });
+    if (!preserveScroll) { body.scrollTop = 0; get("settings-heading").focus({ preventScroll: true }); }
     history();
-    if (busy || dirty()) return;
-    busy = true; input.disabled = true; updateSave(); status.textContent = "Loading…";
-    try { loaded = await options.loadInstructions(); input.value = loaded.content; status.textContent = ""; }
-    catch (error) { loaded = undefined; status.textContent = error instanceof Error ? error.message : "Could not load instructions."; }
+    if (busy || dirty() || (preserveScroll && loaded)) return;
+    busy = true; input.disabled = true; updateSave(); setStatus("Loading…");
+    try { loaded = await options.loadInstructions(); input.value = loaded.content; setStatus(""); }
+    catch (error) { loaded = undefined; setStatus(error instanceof Error ? error.message : "Could not load instructions.", "error"); }
     finally { busy = false; input.disabled = !loaded; updateSave(); }
   } };
 }

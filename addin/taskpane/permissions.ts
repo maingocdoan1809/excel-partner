@@ -1,5 +1,6 @@
 import type { ToolResult } from "../../protocol/src/index.js";
 import type { RunSkillScriptInput } from "../../protocol/src/index.js";
+import { WORD_WRITE_TOOLS, PPT_WRITE_TOOLS } from "../../protocol/src/index.js";
 
 export type PermissionMode = "ask" | "auto";
 
@@ -17,12 +18,18 @@ export async function authorizeSkillScript(
 }
 
 const OVERWRITE_TOOLS = new Set(["write_range", "set_formula", "set_cells", "copy_to", "merge_range"]);
+const ASK_BEFORE_WRITE = new Set<string>([...WORD_WRITE_TOOLS, ...PPT_WRITE_TOOLS, "execute_office_js"]);
+// The proposal card collects approval itself. Slide deletion uses the guarded retry below.
+ASK_BEFORE_WRITE.delete("propose_doc_edits");
 
 function withPermissionFlag(tool: string, args: unknown, enabled: boolean): unknown {
   if (!args || typeof args !== "object" || Array.isArray(args)) return args;
   if (OVERWRITE_TOOLS.has(tool)) return { ...args, allowOverwrite: enabled };
   if (tool === "manage_sheet" && (args as { operation?: unknown }).operation === "delete") {
     return { ...args, confirmDelete: enabled };
+  }
+  if (tool === "modify_presentation_structure" && (args as { operation?: unknown }).operation === "delete") {
+    return { ...args, confirm_delete: enabled };
   }
   return args;
 }
@@ -35,6 +42,14 @@ export async function executeWithPermission(
   execute: (tool: string, args: unknown) => Promise<ToolResult>,
   ask: (message: string) => Promise<boolean>,
 ): Promise<ToolResult> {
+  const guardedSlideDelete = tool === "modify_presentation_structure" &&
+    args !== null && typeof args === "object" && (args as { operation?: unknown }).operation === "delete";
+  if (mode === "ask" && ASK_BEFORE_WRITE.has(tool) && !guardedSlideDelete) {
+    const detail = tool === "execute_office_js"
+      ? "Run Office.js code? It can read, change or delete content with this task pane's access."
+      : `Allow ${tool.replace(/_/g, " ")} to change this file?`;
+    if (!await ask(detail)) return { ok: false, error: { code: "cancelled", message: "The user declined this file change." } };
+  }
   const prepared = withPermissionFlag(tool, args, mode === "auto");
   const result = await execute(tool, prepared);
   if (mode === "auto" || result.ok) return result;
@@ -42,10 +57,12 @@ export async function executeWithPermission(
     ? "allowOverwrite"
     : result.error.code === "confirmation_required" && tool === "manage_sheet"
       ? "confirmDelete"
+      : result.error.code === "confirmation_required" && tool === "modify_presentation_structure"
+        ? "confirm_delete"
       : null;
   if (!flag) return result;
   const approved = await ask(result.error.message.split(" Ask the user")[0]!);
-  if (!approved) return { ok: false, error: { code: "cancelled", message: "The user declined this workbook change." } };
+  if (!approved) return { ok: false, error: { code: "cancelled", message: "The user declined this file change." } };
   return execute(tool, { ...(prepared as Record<string, unknown>), [flag]: true });
 }
 

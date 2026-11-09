@@ -91,6 +91,24 @@ describe("task pane start-up in each Office application", () => {
     } finally { installed.restore(); }
   });
 
+  it("returns from a settings child to Settings and keeps Settings open when switching provider", async () => {
+    installWordFake(new FakeWordDoc());
+    await boot("Word");
+    const get = (id: string) => document.getElementById(id)!;
+    get("menu-settings").click();
+    get("menu-skills").click();
+    expect(get("panel-skills").hidden).toBe(false);
+    expect(document.body.classList.contains("settings-active")).toBe(true);
+    (get("panel-skills").querySelector("[data-close]") as HTMLButtonElement).click();
+    expect(get("panel-settings").hidden).toBe(false);
+    const provider = get("provider-select") as HTMLSelectElement;
+    provider.value = "codex";
+    provider.dispatchEvent(new Event("change"));
+    expect(get("panel-settings").hidden).toBe(false);
+    (get("panel-settings").querySelector("[data-close]") as HTMLButtonElement).click();
+    expect(document.body.classList.contains("settings-active")).toBe(false);
+  });
+
   it("Excel: connects as Excel and keeps the Excel-only controls", async () => {
     const socket = await boot("Excel");
     expect(socket.sent.find((message) => message.type === "hello")).toMatchObject({ clientInfo: { host: "excel" } });

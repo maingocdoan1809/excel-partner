@@ -1,5 +1,6 @@
 import type { ExecuteOfficeJsInput, HostId } from "../../../protocol/src/index.js";
 import { ToolFailure } from "./common.js";
+import { backgroundExcel } from "./background-excel.js";
 
 /** Largest JSON result (characters) sent back to the model. */
 const MAX_RESULT_CHARS = 30_000;
@@ -42,10 +43,15 @@ export async function executeOfficeJs(input: ExecuteOfficeJsInput, host: HostId 
   }
 
   const runner = hostRunner(host);
+  const background = host === "excel" ? backgroundExcel() : null;
   return runner(async (context) => {
-    const returned = await fn(context, hostNamespace(host), Office);
+    const returned = await fn(background?.wrap(context) ?? context, background?.namespace ?? hostNamespace(host), background?.wrap(Office) ?? Office);
     await context.sync();
-    if (returned === undefined) return { result: null };
+    const navigation = background?.skipped.size ? {
+      navigationSuppressed: [...background.skipped],
+      note: "Updated in the background without moving the user's selection or freezing the screen. Use explicit sheet/range references; return cell links for the user to navigate.",
+    } : {};
+    if (returned === undefined) return { result: null, ...navigation };
     let json: string;
     try {
       json = JSON.stringify(returned);
@@ -55,6 +61,6 @@ export async function executeOfficeJs(input: ExecuteOfficeJsInput, host: HostId 
     if (json.length > MAX_RESULT_CHARS) {
       throw new ToolFailure("size_limit_exceeded", `the result is ${json.length} characters (limit ${MAX_RESULT_CHARS}); return less data`);
     }
-    return { result: JSON.parse(json) as unknown };
+    return { result: JSON.parse(json) as unknown, ...navigation };
   });
 }

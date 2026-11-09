@@ -1,11 +1,35 @@
 import { describe, expect, it } from "vitest";
 import { computeAlignment } from "../addin/taskpane/executor/powerpoint/shapes.js";
 import { call, fails, ok, useFakeDeck } from "./support/ppt-fixture.js";
+import { executeWithPermission } from "../addin/taskpane/permissions.js";
 
 const fx = useFakeDeck();
 const shapeOf = (slideId: string, shapeId: string) => fx().deck.slideById(slideId).shapes.find((s) => s.id === shapeId)!;
 
 describe("add_slide / move_slide / modify_presentation_structure", () => {
+  it("Ask cannot be bypassed by a model-supplied deletion confirmation", async () => {
+    let asked = 0;
+    const result = await executeWithPermission("modify_presentation_structure",
+      { operation: "delete", slide_id: fx().agenda, confirm_delete: true }, "ask", call,
+      async () => { asked++; expect(fx().deck.ids()).toHaveLength(3); return false; });
+    expect(asked).toBe(1);
+    expect(result).toMatchObject({ ok: false, error: { code: "cancelled" } });
+    expect(fx().deck.ids()).toHaveLength(3);
+  });
+
+  it("Ask deletes only after approval and Auto supplies the confirmation itself", async () => {
+    const result = await executeWithPermission("modify_presentation_structure",
+      { operation: "delete", slide_id: fx().agenda }, "ask", call,
+      async () => { expect(fx().deck.ids()).toHaveLength(3); return true; });
+    expect(result.ok).toBe(true);
+    expect(fx().deck.ids()).toHaveLength(2);
+    const auto = await executeWithPermission("modify_presentation_structure",
+      { operation: "delete", slide_id: fx().data }, "auto", call,
+      async () => { throw new Error("Auto must not ask"); });
+    expect(auto.ok).toBe(true);
+    expect(fx().deck.ids()).toHaveLength(1);
+  });
+
   it("adds a slide from a layout and returns its placeholders", async () => {
     const data = await ok("add_slide", { layout_id: "l2#" });
     expect(data).toMatchObject({ position: 4, slide_count: 4, layout: "Title and Content" });

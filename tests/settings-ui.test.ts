@@ -46,6 +46,19 @@ describe("Settings and tool details", () => {
     expect(element("settings-history-count").textContent).toBe("3 saved chats");
     element("settings-clear-history").click(); expect(api.clearHistory).toHaveBeenCalledOnce();
   });
+  it("keeps scroll position when returning from a settings child and clears a reverted draft status", async () => {
+    const api = options(); const settings = setupSettings(api); await settings.open();
+    const body = document.querySelector<HTMLElement>(".settings-body")!;
+    body.scrollTop = 350;
+    await settings.open(true);
+    expect(body.scrollTop).toBe(350);
+    expect(api.loadInstructions).toHaveBeenCalledTimes(1);
+    const input = element<HTMLTextAreaElement>("settings-instructions");
+    input.value = "Edited"; input.dispatchEvent(new Event("input"));
+    input.value = "Original"; input.dispatchEvent(new Event("input"));
+    expect(element("settings-instructions-status").textContent).toBe("");
+    expect(element<HTMLButtonElement>("settings-save-instructions").disabled).toBe(true);
+  });
   it("renders actual tool data safely in expandable details and bounds large values", () => {
     const result = formatToolValue({ ok: true, data: { sheet: "<img src=x onerror=alert(1)>" } });
     const card = renderToolCard({ name: "read_range", args: "A1", input: '{"address":"A1"}', result, error: null, state: "ok" });

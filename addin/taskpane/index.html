@@ -59,89 +59,112 @@
       <section id="messages" class="messages" aria-live="polite"></section>
 
       <section id="panel-settings" class="panel settings-panel" hidden aria-label="Settings">
-        <header class="panel-head"><button type="button" class="back" data-close="settings" aria-label="Back to chat">←</button><h2 id="settings-heading" tabindex="-1">Settings</h2></header>
+        <header class="panel-head"><button type="button" class="back" data-close="settings" aria-label="Back to chat">←</button><div class="settings-heading"><h2 id="settings-heading" tabindex="-1">Settings</h2><p>Make Office Partner work your way.</p></div></header>
         <div class="settings-body">
-          <section class="settings-section" aria-labelledby="settings-provider-title">
-            <div class="settings-row"><div><label id="settings-provider-title" class="settings-title" for="provider-select">AI provider</label><p class="settings-description">Choose the account used for new chats.</p></div>
-              <select id="provider-select" class="theme-select"><option value="claude">Claude Code</option><option value="copilot">GitHub Copilot</option><option value="codex">Codex</option><option value="opencode">OpenCode</option></select>
+          <div class="settings-group" role="group" aria-labelledby="settings-assistant-title">
+            <h3 id="settings-assistant-title" class="settings-group-title">Your assistant</h3>
+            <div class="settings-card">
+              <section class="settings-section" aria-labelledby="settings-provider-title">
+                <div class="settings-row"><div><label id="settings-provider-title" class="settings-title" for="provider-select">AI provider</label><p class="settings-description">The account used for new chats.</p></div>
+                  <select id="provider-select" class="theme-select"><option value="claude">Claude Code</option><option value="copilot">GitHub Copilot</option><option value="codex">Codex</option><option value="opencode">OpenCode</option></select>
+                </div>
+                <p id="provider-hint" class="settings-description"></p>
+                <button id="menu-login" type="button" class="secondary settings-account">Sign in to GitHub Copilot</button>
+              </section>
+              <section class="settings-section">
+                <label class="settings-title" for="settings-instructions">Instructions</label>
+                <p class="settings-description">Tell Office Partner how to help you in <span class="host-app">Excel</span>.</p>
+                <textarea id="settings-instructions" rows="4" aria-describedby="settings-instructions-status" placeholder="e.g. Reply in Vietnamese. Keep existing formatting. Explain changes briefly."></textarea>
+                <div class="settings-save-row"><button id="settings-recommended-instructions" type="button" class="secondary" title="Fill with recommended instructions, then save to apply">Use recommended</button><button id="settings-save-instructions" type="button" class="settings-primary">Save instructions</button></div>
+                <p id="settings-instructions-status" role="status" aria-live="polite"></p>
+              </section>
             </div>
-            <p id="provider-hint" class="settings-description"></p>
-            <button id="menu-login" type="button" class="secondary settings-account">Sign in to GitHub Copilot</button>
-          </section>
-          <section class="settings-section">
-            <label class="settings-title" for="settings-instructions">Instructions</label>
-            <p class="settings-description">Tell Office Partner how it should work in <span class="host-app">Excel</span>.</p>
-            <textarea id="settings-instructions" rows="4" placeholder="e.g. Use Vietnamese. Format numbers with thousand separators. Always bold column headers."></textarea>
-            <div class="settings-save-row"><p id="settings-instructions-status" role="status" aria-live="polite"></p><button id="settings-recommended-instructions" type="button" class="secondary" title="Fill the box with the recommended workflow rules for this app, then press Save">Use recommended</button><button id="settings-save-instructions" type="button" class="secondary">Save</button></div>
-          </section>
-          <section class="settings-section settings-row">
-            <div><h3>Text size</h3><p class="settings-description">Adjust the conversation text size.</p></div>
-            <div class="text-size-control"><button id="text-size-decrease" type="button" aria-label="Decrease text size">−</button><button id="text-size-reset" type="button" title="Reset text size to 100%">100%</button><button id="text-size-increase" type="button" aria-label="Increase text size">+</button></div>
-          </section>
-          <section class="settings-section settings-row">
-            <div><label class="settings-title" for="theme-select">Appearance</label><p class="settings-description">Choose a theme or follow <span class="host-app">Excel</span>.</p></div>
-            <select id="theme-select" class="theme-select" aria-label="Appearance"><option value="auto" data-host-label="Follow {app}">Follow Excel</option><option value="light">Light</option><option value="dark">Dark</option></select>
-          </section>
-          <section class="settings-section settings-row">
-            <div><h3>Chat history</h3><p id="settings-history-count" class="settings-description">Saved on this computer.</p></div>
-            <button id="settings-clear-history" type="button" class="secondary">Delete all</button>
-          </section>
-          <section id="settings-update-section" class="settings-section">
-            <div class="settings-row"><div><h3>Updates</h3><p id="update-version" class="settings-description">Version …</p></div>
-              <button id="update-check" type="button" class="secondary">Check for updates</button>
+          </div>
+          <div class="settings-group" role="group" aria-labelledby="settings-appearance-title">
+            <h3 id="settings-appearance-title" class="settings-group-title">Appearance</h3>
+            <div class="settings-card">
+              <section class="settings-section settings-row">
+                <div><label class="settings-title" for="theme-select">Theme</label><p class="settings-description">Light, dark, or follow <span class="host-app">Excel</span>.</p></div>
+                <select id="theme-select" class="theme-select" aria-label="Appearance"><option value="auto" data-host-label="Follow {app}">Follow Excel</option><option value="light">Light</option><option value="dark">Dark</option></select>
+              </section>
+              <section class="settings-section settings-row">
+                <div><h3>Text size</h3><p class="settings-description">Conversation text size.</p></div>
+                <div class="text-size-control"><button id="text-size-decrease" type="button" aria-label="Decrease text size">−</button><button id="text-size-reset" type="button" title="Reset text size to 100%" aria-label="Reset text size to 100%">100%</button><button id="text-size-increase" type="button" aria-label="Increase text size">+</button></div>
+              </section>
             </div>
-            <p id="update-status" class="settings-description" role="status" aria-live="polite"></p>
-            <button id="update-run" type="button" hidden>Update now</button>
-          </section>
-          <section id="settings-tools-section" class="settings-section"><h3>AI tools</h3>
-            <div id="tools-menu" class="settings-tools" aria-label="AI tools">
-              <label><input id="tool-web-search" type="checkbox" /> Web search</label>
-              <p id="tool-web-search-description">Use the selected AI provider’s built-in web search. No separate search service is added.</p>
-              <label><input id="tool-playwright" type="checkbox" /> Playwright browser</label>
-              <p>Use a separate local browser. First use may download Playwright MCP; Chrome must be installed. Ask/Auto controls browser actions.</p>
-              <p>Changes apply to the next message.</p>
+          </div>
+          <div class="settings-group" role="group" aria-labelledby="settings-tools-title">
+            <h3 id="settings-tools-title" class="settings-group-title">Tools &amp; workspace</h3>
+            <div class="settings-card">
+              <section id="settings-tools-section" class="settings-section">
+                <div id="tools-menu" class="settings-tools" aria-label="AI tools">
+                  <label class="settings-toggle" for="tool-web-search"><span>Web search</span><input id="tool-web-search" type="checkbox" role="switch" aria-describedby="tool-web-search-description" /></label>
+                  <p id="tool-web-search-description">Use the selected AI provider’s built-in web search. No separate search service is added.</p>
+                  <label class="settings-toggle" for="tool-playwright"><span>Playwright browser</span><input id="tool-playwright" type="checkbox" role="switch" aria-describedby="tool-playwright-description" /></label>
+                  <p id="tool-playwright-description">Let your assistant use a separate browser. Ask/Auto controls browser actions. First use may download Playwright MCP; Chrome must be installed.</p>
+                  <span class="settings-footnote">Changes apply to your next message.</span>
+                </div>
+              </section>
+              <section class="settings-section settings-links" aria-label="Workspace settings">
+                <button type="button" data-settings-panel="changes"><span class="settings-link-copy"><strong data-host-label="{app} changes">Excel changes</strong><small>Review edits and backups</small></span><span aria-hidden="true">›</span></button>
+                <button id="menu-references" type="button"><span class="settings-link-copy"><strong>References</strong><small>Files and folders your assistant can use</small></span><span aria-hidden="true">›</span></button>
+                <button id="menu-skills" type="button"><span class="settings-link-copy"><strong>Manage skills</strong><small>Reusable instructions and workflows</small></span><span aria-hidden="true">›</span></button>
+                <button id="menu-templates" type="button"><span class="settings-link-copy"><strong>Skill templates</strong><small>Starting points for your work</small></span><span aria-hidden="true">›</span></button>
+                <button id="menu-testing" type="button"><span class="settings-link-copy"><strong>Testing</strong><small>Sign-ins, notes and saved scripts</small></span><span aria-hidden="true">›</span></button>
+              </section>
             </div>
-          </section>
-          <section class="settings-section settings-links" aria-label="Workspace settings">
-            <button type="button" data-settings-panel="changes">Workbook changes <span>›</span></button>
-            <button id="menu-references" type="button">References <span>›</span></button>
-            <button id="menu-testing" type="button">Testing: sign-ins, notes, scripts <span>›</span></button>
-            <button id="menu-skills" type="button">Manage skills <span>›</span></button>
-            <button id="menu-templates" type="button">Skill templates <span>›</span></button>
-          </section>
+          </div>
+          <div class="settings-group" role="group" aria-labelledby="settings-app-title">
+            <h3 id="settings-app-title" class="settings-group-title">App &amp; storage</h3>
+            <div class="settings-card">
+              <section id="settings-update-section" class="settings-section">
+                <div class="settings-row"><div><h3>Updates</h3><p id="update-version" class="settings-description">Version …</p></div><button id="update-check" type="button" class="secondary">Check for updates</button></div>
+                <p id="update-status" class="settings-description" role="status" aria-live="polite"></p>
+                <button id="update-run" type="button" class="settings-primary" hidden>Update now</button>
+              </section>
+              <section class="settings-section settings-row">
+                <div><h3>Chat history</h3><p id="settings-history-count" class="settings-description">Saved on this computer.</p></div>
+                <button id="settings-clear-history" type="button" class="secondary settings-danger">Delete all</button>
+              </section>
+            </div>
+          </div>
         </div>
       </section>
 
-      <section id="panel-testing" class="panel" hidden aria-label="Testing">
-        <header class="panel-head"><button type="button" class="back" data-close="testing" aria-label="Back to chat">←</button><h2>Testing</h2></header>
+      <section id="panel-testing" class="panel testing-panel" hidden aria-label="Testing">
+        <header class="panel-head"><button type="button" class="back" data-close="testing" aria-label="Back to chat">←</button><div class="settings-heading"><h2>Testing</h2><p>Sign-ins and resources for your test runs.</p></div></header>
         <p id="testing-status" class="template-help" role="status" aria-live="polite"></p>
         <div class="panel-body">
-          <h3 class="testing-heading">Sign-ins</h3>
-          <p class="template-help">A sign-in is a saved browser session, so the assistant can open your system already logged in. Your password is typed on the site itself and is never stored. It expires like any login: sign in again when it does.</p>
-          <div id="testing-signins"></div>
-          <form id="testing-signin-form" class="testing-form">
-            <input id="testing-signin-name" type="text" maxlength="32" placeholder="Name, e.g. admin" aria-label="Name for this sign-in" autocomplete="off" />
-            <input id="testing-signin-url" type="url" placeholder="https://staging.example.com" aria-label="System address" autocomplete="off" />
-            <button id="testing-signin-start" type="submit">Open browser to sign in</button>
-          </form>
-          <div id="testing-signin-wait" class="reference-row" hidden>
-            <p id="testing-signin-wait-text"></p>
-            <div class="reference-actions">
-              <button id="testing-signin-cancel" type="button" class="secondary">Cancel</button>
-              <button id="testing-signin-done" type="button">I'm signed in</button>
+          <section class="testing-section settings-card" aria-labelledby="testing-signins-heading">
+            <h3 id="testing-signins-heading" class="testing-heading">Sign-ins</h3>
+            <p class="template-help">Save a browser session so your assistant can test a system you’re signed in to. Your password is never stored.</p>
+            <div id="testing-signins" class="testing-list"></div>
+            <form id="testing-signin-form" class="testing-form">
+              <div class="testing-field"><label for="testing-signin-name">Sign-in name</label><input id="testing-signin-name" type="text" maxlength="32" placeholder="e.g. staging-admin" aria-label="Name for this sign-in" autocomplete="off" required /></div>
+              <div class="testing-field"><label for="testing-signin-url">System address</label><input id="testing-signin-url" type="url" placeholder="https://staging.example.com" aria-label="System address" autocomplete="off" required /></div>
+              <p class="settings-footnote">A browser opens for you to sign in. Return here when you’re done.</p>
+              <button id="testing-signin-start" type="submit">Open browser to sign in <span aria-hidden="true">↗</span></button>
+            </form>
+            <div id="testing-signin-wait" class="reference-row" hidden>
+              <p id="testing-signin-wait-text"></p>
+              <div class="reference-actions"><button id="testing-signin-cancel" type="button" class="secondary">Cancel</button><button id="testing-signin-done" type="button">I'm signed in</button></div>
             </div>
-          </div>
-          <h3 class="testing-heading">What the assistant learned</h3>
-          <p class="template-help">Short notes per system (how to log in, where screens are). Delete any that are wrong.</p>
-          <div id="testing-notes"></div>
-          <h3 class="testing-heading">Regression scripts</h3>
-          <p class="template-help">One Playwright script per test case that passed or failed because of the application.</p>
-          <div id="testing-scripts"></div>
-          <div class="reference-actions testing-folders">
-            <button type="button" class="secondary" data-testing-folder="sessions">Open sign-ins folder</button>
-            <button type="button" class="secondary" data-testing-folder="knowledge">Open notes folder</button>
-            <button type="button" class="secondary" data-testing-folder="scripts">Open scripts folder</button>
-          </div>
+          </section>
+          <section class="testing-section settings-card" aria-labelledby="testing-notes-heading">
+            <h3 id="testing-notes-heading" class="testing-heading">What the assistant learned</h3>
+            <p class="template-help">Notes about each system: how to sign in, navigate and prepare test data. Review or delete them here.</p>
+            <div id="testing-notes" class="testing-list"></div>
+          </section>
+          <section class="testing-section settings-card" aria-labelledby="testing-scripts-heading">
+            <h3 id="testing-scripts-heading" class="testing-heading">Regression scripts</h3>
+            <p class="template-help">Saved Playwright scripts for cases that passed or exposed an application defect.</p>
+            <div id="testing-scripts" class="testing-list"></div>
+          </section>
+          <div class="testing-folder-section"><h3 class="settings-group-title">Local folders</h3><div class="reference-actions testing-folders">
+            <button type="button" class="secondary" data-testing-folder="sessions">Sign-ins <span aria-hidden="true">↗</span></button>
+            <button type="button" class="secondary" data-testing-folder="knowledge">Notes <span aria-hidden="true">↗</span></button>
+            <button type="button" class="secondary" data-testing-folder="scripts">Scripts <span aria-hidden="true">↗</span></button>
+          </div></div>
         </div>
       </section>
 

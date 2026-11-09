@@ -427,7 +427,7 @@ Office.onReady((info) => {
   document.addEventListener("keydown", (event) => {
     if (event.key !== "Escape") return;
     if (!els.menu.hidden) closeMenu();
-    else if (!slash.isOpen && openPanel() !== null) showPanel(null);
+    else if (!slash.isOpen && openPanel() !== null) backFromPanel();
   });
   byId<HTMLSelectElement>("provider-select").addEventListener("change", event => selectProvider((event.target as HTMLSelectElement).value as ProviderId));
   els.menuChanges.addEventListener("click", () => showPanel("changes"));
@@ -474,7 +474,7 @@ Office.onReady((info) => {
   });
 
   // Panels
-  document.querySelectorAll<HTMLButtonElement>("[data-close]").forEach((button) => button.addEventListener("click", () => showPanel(null)));
+  document.querySelectorAll<HTMLButtonElement>("[data-close]").forEach((button) => button.addEventListener("click", backFromPanel));
   els.sessionBack.addEventListener("click", () => showPanel("history"));
   els.sessionContinue.addEventListener("click", continueViewedSession);
   els.sessionDelete.addEventListener("click", deleteViewedSession);
@@ -1644,7 +1644,7 @@ function persistNow(): void {
   store.save(session);
 }
 
-function startNewChat(): void {
+function startNewChat(keepPanel = false): void {
   slash.reload();
   abandonRequest();
   clearAttachment();
@@ -1661,7 +1661,7 @@ function startNewChat(): void {
   renderWelcome();
   renderChanges();
   void refreshUsage();
-  showPanel(null);
+  if (!keepPanel) showPanel(null);
 }
 
 /** Draw the current chat's messages again, where they were. Only between requests: a running one has live parts on screen. */
@@ -1755,7 +1755,7 @@ function selectProvider(next: ProviderId): void {
   renderAuthNotice();
   renderModelPicker();
   // A provider keeps its own conversation: switching starts a fresh chat (the old one stays in History).
-  startNewChat();
+  startNewChat(openPanel() === "settings");
   client.setProvider(next);
   void refreshModelCatalog(next);
 }
@@ -1841,18 +1841,37 @@ previewCopy.addEventListener("click", () => {
 });
 
 type PanelName = keyof typeof els.panels;
+let settingsChild = false;
+let settingsOpener: HTMLElement | null = null;
+
+function backFromPanel(): void {
+  const returning = settingsChild;
+  showPanel(returning ? "settings" : null);
+  if (returning) settingsOpener?.focus({ preventScroll: true });
+  else els.menuButton.focus({ preventScroll: true });
+}
+
 function openPanel(): PanelName | null {
   for (const name of Object.keys(els.panels) as PanelName[]) if (!els.panels[name].hidden) return name;
   return null;
 }
 
 function showPanel(name: PanelName | null): void {
+  const previous = openPanel();
+  const returningToSettings = name === "settings" && settingsChild;
+  if (previous === "settings" && name !== null && name !== "settings") {
+    settingsChild = true;
+    settingsOpener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  } else if (name === null || name === "settings") settingsChild = false;
   closeMenu();
   for (const key of Object.keys(els.panels) as PanelName[]) els.panels[key].hidden = key !== name;
-  document.body.classList.toggle("settings-active", name === "settings");
+  document.body.classList.toggle("settings-active", name === "settings" || settingsChild);
+  for (const button of document.querySelectorAll<HTMLButtonElement>("[data-close]")) {
+    button.setAttribute("aria-label", settingsChild ? "Back to settings" : "Back to chat");
+  }
   // The small view repeats the large one and takes its height, so it steps aside while the large one is open.
   document.body.classList.toggle("browser-active", name === "browser");
-  if (name === "settings") { persistNow(); void settings.open(); void updatePanel.refresh(); }
+  if (name === "settings") { persistNow(); void settings.open(returningToSettings); if (!returningToSettings) void updatePanel.refresh(); }
   if (name !== "preview") { previewFrame.srcdoc = ""; previewing = null; }
   if (name === "references") void savedReferences.refresh();
   if (name === "skills") void userSkills.refresh();

@@ -48,6 +48,7 @@
     "clean": "rm -rf dist addin/dist",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p addin/tsconfig.json --noEmit",
     "test": "vitest run",
+    "test:browser": "npm run build && node scripts/test-browser.mjs",
     "test:watch": "vitest",
     "bridge": "node dist/bridge/src/index.js",
     "dev:bridge": "tsx watch bridge/src/index.ts",

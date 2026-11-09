@@ -14,4 +14,5 @@ export const OFFICE_TOOL_GUIDANCE = [
   "Never load a whole sheet's usedRange values. Load only the range you need, in bounded blocks, and return a summary or a small sample: results over about 30,000 characters are rejected.",
   "Before calling an API from a newer requirement set, check Office.context.requirements.isSetSupported('ExcelApi', version) and fall back to an older equivalent or report the limit.",
   "When writing many cells, set range.values/formulas once on a rectangular block instead of per cell, and keep each execute_office_js call to one logical change so a failure leaves a clear state.",
+  "Keep Excel edits in the background. Use explicit worksheet IDs/names and range addresses, never activate/select a target or restore an earlier selection after a batch: the user may be scrolling or working on another sheet. Return cell links for optional navigation. Do not repeatedly suspend screen updating; that causes flicker. Batch writes and minimize context.sync calls instead.",
 ].join("\n");

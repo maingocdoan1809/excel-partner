@@ -513,7 +513,8 @@ export const ExecuteOfficeJsInputSchema = z.object({
     .max(20_000)
     .describe(
       "Body of an async function with `context` (Excel.RequestContext), `Excel` and `Office` in scope, run inside Excel.run. " +
-        "`return` a JSON-serialisable value. Call `await context.sync()` yourself.",
+        "`return` a JSON-serialisable value. Call `await context.sync()` yourself. " +
+        "Edit in the background using explicit sheet names/IDs and ranges. Selection, activation and screen suspension calls are suppressed to keep the user's viewport free. Never activate a sheet to target a write. Batch range writes and avoid sync inside loops; return cell links for navigation.",
     ),
   description: z.string().max(200).optional().describe("One line saying what this does (shown in the change list)."),
 });
