@@ -9,10 +9,10 @@ import { WORKBOOK_NAME_REQUEST } from "../protocol/src/index.js";
 const limits = { maxReadCells: 100, maxWriteCells: 100, maxSheets: 10, maxSelectionCells: 10 };
 
 /** Source pane: answers approvals. Target pane: runs a delegated request and ends it with `reply`. */
-function setup(options: { approve?: boolean; reply?: string; targetProvider?: "claude" | null } = {}) {
+function setup(options: { approve?: boolean; reply?: string; targetProvider?: "claude" | null; sourceHost?: "excel" | "word" | "powerpoint"; targetHost?: "excel" | "word" | "powerpoint" } = {}) {
   const sessions = new SessionManager({ ttlMs: 60_000 });
-  const source = sessions.create("source", null);
-  const target = sessions.create("target", null);
+  const source = sessions.create("source", options.sourceHost ? { host: options.sourceHost } : null);
+  const target = sessions.create("target", options.targetHost ? { host: options.targetHost } : null);
   source.workbookName = "Budget.xlsx";
   target.workbookName = "Actuals.xlsx";
   target.provider = options.targetProvider === undefined ? "claude" : options.targetProvider;
@@ -51,12 +51,23 @@ const send = (gateway: ToolGateway, session: WorkbookSession, file: string, mess
   gateway.invoke({ sessionId: session.id, tool: "send_to_connected_file", args: { file, message } });
 
 describe("send_to_connected_file", () => {
+  it("sends a request between files of different Office apps, naming the kind of file to the person", async () => {
+    const { gateway, source, target, approvals, delivered } = setup({ sourceHost: "word", targetHost: "powerpoint", reply: "Slide 3 now shows the figure." });
+    source.workbookName = "Plan.docx";
+    target.workbookName = "Review.pptx";
+    source.beginTurn("req-1");
+    const result = await send(gateway, source, target.fileId, "Put the revenue figure on slide 3");
+    expect(approvals).toEqual([{ tool: "__authorize_connected_file", args: { fileId: "f2", name: "Review.pptx", host: "powerpoint", action: "message", text: "Put the revenue figure on slide 3" } }]);
+    expect(delivered).toEqual([expect.objectContaining({ from: { id: "f1", name: "Plan.docx", host: "word" }, text: "Put the revenue figure on slide 3" })]);
+    expect(result).toMatchObject({ ok: true, data: { file: { id: "f2", name: "Review.pptx", host: "powerpoint" }, outcome: "completed", reply: "Slide 3 now shows the figure." } });
+  });
+
   it("asks the user with the exact text, delivers it with the sender's name and returns the other assistant's reply", async () => {
     const { gateway, source, target, approvals, delivered } = setup({ reply: "D2:D40 now hold the totals." });
     source.beginTurn("req-1");
     const result = await send(gateway, source, target.fileId);
-    expect(approvals).toEqual([{ tool: "__authorize_connected_file", args: { fileId: "f2", name: "Actuals.xlsx", action: "message", text: "Fill column D with totals" } }]);
-    expect(delivered).toEqual([expect.objectContaining({ type: "delegated_prompt", from: { id: "f1", name: "Budget.xlsx" }, text: "Fill column D with totals" })]);
+    expect(approvals).toEqual([{ tool: "__authorize_connected_file", args: { fileId: "f2", name: "Actuals.xlsx", host: "excel", action: "message", text: "Fill column D with totals" } }]);
+    expect(delivered).toEqual([expect.objectContaining({ type: "delegated_prompt", from: { id: "f1", name: "Budget.xlsx", host: "excel" }, text: "Fill column D with totals" })]);
     expect(result).toMatchObject({ ok: true, data: { file: { id: "f2", name: "Actuals.xlsx" }, outcome: "completed", reply: "D2:D40 now hold the totals." } });
   });
 

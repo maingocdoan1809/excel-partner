@@ -1,13 +1,14 @@
 import { watchShapeSelectionEvents } from "./executor/selection-events.js";
-import { getSelectionLabel } from "./executor/read.js";
+import { activeHost, initHost } from "./host/index.js";
+import { HOST_BASELINE, isSupported } from "./host/requirements.js";
 import { monitorSelection } from "./ui/selection.js";
 import type { UsageSummary, TokenUsage, ProviderEvent, ProviderId, ProviderConnectionStatus, ToolResult } from "../../protocol/src/index.js";
 import { BridgeClient, type ModelCatalog, type SavedReference, type SkillTemplate, type UploadedAttachment, type WorkspaceEntry, type WorkspaceRoot } from "./bridge-client.js";
 import type { PermissionMode } from "./permissions.js";
-import { WRITE_TOOLS, executeTool } from "./executor/index.js";
 import { UndoJournal } from "./executor/journal.js";
 import { undoBar, undoControl, type UndoView } from "./ui/undo-controls.js";
-import { readWorkbookFile } from "./executor/backup.js";
+import { setProposalReviewer } from "./executor/word/index.js";
+import { showProposalReview } from "./ui/proposal.js";
 import { formatCredits, formatDuration, usageCsv } from "./ui/usage.js";
 import { setupUsagePopover } from "./ui/usage-popover.js";
 import { describeChange } from "./ui/changes.js";
@@ -17,6 +18,7 @@ import { buildPreviewDocument, renderArtifactCard, type StoredArtifact } from ".
 import { BrowserView } from "./ui/browser-view.js";
 import { setupTestingPanel } from "./ui/testing-panel.js";
 import { setupUpdatePanel } from "./ui/update-panel.js";
+import { reloadKeepingChat, takeChatRestore } from "./ui/chat-restore.js";
 import { createSelfUpdater } from "./ui/self-update.js";
 import { setupProviderLogin } from "./ui/provider-login.js";
 import { setupToolSettings } from "./ui/tool-settings.js";
@@ -29,7 +31,7 @@ import { setupSettings } from "./ui/settings.js";
 import { renderToolCard, paintTool, formatToolValue, toolChevron } from "./ui/tool-view.js";
 import { ThoughtView } from "./ui/thought.js";
 import { mentionsFile, mentionsSheet } from "./ui/cell-links.js";
-import { exposedToolNames, sameWorkbookName } from "../../protocol/src/index.js";
+import { exposedToolNamesForHost, sameWorkbookName } from "../../protocol/src/index.js";
 import {
   SessionStore,
   buildContextPreface,
@@ -114,7 +116,7 @@ const PROVIDER_KEY = "excelPartner.provider";
 const MODEL_KEY = "excelPartner.models.v1";
 const PERMISSION_MODE_KEY = "excelPartner.permissionMode";
 const NARROW_BELOW = 330;
-/** A chat younger than this is reopened automatically after a reload. */
+/** After the pane reloaded itself, a chat younger than this is reopened automatically. */
 const RESTORE_WITHIN_MS = 12 * 3_600_000;
 
 const PROVIDER_NAMES: Record<ProviderId, string> = { claude: "Claude Code", copilot: "GitHub Copilot", codex: "Codex", opencode: "OpenCode" };
@@ -145,8 +147,8 @@ function loadModels(): Partial<Record<ProviderId, string>> {
   } catch { return {}; }
 }
 
-const store = new SessionStore(localStorage);
-const journal = new UndoJournal((tool) => WRITE_TOOLS.has(tool), async () => client.saveBackup((await currentWorkbookName()) || "workbook", await readWorkbookFile()));
+const store = new SessionStore(localStorage, undefined, () => activeHost().id);
+const journal = new UndoJournal((tool) => activeHost().writeTools.has(tool), async () => client.saveBackup((await currentWorkbookName()) || activeHost().noun, await activeHost().readFile()));
 // Handle for end-to-end checks against a live workbook; it grants nothing execute_office_js does not already have.
 (globalThis as { __undoJournal?: UndoJournal }).__undoJournal = journal;
 /** Result of the last undo, shown above the change list until the next one. */
@@ -184,7 +186,9 @@ const liveTools = new Map<string, { card: HTMLElement; tool: StoredTool }>();
 // Tools the bridge answers by itself reach the pane only as provider events, never as a tool request, so they must keep
 // their own card: the person sees which other file was read or sent a request.
 const bridgeAnsweredTools: ReadonlySet<string> = new Set(["list_connected_files", "read_connected_file", "send_to_connected_file"]);
-const workbookToolNames = new Set<string>(exposedToolNames(true, { playwright: true, webSearch: true }).filter((name) => !bridgeAnsweredTools.has(name)));
+let workbookToolNamesCache: Set<string> | null = null;
+/** Tools of the open file's application that reach the pane as tool requests (their card comes from the executed result). */
+const isDocumentTool = (name: string): boolean => (workbookToolNamesCache ??= new Set<string>(exposedToolNamesForHost(activeHost().id, true, { playwright: true, webSearch: true }).filter((tool) => !bridgeAnsweredTools.has(tool)))).has(name);
 const browserView = new BrowserView({
   dock: byId("browser-dock"), dockLabel: byId("browser-dock-label"), dockStep: byId("browser-dock-step"), dockUrl: byId("browser-dock-url"),
   dockImage: byId<HTMLImageElement>("browser-dock-image"), dockOpen: byId<HTMLButtonElement>("browser-dock-open"),
@@ -270,7 +274,7 @@ const connectedFiles = setupConnectedFiles({ onOpen: () => client?.refreshConnec
 const savedReferences = setupSavedReferences(() => client);
 const userSkills = setupUserSkills(() => client, () => slash.reload());
 const testingPanel = setupTestingPanel(() => client);
-const updatePanel = setupUpdatePanel({ getClient: () => client, reload: () => window.location.reload(), announce: (text) => append({ kind: "note", text }) });
+const updatePanel = setupUpdatePanel({ getClient: () => client, reload: () => reloadKeepingChat(), appName: () => activeHost().app, announce: (text) => append({ kind: "note", text }) });
 const toolSettings = setupToolSettings(() => provider);
 const settings = setupSettings({
   loadInstructions: () => client.systemPrompt(),
@@ -280,7 +284,15 @@ const settings = setupSettings({
 });
 
 Office.onReady((info) => {
-  if (info.host !== Office.HostType.Excel) return;
+  // Excel, Word and PowerPoint share this pane. Any other Office application has no tools here.
+  if (!["Excel", "Word", "PowerPoint"].includes(String(info.host))) return;
+  initHost(String(info.host));
+  applyHostBranding();
+  {
+    // The manifest only asks for what every host has; what this host needs is checked here, so an old Office says so.
+    const [set, version] = HOST_BASELINE[activeHost().id];
+    if (!isSupported([set, version])) window.setTimeout(() => append({ kind: "error", text: `Office Partner needs ${set} ${version} in ${activeHost().app}, which this version of Office does not have. Update Office to use it.` }), 0);
+  }
 
   client = new BridgeClient({
     onUserInput: async (request, signal, requestId) => {
@@ -336,7 +348,8 @@ Office.onReady((info) => {
     onBrowserFrame: (frame) => { if (frame.requestId === currentRequestId) browserView.push(frame); },
     readWorkbookName,
     onConnectedFiles: (files) => {
-      const names = files.filter((file) => !file.current).map((file) => file.name).filter(Boolean);
+      // Only workbooks count here: this list decides which cell references in a reply can be linked to another file.
+      const names = files.filter((file) => !file.current && file.host === "excel").map((file) => file.name).filter(Boolean);
       const changed = names.join("\n") !== otherFiles.join("\n");
       otherFiles = names;
       connectedFiles.render(files);
@@ -351,7 +364,7 @@ Office.onReady((info) => {
         client.declineDelegation(request.delegationId, "That file is busy with its own request.");
         return;
       }
-      void submit(undefined, { delegationId: request.delegationId, from: request.from.name, text: request.text });
+      void submit(undefined, { delegationId: request.delegationId, from: request.from.name, fromHost: request.from.host ?? "excel", text: request.text });
     },
     onError: (message) => append({ kind: "error", text: message }),
     onToolExecuted: (tool, args, result, context) => {
@@ -567,8 +580,9 @@ Office.onReady((info) => {
   }, 120));
   window.addEventListener("pagehide", persistNow);
 
-  // Reopen the last chat after a reload (e.g. the pane updated itself).
-  const previous = store.latest(RESTORE_WITHIN_MS);
+  // Bring the last chat back only after the pane reloaded itself (a new build or a finished update). A pane that was
+  // closed and opened again starts a new chat; the old one is in the history list.
+  const previous = takeChatRestore() ? store.latest(RESTORE_WITHIN_MS) : null;
   if (previous) loadSession(previous);
   else renderWelcome();
   renderProviderMenu();
@@ -589,7 +603,7 @@ function renderMessage(container: HTMLElement, message: StoredMessage): HTMLElem
   let element: HTMLElement;
   switch (message.kind) {
     case "user": {
-      if (message.from !== undefined) { element = renderReceivedMessage(message.from, message.text); break; }
+      if (message.from !== undefined) { element = renderReceivedMessage(message.from, message.text, message.fromHost); break; }
       element = bubble("user");
       const lead = leadingCommand(message.text);
       if (lead) {
@@ -783,7 +797,7 @@ async function runClientCommand(command: ProviderCommand, args: string): Promise
 }
 
 /** `delegated`: another open workbook's assistant sent this request; it runs as a normal turn here and its reply goes back. */
-async function submit(queued?: PendingPrompt, delegated?: { delegationId: string; from: string; text: string }): Promise<void> {
+async function submit(queued?: PendingPrompt, delegated?: { delegationId: string; from: string; fromHost?: "excel" | "word" | "powerpoint"; text: string }): Promise<void> {
   // Whoever sent a delegated request waits for an answer: every way out of here that does not start the turn must say so.
   const decline = (reason: string) => { if (delegated) client.declineDelegation(delegated.delegationId, reason); };
   const prompt = delegated ? delegatedPrompt(delegated.from, delegated.text)
@@ -811,7 +825,7 @@ async function submit(queued?: PendingPrompt, delegated?: { delegationId: string
     finally { resolvingCommand = false; }
   }
   const turnAttachments = delegated ? [] as typeof pendingAttachments : queued?.attachments ?? pendingAttachments.slice();
-  if (!delegated && !turnAttachments.length && /(?:^|\s)@[^\n]*\.(?:xlsx|xlsm|xltx|xltm|png|jpe?g|gif|webp|md|txt|json|csv|ya?ml|zip)(?=\s|$)/i.test(prompt)) {
+  if (!delegated && !turnAttachments.length && /(?:^|\s)@[^\n]*\.(?:xlsx|xlsm|xltx|xltm|docx|docm|pptx|pptm|png|jpe?g|gif|webp|md|txt|json|csv|ya?ml|zip)(?=\s|$)/i.test(prompt)) {
     append({ kind: "error", text: "The @ file is only text. Choose it from a workspace or the local file picker so I can read it." });
     updateMentionMenu();
     return;
@@ -874,13 +888,13 @@ async function submit(queued?: PendingPrompt, delegated?: { delegationId: string
     for (const element of els.messages.querySelectorAll<HTMLElement>(".bubble.user[data-queue-id]")) {
       if (element.dataset.queueId === queued.id) renderDelivery(element, queued.message);
     }
-  } else append(delegated ? { kind: "user", text: delegated.text, from: delegated.from }
+  } else append(delegated ? { kind: "user", text: delegated.text, from: delegated.from, fromHost: delegated.fromHost }
     : { kind: "user", text: prompt, attachments: turnAttachments.map((item) => ({ name: item.name })) });
   if (!queued && !delegated) clearAttachment();
   showThinking();
   persistNow();
 
-  const result = nativeCommand ? null : await executeTool("get_selection", {});
+  const result = nativeCommand ? null : await activeHost().execute("get_selection", {});
   if (currentRequestId !== requestId || requestSession !== session) { decline("The chat open in that file changed before the request could start."); return; }
   const selection = result?.ok ? (result.data as never) : null;
   if (cancelRequested) return finishLocalCancel(requestId, delegated?.delegationId);
@@ -972,7 +986,7 @@ async function ensureWorkspaces(): Promise<void> {
   workspaceError = null;
   renderWorkspaceMenu();
   try {
-    const [documentUrl, workbookName] = await Promise.all([currentWorkbookUrl(), currentWorkbookName()]);
+    const [documentUrl, workbookName] = await Promise.all([currentWorkbookUrl(), activeHost().hasSheets ? currentWorkbookName() : Promise.resolve("")]);
     const result = await client.listWorkspaces(documentUrl, workbookName);
     workspaceRoots = result.roots;
     workspaceDefaultError = result.defaultError;
@@ -999,14 +1013,7 @@ async function currentWorkbookUrl(): Promise<string> {
 }
 
 async function currentWorkbookName(): Promise<string> {
-  try {
-    return await Excel.run(async (context) => {
-      const workbook = context.workbook;
-      workbook.load("name");
-      await context.sync();
-      return workbook.name;
-    });
-  } catch { return ""; }
+  return (await activeHost().readName()) ?? "";
 }
 
 async function openWorkspaceFolder(path: string, name: string): Promise<void> {
@@ -1444,7 +1451,7 @@ function handleEvent(event: ProviderEvent): void {
       if (CONNECTED_FILE_TOOLS.has(event.tool)) turnTouchedOtherFiles = true;
       // Workbook calls get their exact result from onToolExecuted. Provider-local
       // tools have a separate native call ID and must not be paired by name.
-      if (workbookToolNames.has(event.tool)) return;
+      if (isDocumentTool(event.tool)) return;
       const tool: StoredTool = { name: event.tool, args: summarize(event.args), input: formatToolValue(event.args), state: "running", error: null };
       const card = appendTurnTool(tool);
       liveTools.set(event.callId, { card, tool });
@@ -1853,7 +1860,7 @@ function showPanel(name: PanelName | null): void {
   document.body.classList.toggle("login-active", name === "login");
   if (name === "login") {
     byId("login-heading").textContent = `Sign in to ${PROVIDER_NAMES[provider]}`;
-    byId("login-description").textContent = provider === "copilot" ? "Finish signing in through your browser, then return to Excel." : "Sign in through the CLI on the bridge machine, then check the connection again.";
+    byId("login-description").textContent = provider === "copilot" ? `Finish signing in through your browser, then return to ${activeHost().app}.` : "Sign in through the CLI on the bridge machine, then check the connection again.";
     byId("login-device").hidden = provider !== "copilot";
     byId("login-manual").hidden = provider === "copilot";
     byId("login-command").textContent = PROVIDER_LOGIN_COMMANDS[provider];
@@ -1929,7 +1936,7 @@ async function addTemplate(file: File): Promise<void> {
 }
 
 function recordChange(tool: string, args: unknown, result: ToolResult, context: { callId: string; requestId: string }): void {
-  const change = describeChange(tool, args, result, WRITE_TOOLS);
+  const change = describeChange(tool, args, result, activeHost().writeTools);
   if (!change) return;
   session.changes.push({ at: Date.now(), tool: change.tool, ok: change.ok, summary: change.summary, target: change.target, callId: context.callId, requestId: context.requestId });
   renderChanges();
@@ -2007,6 +2014,7 @@ function changeRow(entry: StoredChange): HTMLElement {
  * cells of a reply are linked depends on it (a chat opened before the first read, for one).
  */
 async function refreshSheetNames(redraw = true): Promise<boolean> {
+  if (!activeHost().hasSheets) return false;
   try {
     const names = await Excel.run(async (context) => {
       const sheets = context.workbook.worksheets;
@@ -2025,6 +2033,7 @@ async function refreshSheetNames(redraw = true): Promise<boolean> {
 
 /** Show a range in this workbook: its sheet (or the open one) is activated and the range selected. Throws when it cannot. */
 async function selectRange(target: { sheet?: string; address: string }): Promise<void> {
+  if (!activeHost().hasSheets) throw new Error(`Links to cells only work in Excel; this is ${activeHost().app}.`);
   await Excel.run(async (context) => {
     const sheet = target.sheet ? context.workbook.worksheets.getItemOrNullObject(target.sheet) : context.workbook.worksheets.getActiveWorksheet();
     if (target.sheet) {
@@ -2208,7 +2217,7 @@ let refreshSelectionSubscriptions: (() => void) | undefined;
 
 function watchSelection(): void {
   const monitor = monitorSelection({
-    read: getSelectionLabel,
+    read: () => activeHost().readSelectionLabel(),
     isVisible: () => document.visibilityState !== "hidden",
     render: value => {
       els.chip.textContent = value.label;
@@ -2228,14 +2237,15 @@ function watchSelection(): void {
     window.clearTimeout(selectionTimer);
     selectionTimer = window.setTimeout(() => monitor.refresh(), 80);
   };
-  const events = watchShapeSelectionEvents({
+  // Shape selection events exist only for Excel; Word and PowerPoint rely on DocumentSelectionChanged, focus and the send-time read.
+  const events = activeHost().hasSheets ? watchShapeSelectionEvents({
     onActivated: value => {
       window.clearTimeout(selectionTimer);
       monitor.show(value);
     },
     onSelection: selectionChanged,
     onError: error => { console.warn("Shape selection event registration failed", error); },
-  });
+  }) : { refresh: async () => undefined, stop: async () => undefined };
   const refresh = () => { monitor.refresh(); void events.refresh(); };
   refreshSelectionSubscriptions = refresh;
   Office.context.document.addHandlerAsync(Office.EventType.DocumentSelectionChanged, selectionChanged);
@@ -2252,18 +2262,44 @@ function watchSelection(): void {
 }
 
 /* -------------------------------------------------------------------------- */
+/* Which Office application this is                                            */
+/* -------------------------------------------------------------------------- */
+
+/** Names and wording that depend on the host: the brand, the page title and the review card Word edits are approved in. */
+function applyHostBranding(): void {
+  const host = activeHost();
+  document.title = "Office Partner";
+  const brand = document.querySelector(".brand-text strong");
+  if (brand) brand.textContent = "Office Partner";
+  document.body.dataset.host = host.id;
+  // Static wording in index.html names Excel; say the application this pane is really in.
+  for (const el of document.querySelectorAll<HTMLElement>(".host-app")) el.textContent = host.app;
+  for (const el of document.querySelectorAll<HTMLElement>("[data-host-label]")) el.textContent = (el.dataset.hostLabel ?? "").replace("{app}", host.app);
+  if (!host.hasSheets) {
+    // The testing tools work from a workbook only. Connected files work from every Office app.
+    byId("menu-testing").hidden = true;
+  }
+  if (host.id === "word") {
+    // propose_doc_edits stages edits; the card below is where the person applies them.
+    setProposalReviewer((request, signal) => {
+      const dock = byId("question-dock");
+      dock.hidden = false;
+      document.body.classList.add("question-active");
+      const outcome = showProposalReview(dock, request, signal ?? new AbortController().signal);
+      const close = () => { dock.hidden = true; document.body.classList.remove("question-active"); };
+      void outcome.then(close, close);
+      return outcome;
+    });
+  }
+}
+
+/* -------------------------------------------------------------------------- */
 /* Workbook name, so other open workbooks can list this one                    */
 /* -------------------------------------------------------------------------- */
 
-/** What Excel calls this workbook now (it changes on Save As), or null when it cannot be read. Excel has no event for a rename. */
+/** What Office calls the open file now (it changes on Save As), or null when it cannot be read. There is no event for a rename. */
 async function readWorkbookName(): Promise<string | null> {
-  try {
-    return await Excel.run(async (context) => {
-      context.workbook.load("name");
-      await context.sync();
-      return context.workbook.name || null;
-    });
-  } catch { return null; }
+  return activeHost().readName();
 }
 
 /**
@@ -2281,7 +2317,7 @@ async function publishWorkbookName(): Promise<void> {
 
 function renderState(state: string): void {
   connectedFiles.setConnected(state === "open");
-  els.statusLabel.textContent = ({ open: "Connected to Excel", connecting: "Connecting…", closed: "Reconnecting…", idle: "Waiting for Excel" } as Record<string, string>)[state] ?? state;
+  els.statusLabel.textContent = ({ open: `Connected to ${activeHost().app}`, connecting: "Connecting…", closed: "Reconnecting…", idle: `Waiting for ${activeHost().app}` } as Record<string, string>)[state] ?? state;
   els.status.dataset.state = state;
   els.send.disabled = state !== "open" || els.send.dataset.stopping === "true";
   if (state === "closed" && currentRequestId) {

@@ -4,7 +4,7 @@ import path from "node:path";
 import fs from "node:fs";
 import { createRequire } from "node:module";
 import type { CopilotClient, CopilotSession, SessionConfig } from "@github/copilot-sdk";
-import { exposedToolNames, UserInputRequestSchema, type ProviderEvent } from "../../protocol/src/index.js";
+import { exposedToolNamesForHost, hostFromEnv, UserInputRequestSchema, type ProviderEvent } from "../../protocol/src/index.js";
 import { AsyncQueue } from "./async-queue.js";
 import { askProviderQuestions } from "./user-input.js";
 import { CopilotUsageReader } from "./copilot-usage.js";
@@ -59,7 +59,7 @@ export class CopilotNativeSessions {
     if (ctx.resumeSessionId && !validNativeId(ctx.resumeSessionId)) throw new Error("Invalid Copilot resume session ID");
     const { CopilotClient, RuntimeConnection, ToolSet } = await import("@github/copilot-sdk");
     const web = ctx.mcp.env.EXCEL_WEB_SEARCH === "1";
-    const names = ctx.mcp.toolNames ?? exposedToolNames(ctx.mcp.env.EXCEL_ALLOW_OFFICE_JS === "1", { playwright: ctx.mcp.env.EXCEL_PLAYWRIGHT === "1" });
+    const names = ctx.mcp.toolNames ?? exposedToolNamesForHost(hostFromEnv(ctx.mcp.env), ctx.mcp.env.EXCEL_ALLOW_OFFICE_JS === "1", { playwright: ctx.mcp.env.EXCEL_PLAYWRIGHT === "1" });
     const tools = new ToolSet();
     if (!ctx.mcp.toolNames) tools.addBuiltIn("ask_user");
     for (const name of names) tools.addMcp(`excel-${name}`);

@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-  Sideload the Excel Partner add-in into Excel desktop on Windows.
+  Sideload the Office Partner add-in into Word, Excel and PowerPoint desktop on Windows (one registration covers all three).
 
 .DESCRIPTION
   Copies manifest.xml into a shared folder and registers that folder as a
@@ -57,5 +57,5 @@ Write-Host ''
 Write-Host 'Next steps:'
 Write-Host '  1. Make sure the bridge is running in WSL: bash scripts/start.sh'
 Write-Host '  2. Trust the localhost certificate in certs/localhost.crt (docs/install.md)'
-Write-Host '  3. Restart Excel, then click Home > Excel Partner'
-Write-Host '     (or Insert > My Add-ins > Developer Add-ins > Excel Partner)'
+Write-Host '  3. Restart Word, Excel and PowerPoint, then click Home > Office Partner'
+Write-Host '     (or Insert > My Add-ins > Developer Add-ins > Office Partner)'

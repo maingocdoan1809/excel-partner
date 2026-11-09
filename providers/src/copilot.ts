@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { exposedToolNames } from "../../protocol/src/index.js";
+import { exposedToolNamesForHost, hostFromEnv } from "../../protocol/src/index.js";
 import { TokenUsageSchema } from "../../protocol/src/usage.js";
 import { CumulativeUsage } from "./usage.js";
 import { CopilotUsageReader } from "./copilot-usage.js";
@@ -183,7 +183,7 @@ export class CopilotAdapter extends BaseCliAdapter {
         ...(webSearch ? [] : ["--disable-builtin-mcps"]),
         // Expose Excel MCP and, when selected, only the provider-native web tools.
         "--available-tools",
-        ...(ctx.mcp.toolNames ?? exposedToolNames(ctx.mcp.env.EXCEL_ALLOW_OFFICE_JS === "1", { webSearch: ctx.mcp.env.EXCEL_WEB_SEARCH === "1", playwright: ctx.mcp.env.EXCEL_PLAYWRIGHT === "1" })).map((name) => `${MCP_SERVER_NAME}-${name}`),
+        ...(ctx.mcp.toolNames ?? exposedToolNamesForHost(hostFromEnv(ctx.mcp.env), ctx.mcp.env.EXCEL_ALLOW_OFFICE_JS === "1", { webSearch: ctx.mcp.env.EXCEL_WEB_SEARCH === "1", playwright: ctx.mcp.env.EXCEL_PLAYWRIGHT === "1" })).map((name) => `${MCP_SERVER_NAME}-${name}`),
         ...(webSearch ? ["web_search", "web_fetch"] : []),
         "--allow-tool",
         MCP_SERVER_NAME,

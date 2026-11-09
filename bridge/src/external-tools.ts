@@ -16,7 +16,7 @@ export type FrameSink = (frame: BrowserFrame) => void;
 
 interface FrameState { seq: number; token: number; shown: boolean; url?: string; title?: string }
 
-/** A browser limited to the sites the user approved. It starts signed out, or with a session the user saved with `excel-partner login` (the file is copied, never modified). */
+/** A browser limited to the sites the user approved. It starts signed out, or with a session the user saved with `office-partner login` (the file is copied, never modified). */
 export interface BrowserProfile { allowedOrigins: string[]; visible?: boolean; storageState?: string }
 
 function bypassEntry(origin: string): string | null {

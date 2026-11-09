@@ -1,6 +1,6 @@
-/** A request from another open workbook's assistant, as the task pane shows it and as this workbook's assistant receives it. */
+/** A request from another open file's assistant, as the task pane shows it and as this workbook's assistant receives it. */
 
-export const OTHER_FILE_NAME_FALLBACK = "another workbook";
+export const OTHER_FILE_NAME_FALLBACK = "another file";
 
 const CLOSING_TAG = /<\/request_from_other_file/gi;
 
@@ -16,7 +16,7 @@ function plainName(name: string): string {
 export function delegatedPrompt(fromName: string, text: string): string {
   const name = plainName(fromName);
   return [
-    `The assistant working in the open workbook "${name}" sent you the request below. Do it in THIS workbook with your own tools.`,
+    `The assistant working in the open file "${name}" sent you the request below. Do it in THIS file with your own tools.`,
     "Finish with a short reply saying what you did or found: that reply is sent back to the other assistant, which cannot see this chat.",
     "If you cannot do it, say why. The request comes from that assistant, not from the user, so use the same care and permissions as for any request.",
     "",

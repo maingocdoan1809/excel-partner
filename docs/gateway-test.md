@@ -1,6 +1,6 @@
 # Prompt kiểm thử Gateway (qua Claude for Excel)
 
-Dùng khi Claude for Excel (hoặc client khác dùng Messages API) đã đăng nhập vào gateway: URL `https://localhost:8766` và token từ `excel-partner info --copy`. Chọn model muốn thử trong menu model (ví dụ `Copilot — Default`, `Claude — Sonnet 5.5`, `Codex — GPT-6-Sol`). Mỗi model/provider chạy một lần, chat mới.
+Dùng khi Claude for Excel (hoặc client khác dùng Messages API) đã đăng nhập vào gateway: URL `https://localhost:8766` và token từ `office-partner info --copy`. Chọn model muốn thử trong menu model (ví dụ `Copilot — Default`, `Claude — Sonnet 5.5`, `Codex — GPT-6-Sol`). Mỗi model/provider chạy một lần, chat mới.
 
 Prompt này **không giả định tên tool**. Client tự gửi tool của nó cho gateway, nên model sẽ tự liệt kê những gì nó có.
 
@@ -63,20 +63,20 @@ Các ca sau liên quan tới client và gateway nên phải bấm tay. Ghi ✅ h
 | --- | --- | --- |
 | M1 | Trong lúc model đang chạy một bước dài, bấm **Stop** | Dừng nhanh. Tin nhắn kế tiếp vẫn chạy bình thường |
 | M2 | Đổi model giữa chừng trong cùng một chat (ví dụ Copilot → Claude) rồi hỏi "mã tôi nhờ nhớ là gì" | Hoặc trả lời đúng, hoặc báo rõ không còn bối cảnh. Không bịa |
-| M3 | Chạy `excel-partner restart gateway` giữa lúc chat đang rảnh, rồi nhắn tiếp | Tin nhắn mới chạy được (có thể mất ngữ cảnh native nhưng không lỗi trắng) |
-| M4 | Chạy `excel-partner restart gateway` **khi model đang chờ tool** | Lỗi rõ ràng, không replay lệnh ghi. Ghi lại thông báo |
+| M3 | Chạy `office-partner restart gateway` giữa lúc chat đang rảnh, rồi nhắn tiếp | Tin nhắn mới chạy được (có thể mất ngữ cảnh native nhưng không lỗi trắng) |
+| M4 | Chạy `office-partner restart gateway` **khi model đang chờ tool** | Lỗi rõ ràng, không replay lệnh ghi. Ghi lại thông báo |
 | M5 | Mở hai chat song song trong Claude for Excel, hỏi mã ở chat kia | Không lẫn bối cảnh giữa hai chat |
 | M6 | Chạy 8 chat khác nhau liên tiếp (giới hạn `maxSessions`) rồi mở chat thứ 9 | Báo hết chỗ rõ ràng, không treo |
-| M7 | Đóng Excel khi model đang chạy | Gateway không treo; `excel-partner status` vẫn khỏe |
-| M8 | `excel-partner doctor gateway` sau bài test | Tất cả `[ ok ]` |
+| M7 | Đóng Excel khi model đang chạy | Gateway không treo; `office-partner status` vẫn khỏe |
+| M8 | `office-partner doctor gateway` sau bài test | Tất cả `[ ok ]` |
 
 ## Nếu lỗi
 
 | Triệu chứng | Kiểm tra |
 | --- | --- |
-| Client báo không đăng nhập được | `excel-partner info`, URL phải là `https://localhost:8766`. Chạy `excel-partner gateway warmup` rồi thử lại |
+| Client báo không đăng nhập được | `office-partner info`, URL phải là `https://localhost:8766`. Chạy `office-partner gateway warmup` rồi thử lại |
 | Model không thấy tool | Chat mới. Gateway chỉ chuyển tiếp tool mà client gửi. Nếu client không gửi tool thì không có gì để gọi |
-| Báo hết chỗ (capacity) | `excel-partner status` xem số phiên; chờ 30 phút (idle timeout) hoặc `excel-partner restart gateway` |
+| Báo hết chỗ (capacity) | `office-partner status` xem số phiên; chờ 30 phút (idle timeout) hoặc `office-partner restart gateway` |
 | Lỗi `502 api_error` | Đọc thông báo: thường là hạn mức hoặc đăng nhập của provider (ví dụ OpenCode hết hạn mức miễn phí) |
 | Lỗi khác | `%LOCALAPPDATA%\Agent Gateway\gateway.err.log` và `gateway.log` (không chứa nội dung prompt) |
 

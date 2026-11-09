@@ -3,7 +3,7 @@ import type {
   ProviderDetection,
   ProviderEvent,
   ProviderId,
-  SelectionSnapshot,
+  PromptSelectionSnapshot,
 } from "../../protocol/src/index.js";
 
 /**
@@ -21,7 +21,7 @@ export interface McpEndpoint {
   toolNames?: string[];
   /**
    * Environment the MCP process needs to call back into the bridge
-   * (EXCEL_BRIDGE_URL, EXCEL_SESSION_ID, EXCEL_SESSION_TOKEN and, for the
+   * (EXCEL_BRIDGE_URL, EXCEL_SESSION_ID, EXCEL_SESSION_TOKEN, OFFICE_HOST and, for the
    * self-signed localhost certificate, NODE_EXTRA_CA_CERTS).
    */
   env: Record<string, string>;
@@ -75,7 +75,7 @@ export interface SendTurnInput {
   images?: Array<{ mediaType: "image/jpeg" | "image/png" | "image/gif" | "image/webp"; data: string }>;
   /** Original user text before bridge context and skill expansion. */
   userPrompt?: string;
-  selection: SelectionSnapshot | null;
+  selection: PromptSelectionSnapshot | null;
   /** Aborted when the user hits stop or the pane disconnects. */
   signal: AbortSignal;
 }

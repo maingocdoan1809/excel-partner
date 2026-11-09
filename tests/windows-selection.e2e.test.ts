@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { Bridge } from "../bridge/src/server.js";
 import { loadConfig } from "../bridge/src/config.js";
 import { mergeWindowsSelection } from "../bridge/src/windows-selection.js";
-import { SelectionSnapshotSchema, type SelectionSnapshot } from "../protocol/src/index.js";
+import { SelectionSnapshotSchema, type PromptSelectionSnapshot, type SelectionSnapshot } from "../protocol/src/index.js";
 import { MockAdapter } from "../providers/src/mock.js";
 import { ProviderRegistry } from "../providers/src/registry.js";
 import type { SendTurnInput } from "../providers/src/types.js";
@@ -14,7 +14,7 @@ describe("native selection routing", () => {
       address: "A1", rowCount: 1, columnCount: 1, values: [[1]], headers: null, truncated: false });
     const shapes = [{ name: "Box A", nativeId: "2", nativeType: 1, connector: false },
       { name: "Arrow", nativeId: "3", nativeType: 9, connector: true }];
-    let captured: SelectionSnapshot | null = null;
+    let captured: PromptSelectionSnapshot | null = null;
     class CaptureAdapter extends MockAdapter {
       override async *sendTurn(input: SendTurnInput) {
         captured = input.selection;
@@ -45,7 +45,7 @@ describe("native selection routing", () => {
       await pane.waitFor(message => message.type === "provider_status");
       pane.send({ type: "prompt", requestId: "selected-group", prompt: "inspect these", selection: baseline });
       await pane.waitFor(message => message.type === "turn_finished");
-      expect(captured).toEqual(tool.data);
+      expect(captured).toEqual({ ...tool.data, host: "excel" });
     } finally { await pane.close(); await bridge.close(); }
   });
 });

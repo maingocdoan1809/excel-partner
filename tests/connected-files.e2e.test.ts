@@ -40,18 +40,18 @@ describe("connected files over the wire", () => {
 
     await actuals.waitFor((m) => m.type === "connected_files" && m.files.length === 2 && m.files.every((f) => f.name));
     expect(lastFiles(actuals)).toEqual([
-      { id: "f2", name: "Actuals.xlsx", current: true },
-      { id: "f1", name: "Budget.xlsx", current: false },
+      { id: "f2", name: "Actuals.xlsx", host: "excel", current: true },
+      { id: "f1", name: "Budget.xlsx", host: "excel", current: false },
     ]);
     await budget.waitFor((m) => m.type === "connected_files" && m.files.length === 2 && m.files.every((f) => f.name));
-    expect(lastFiles(budget)[0]).toEqual({ id: "f1", name: "Budget.xlsx", current: true });
+    expect(lastFiles(budget)[0]).toEqual({ id: "f1", name: "Budget.xlsx", host: "excel", current: true });
 
     budget.send({ type: "workbook_info", name: "Budget (final).xlsx" });
     await actuals.waitFor((m) => m.type === "connected_files" && m.files.some((f) => f.name === "Budget (final).xlsx"));
 
     await budget.close();
     await actuals.waitFor((m) => m.type === "connected_files" && m.files.length === 1);
-    expect(lastFiles(actuals)).toEqual([{ id: "f2", name: "Actuals.xlsx", current: true }]);
+    expect(lastFiles(actuals)).toEqual([{ id: "f2", name: "Actuals.xlsx", host: "excel", current: true }]);
     await actuals.close();
   });
 
@@ -133,7 +133,7 @@ describe("names are read when someone looks, not on a timer", () => {
     namedPane(pane, { name: null });
     pane.send({ type: "refresh_connected_files" });
     await pane.waitFor((m, i) => m.type === "connected_files" && i > 1);
-    expect(lastFiles(pane)).toEqual([{ id: "f1", name: "Kept.xlsx", current: true }]);
+    expect(lastFiles(pane)).toEqual([{ id: "f1", name: "Kept.xlsx", host: "excel", current: true }]);
     await pane.close();
   });
 });

@@ -1,5 +1,9 @@
 import type { StoredArtifact } from "./artifact.js";
 import { cleanSessionTitle } from "../../../protocol/src/session-title.js";
+import { isToolNameForHost } from "../../../protocol/src/host.js";
+
+/** The Office application a chat belongs to. */
+export type SessionHost = "excel" | "word" | "powerpoint";
 
 /**
  * Chat history kept in the task pane's own storage (localStorage on the add-in origin): nothing leaves the machine
@@ -23,6 +27,8 @@ export interface StoredMessage {
   attachments?: Array<{ name: string }>;
   /** Set on a request another open workbook's assistant sent: the name of that workbook. `text` is the request itself. */
   from?: string;
+  /** The application the request came from; messages saved before Word and PowerPoint have none: Excel. */
+  fromHost?: "excel" | "word" | "powerpoint";
   /** The assistant used the connected-file tools before writing this reply, so its bare cell references could be another file's. */
   aboutOtherFiles?: boolean;
   tool?: StoredTool;
@@ -49,10 +55,27 @@ export interface StoredSession {
   /** Distinguishes old chats with no recorded native identity from a new provisional chat. */
   identityVersion?: 1;
   provider: string;
+  /** The application the chat was held in. History shows a chat only in the same app; chats saved before this existed have none (see `inferHost`). */
+  host?: SessionHost;
   startedAt: number;
   updatedAt: number;
   messages: StoredMessage[];
   changes: StoredChange[];
+}
+
+/**
+ * Which app an older chat (saved before chats recorded their app) belongs to: a Word or PowerPoint chat shows itself by
+ * using a tool only that app has. A chat that never used one is taken to be Excel's, as every chat used to be.
+ */
+export function inferHost(session: Pick<StoredSession, "messages">): SessionHost {
+  for (const message of session.messages) {
+    for (const tool of [message.tool, ...(message.tools ?? [])]) {
+      if (!tool) continue;
+      if (isToolNameForHost("word", tool.name) && !isToolNameForHost("excel", tool.name)) return "word";
+      if (isToolNameForHost("powerpoint", tool.name) && !isToolNameForHost("excel", tool.name)) return "powerpoint";
+    }
+  }
+  return "excel";
 }
 
 export interface SessionSummary {
@@ -128,10 +151,15 @@ export function bindProviderSession(session: StoredSession,
   return { current, previous };
 }
 
+/**
+ * All the chats on this computer live in one place (the add-in's address is the same in Word, Excel and PowerPoint), but each
+ * app sees only its own: `scope` says which app this pane is in. Saving, deleting and clearing touch that app's chats only.
+ */
 export class SessionStore {
   constructor(
     private readonly storage: KeyValueStorage,
     private readonly key = "excelPartner.sessions.v1",
+    private readonly scope: () => SessionHost = () => "excel",
   ) {}
 
   private read(): StoredSession[] {
@@ -142,7 +170,7 @@ export class SessionStore {
           .filter((s) => s && typeof s.id === "string" && Array.isArray(s.messages))
           .map((s) => {
             const providerTitle = cleanSessionTitle(s.provider, s.providerTitle);
-            return { ...s, providerTitle, title: providerTitle || (s.providerTitle ? titleFrom(s.messages) : s.title),
+            return { ...s, host: s.host ?? inferHost(s), providerTitle, title: providerTitle || (s.providerTitle ? titleFrom(s.messages) : s.title),
               messages: s.messages.filter((m) => !(m.kind === "note" && m.text === "Updating Excel Partner…")) };
           })
         : [];
@@ -152,7 +180,13 @@ export class SessionStore {
   }
 
   private write(sessions: StoredSession[]): void {
-    let kept = sessions.sort((a, b) => b.updatedAt - a.updatedAt).slice(0, LIMITS.sessions);
+    // The count limit is per app, so a long Excel history cannot push out the chats of Word or PowerPoint.
+    const perHost = new Map<string, number>();
+    let kept = sessions.sort((a, b) => b.updatedAt - a.updatedAt).filter((s) => {
+      const count = (perHost.get(s.host ?? "excel") ?? 0) + 1;
+      perHost.set(s.host ?? "excel", count);
+      return count <= LIMITS.sessions;
+    });
     let json = JSON.stringify(kept);
     while (json.length > LIMITS.totalChars && kept.length > 1) {
       kept = kept.slice(0, -1);
@@ -170,9 +204,15 @@ export class SessionStore {
     }
   }
 
+  /** The chats of this pane's app. */
+  private mine(): StoredSession[] {
+    const host = this.scope();
+    return this.read().filter((s) => s.host === host);
+  }
+
   /** Newest first; empty chats are not listed. */
   list(): SessionSummary[] {
-    return this.read()
+    return this.mine()
       .filter((s) => s.messages.some((m) => m.kind === "user"))
       .sort((a, b) => b.updatedAt - a.updatedAt)
       .map((s) => ({
@@ -188,30 +228,35 @@ export class SessionStore {
   }
 
   get(id: string): StoredSession | null {
-    return this.read().find((s) => s.id === id) ?? null;
+    return this.mine().find((s) => s.id === id) ?? null;
   }
 
   /** The most recently updated non-empty session, if it is newer than `maxAgeMs`. */
   latest(maxAgeMs: number, now = Date.now()): StoredSession | null {
-    const [top] = this.read()
+    const [top] = this.mine()
       .filter((s) => s.messages.some((m) => m.kind === "user"))
       .sort((a, b) => b.updatedAt - a.updatedAt);
     return top && now - top.updatedAt <= maxAgeMs ? top : null;
   }
 
   save(session: StoredSession): void {
-    const trimmed = trimSession(session);
+    const trimmed: StoredSession = { ...trimSession(session), host: this.scope() };
     const others = this.read().filter((s) => s.id !== trimmed.id);
     // Empty chats are not worth keeping.
     this.write(trimmed.messages.some((m) => m.kind === "user") ? [trimmed, ...others] : others);
   }
 
   delete(id: string): void {
-    this.write(this.read().filter((s) => s.id !== id));
+    const host = this.scope();
+    this.write(this.read().filter((s) => !(s.id === id && s.host === host)));
   }
 
+  /** Delete this app's chats. The chats of the other apps stay. */
   clear(): void {
-    this.storage.removeItem(this.key);
+    const host = this.scope();
+    const rest = this.read().filter((s) => s.host !== host);
+    if (rest.length === 0) this.storage.removeItem(this.key);
+    else this.write(rest);
   }
 }
 

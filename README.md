@@ -1,6 +1,8 @@
-# Excel Partner
+# Office Partner (formerly Excel Partner)
 
-Chat with an AI coding assistant, **Claude Code, GitHub Copilot CLI, Codex CLI or OpenCode**, to read, analyse and edit the workbook you have open in **Excel desktop on Windows**.
+Chat with an AI coding assistant, **Claude Code, GitHub Copilot CLI, Codex CLI or OpenCode**, to read, analyse and edit the file you have open in **Excel, Word or PowerPoint desktop on Windows**. One install adds **Home > Office Partner** to all three.
+
+> **Renamed.** The npm package is now `office-partner` and the command is `office-partner`. Already have `excel-partner`? Run `npm install -g office-partner` and `office-partner setup`, or just run `excel-partner` once (or press **Update now** in Settings): it installs `office-partner` and hands the command over. Your settings, certificate, backups and saved sign-ins are kept; the data folder is still `%LOCALAPPDATA%\Excel Partner`.
 
 > Example: select a range and type *"Add a Total column in D. Calculate B times C for each row and bold the header."*
 
@@ -10,13 +12,13 @@ Chat with an AI coding assistant, **Claude Code, GitHub Copilot CLI, Codex CLI o
 Excel task pane  <-->  local bridge (localhost:8765)  <-->  your provider CLI (Claude / Copilot / Codex / OpenCode)
 ```
 
-- The task pane is the chat UI inside Excel. Workbook changes run through Office.js in your open workbook.
-- The bridge runs on your PC. It uses the provider CLI you already installed and signed in to. Excel Partner never asks for or stores an API key.
+- The task pane is the chat UI inside Excel, Word or PowerPoint. Changes run through Office.js in the file you have open.
+- The bridge runs on your PC. It uses the provider CLI you already installed and signed in to. Office Partner never asks for or stores an API key.
 - Billing, usage limits and data policy belong to the provider you choose.
 
 ## Requirements
 
-- Windows with Excel desktop (ExcelApi 1.9+; some features need a newer Excel)
+- Windows with Excel, Word and/or PowerPoint desktop (ExcelApi 1.9+, WordApi 1.1+, PowerPointApi 1.2+; many features need a newer version, and a tool that needs one says so instead of failing)
 - Node.js 20+ and npm, installed on Windows
 - At least one provider CLI, installed and signed in on Windows (not only inside WSL)
 
@@ -33,17 +35,17 @@ Run in **Windows PowerShell**.
 | Codex | `npm install -g @openai/codex` | `codex login` |
 | OpenCode | `npm install -g opencode-ai` | `opencode auth login` |
 
-**2. Install Excel Partner** (save your work and close Excel first):
+**2. Install Office Partner** (save your work and close Word, Excel and PowerPoint first):
 
 ```powershell
-npm install -g excel-partner
-excel-partner setup
-excel-partner status
+npm install -g office-partner
+office-partner setup
+office-partner status
 ```
 
 `setup` trusts a localhost certificate for your user, registers the add-in, starts the bridge and adds it to Windows start-up. A healthy bridge prints `Bridge running at https://localhost:8765`.
 
-**3. Use it:** reopen Excel, open a workbook, choose **Home > Excel Partner**, pick a provider, select cells, type a request, press **Enter**. (**Ctrl+Enter** adds a new line.)
+**3. Use it:** reopen Excel, Word or PowerPoint, open a file, choose **Home > Office Partner**, pick a provider, select cells, text or a slide shape, type a request, press **Enter**. (**Ctrl+Enter** adds a new line.)
 
 ## What it can do
 
@@ -51,11 +53,27 @@ excel-partner status
 - **Write:** values and formulas (with a check for `#REF!`/`#NAME?` errors), formatting, sort, filter, merge, validation, conditional formatting, named ranges, print layout, sheets.
 - **Build:** tables, charts, pivot tables, flowcharts with attached connectors.
 - **Audit:** `find_errors` scans for formula errors; writes refuse to overwrite existing data unless overwrite is approved.
-- **Look across open files:** the button at the top left lists every workbook open with Excel Partner. The assistant can read another one when you ask, for example to compare or look something up, or ask that file's assistant to make a change there. See *Connected files* below.
+- **Look across open files:** the button at the top left lists every file open with Office Partner, in any of the three apps. The assistant can read another one when you ask, for example to compare a workbook with a report or put a figure from Excel on a slide, or ask that file's assistant to make a change there. See *Connected files* below.
+- **Read files that are not open:** Word documents and PowerPoint decks (including speaker notes) with `read_document_file`, Excel workbooks with `read_workbook_file`, from your reference folders or an attachment. Choosing a `.docx` or `.pptx` with the file picker or `@` works too.
 - **Extend:** your own reusable skills (`/skill-name`), references (any file or folder) and templates, file attachments (`@`), optional web search and browser automation.
 - **Work your way:** choose provider, model and effort per chat; queue a message while the assistant works; review changes and reopen past chats from History.
 
 Type `/` in the chat to browse commands and skills of the selected provider.
+
+### In Word
+
+- **Read:** the outline, a section under a heading, search, comments and tracked changes.
+- **Edit in place:** replace a passage (or all of it), lists, styles, tables, hyperlinks, bookmarks, footnotes, content controls, fields, tables of contents (desktop only), headers and footers, page layout, blank-line clean-up.
+- **Review:** `propose_doc_edits` shows a card where you tick which edits to apply; nothing is written until you press Apply. Comments can be added, answered and resolved; track changes can be switched on, and accepted or rejected in bulk.
+
+### In PowerPoint
+
+- **Read:** the deck and its layouts, a slide's shapes and text, a rendered image of a slide.
+- **Edit in place:** text, shapes, tables, order, duplicate, delete, background, alt text, links, z-order, grouping, alignment. `edit_slide_xml` changes what Office.js cannot reach by editing the slide's XML.
+- **Check:** `verify_slides` looks for overlaps, shapes off the slide, overflowing and tiny text; `verify_slide_visual` shows the rendered slide.
+- Not covered yet: speaker notes, pictures, charts, transitions, sections (use `execute_office_js` / `edit_slide_xml`).
+
+In Word and PowerPoint a copy of the file is saved before the assistant's first change in a reply (see *Safety and permissions*); there is no automatic undo there, so open the copy to go back. Connected files and the testing tools work between Excel workbooks only.
 
 ## In a browser tab
 
@@ -63,23 +81,30 @@ Open `https://localhost:8765/` (or `/index.html`) in a browser for the same pane
 
 ## Connected files
 
-Open two workbooks and open **Home > Excel Partner** in each. The button at the top left of the task pane (green dot = connected) lists both files, with the current one marked **This file**.
+Open two or more files, in any of Excel, Word and PowerPoint, and open **Home > Office Partner** in each. The button at the top left of the task pane (green dot = connected) lists them all, each with the app it is open in, and the current one marked **This file**.
 
-Ask for it in plain words, for example *"Compare the totals in this sheet with the Actuals file"* or *"In the Actuals file, fill column D with the totals"*. The assistant has two ways to reach the other file:
+Ask for it in plain words, for example *"Compare the totals in this sheet with the Actuals file"*, *"Put the revenue from Budget.xlsx on slide 3"* or *"In the Actuals file, fill column D with the totals"*. The assistant has two ways to reach the other file:
 
-- **Look something up** (`list_connected_files`, `read_connected_file`): runs one **read** tool in the other workbook (`get_sheets`, `read_range`, `get_cell_ranges`, `search_data`, `find_errors`, `check_formula_consistency`, `get_objects`). It never writes. In *Ask* mode you are asked once per message and per file.
+- **Look something up** (`list_connected_files`, `read_connected_file`): runs one **read** tool of that file's own app in the other file. It never writes. In *Ask* mode you are asked once per message and per file.
+
+  | The other file is open in | Read tools |
+  | --- | --- |
+  | Excel | `get_sheets`, `read_range`, `get_cell_ranges`, `search_data`, `find_errors`, `check_formula_consistency`, `get_objects` |
+  | Word | `get_doc_outline`, `read_doc_section`, `search_doc_text`, `read_comments`, `read_tracked_changes` |
+  | PowerPoint | `get_presentation_metadata`, `list_slide_shapes`, `read_slide_text` |
+
 - **Have something done** (`send_to_connected_file`): the assistant of this file sends a message to the assistant of the other file. That one runs it as a normal turn in **its own chat** (its own model, tools and Ask/Auto setting), and its final reply comes back to the asker. In *Ask* mode you see the exact message and are asked every time; *Auto* mode sends without asking.
 
 What to expect when something is done in the other file:
 
-- The request appears in the other file's chat as a message *From <file name>*, and its changes are listed in that file's **Changes** like any other edit. There is no undo, so save that file first.
+- The request appears in the other file's chat as a message *From <app> · <file name>*, and its changes are listed in that file's **Changes** like any other edit. There is no undo, so save that file first.
 - That file's own Ask/Auto setting applies. In *Ask* mode its change prompts appear **in that window**, so switch to it to approve them; the asker waits up to 10 minutes.
 - If the other file fails or you stop it there, the asker is told it failed (with the reason), not that it finished. If the asker is stopped first, the request is not run.
 - A file that is busy with its own request is refused at once; try again when it has finished. A file needs a provider selected in its own pane.
 
-**Cell links go exactly where they say, and nothing is guessed from the words around them.** The assistant points at cells with a markdown link that spells out the target: `[A1:E8](cell:?file=Book2.xlsx&sheet=Sheet1&range=A1:E8)` (`file` and `sheet` are optional; a space in a name is `%20`). Click it and that file's pane selects the range and its window comes to the front. The assistant does not have to work the target out: what it reads from or changes in another file comes back with ready-made links (`link`, `changed[].link`, taken from what the tools actually did) that it pastes into its reply. The same goes for this file: the result of a tool that works on a range (`read_range`, `write_range`, `get_selection`, …) carries a ready-made `link` for it. A cell written in plain words ("F10:F16", "Data!B2") still links to a sheet of the file you are in, but not in a reply that used the other-file tools, names another open file, or names one of this workbook's sheets ("sheet2/C5"): there it stays plain text, because a link to the wrong sheet or file is worse than no link. If a file is not open, or has no such sheet, you get a message saying so.
-- A file's name is read from Excel when someone needs it: when you open the list, or when the assistant lists or uses the files. After a Save As, the new name shows up the next time you open the list.
-- Its task pane must be open: a workbook without the pane is not listed. A file that was closed and reopened gets a new id, so the assistant lists again.
+**Cell links (workbooks only) go exactly where they say, and nothing is guessed from the words around them.** The assistant points at cells with a markdown link that spells out the target: `[A1:E8](cell:?file=Book2.xlsx&sheet=Sheet1&range=A1:E8)` (`file` and `sheet` are optional; a space in a name is `%20`). Click it and that file's pane selects the range and its window comes to the front. The assistant does not have to work the target out: what it reads from or changes in another file comes back with ready-made links (`link`, `changed[].link`, taken from what the tools actually did) that it pastes into its reply. The same goes for this file: the result of a tool that works on a range (`read_range`, `write_range`, `get_selection`, …) carries a ready-made `link` for it. A cell written in plain words ("F10:F16", "Data!B2") still links to a sheet of the file you are in, but not in a reply that used the other-file tools, names another open file, or names one of this workbook's sheets ("sheet2/C5"): there it stays plain text, because a link to the wrong sheet or file is worse than no link. If a file is not open, or has no such sheet, you get a message saying so.
+- A file's name is read from its app when someone needs it: when you open the list, or when the assistant lists or uses the files. After a Save As, the new name shows up the next time you open the list.
+- Its task pane must be open: a file without the pane is not listed. A file that was closed and reopened gets a new id, so the assistant lists again.
 - What is read or sent goes to the AI provider of the chat that handles it. Replies and cell contents from the other file are data, not instructions.
 
 ## Testing from your own test-case file
@@ -89,9 +114,9 @@ Open any test-case workbook (your company's format, any folder) and let the assi
 **One-time, per system you test.** In Excel: Settings → *Testing: sign-ins, notes, scripts* → enter a name and the address → *Open browser to sign in* → sign in → *I'm signed in*. The same panel lists, shows and deletes saved sign-ins, notes and scripts, and opens their folders. Or in a terminal:
 
 ```powershell
-excel-partner login admin https://staging.example.com   # Chrome opens; you sign in; press Enter in the terminal
-excel-partner sessions                                   # list saved sign-ins (names, sites, date)
-excel-partner logout admin                               # delete one
+office-partner login admin https://staging.example.com   # Chrome opens; you sign in; press Enter in the terminal
+office-partner sessions                                   # list saved sign-ins (names, sites, date)
+office-partner logout admin                               # delete one
 ```
 
 The password is typed into the site itself. Only the browser's session (cookies) is saved, in `%LOCALAPPDATA%\Excel Partner\sessions`, and the assistant never sees it. If the sign-in page is on another host (single sign-on), the hosts visited during login are saved with it; add more with `--origin https://sso.example.com`. A saved sign-in expires like any login: run the command again.
@@ -108,10 +133,10 @@ The password is typed into the site itself. Only the browser's session (cookies)
 **What the assistant remembers.** Everything it learns about a system (how to log in, where screens are, how to do a task, quirks, test data that is safe to keep) is saved as short Markdown notes in `%LOCALAPPDATA%\\Excel Partner\\knowledge\\<host>\\`, next to `sessions`. When the browser opens, the assistant is handed the list of notes for those sites (one line each, with the date) and opens only the ones it needs, so a new chat or a new day does not start from zero. In Ask mode you see each note before it is saved; notes that look like they contain a password, token or cookie are refused. A system keeps at most 30 notes (64,000 characters). Notes are treated as hints from earlier sessions, not as orders, and the assistant checks them against the page.
 
 ```powershell
-excel-partner knowledge                      # which systems have notes (and where the folder is)
-excel-partner knowledge https://staging.example.com           # list that system's notes
-excel-partner knowledge show https://staging.example.com login # read one
-excel-partner knowledge delete https://staging.example.com login
+office-partner knowledge                      # which systems have notes (and where the folder is)
+office-partner knowledge https://staging.example.com           # list that system's notes
+office-partner knowledge show https://staging.example.com login # read one
+office-partner knowledge delete https://staging.example.com login
 ```
 
 You can also edit the `.md` files by hand; the list is read from each file's header (`kind`, `summary`, `updated`).
@@ -119,10 +144,10 @@ You can also edit the `.md` files by hand; the list is read from each file's hea
 **Regression scripts.** Each kept case becomes a file `%LOCALAPPDATA%\\Excel Partner\\scripts\\<host>\\<case id>.spec.js` (a Playwright Test file with a header: case, outcome, date, sheet row, the evidence). It asserts the *expected* result, so a script saved for an application defect fails until the defect is fixed. Scripts may import only `@playwright/test`, use relative paths and read only `BASE_URL` and `STORAGE_STATE`; ones with `require`, `fetch`, other sites or anything that looks like a password are refused. This is a check, not a sandbox: read a script before you run it. To run one (the add-in itself does not run them): `npm i -D @playwright/test`, then `BASE_URL=https://staging.example.com STORAGE_STATE=<saved session file> npx playwright test <file>`. `open_test_browser` also lists the scripts that already exist for the sites, so the assistant knows which cases were done before.
 
 ```powershell
-excel-partner scripts                                   # which systems have scripts (and where the folder is)
-excel-partner scripts https://staging.example.com        # list that system's scripts
-excel-partner scripts show https://staging.example.com TC-001
-excel-partner scripts delete https://staging.example.com TC-001
+office-partner scripts                                   # which systems have scripts (and where the folder is)
+office-partner scripts https://staging.example.com        # list that system's scripts
+office-partner scripts show https://staging.example.com TC-001
+office-partner scripts delete https://staging.example.com TC-001
 ```
 
 Without a saved sign-in the assistant can still open a browser window and wait while you sign in by hand, but that sign-in is lost when the browser closes.
@@ -136,7 +161,7 @@ Cells that already hold something are not overwritten unless you agree; cells th
   - Put back: values, formulas, number formats, fills, fonts, borders, alignment, merged cells, column widths and row heights of the cells an edit touched (`write_range`, `set_formula`, `set_cells`, `clear_range`, `format_range`, `find_replace`, `copy_to`, `sort_range`, `merge_range`, `resize_range`) and rows added by `insert_rows`.
   - **Cells you changed after the assistant's edit are never overwritten**: they keep your version and the undo message lists them. Undoing twice does nothing the second time.
   - Not put back: cell notes, hyperlinks, formatting of single characters inside a cell, data validation and conditional formats on cleared or copied cells, charts, pivot tables, tables, shapes, sheet operations, named ranges, filters, print layout, row/column structure changes and anything done through `execute_office_js`. These show **Can't undo** in Changes.
-  - Before the first of those in a reply, a copy of the whole workbook is saved to `%LOCALAPPDATA%\Excel Partner\backups\` (newest 10 kept; `excel-partner backups` lists them). Restoring is "open the copy". If no copy could be saved, the change list says so.
+  - Before the first of those in a reply, a copy of the whole file is saved to `%LOCALAPPDATA%\Excel Partner\backups\` as `.xlsx`, `.docx` or `.pptx` (newest 10 kept; `office-partner backups` lists them). Restoring is "open the copy". If no copy could be saved, the change list says so.
   - An edit over 50,000 cells (20,000 when formatting is involved) is not recorded. The undo history lives in memory only: reloading the task pane clears it, and old entries expire after about 500,000 recorded cells.
   - Excel tables that grew because the assistant wrote just below them are shrunk back.
   - With several workbooks open, Excel can refuse the undo ("the workbook has lost focus"): bring that workbook to the front and press Undo again; nothing was changed.
@@ -147,41 +172,41 @@ Cells that already hold something are not overwritten unless you agree; cells th
 
 ### Instructions
 
-**Settings > Instructions** adds your own rules for every chat (for example "answer in Vietnamese"). It is empty by default, so each provider keeps its native behaviour. **Use recommended** loads a ready-made set of Excel working rules (read before writing, use formulas, never overwrite silently, verify after editing). Press **Save**, then start a new chat so the old history does not keep earlier instructions. Note: with Claude, a non-empty instruction replaces its built-in prompt rather than adding to it.
+**Settings > Instructions** adds your own rules for every chat (for example "answer in Vietnamese"). It is empty by default, so each provider keeps its native behaviour. **Use recommended** loads a ready-made set of working rules for the app you are in (in Excel: read before writing, use formulas, never overwrite silently, verify after editing). In Word and PowerPoint the add-in adds its own short rules for that app on top of yours (and uses them alone when yours is empty). Press **Save**, then start a new chat so the old history does not keep earlier instructions. Note: with Claude, a non-empty instruction replaces its built-in prompt rather than adding to it.
 
 ## Commands
 
 | Command | What it does |
 | --- | --- |
-| `excel-partner setup [addin\|gateway\|all]` | Register and start (default: add-in) |
-| `excel-partner start` / `stop` / `restart` | Control the bridge |
-| `excel-partner status` | Show what is running |
-| `excel-partner doctor` | Check the installation and say what to fix |
-| `excel-partner logs` | Show recent log lines |
-| `excel-partner login <name> <url>` / `sessions` / `logout <name>` | Save, list and delete signed-in sessions for the test assistant (see Testing above) |
-| `excel-partner knowledge [<url>]` / `show` / `delete` | See and manage what the assistant has learned about each system |
-| `excel-partner backups` | List the workbook copies saved before changes Undo cannot reverse (and where the folder is) |
-| `excel-partner update [--from <spec\|.tgz>]` | Install the latest release (or the given package); same as Settings > Updates |
-| `excel-partner uninstall` | Stop, unregister and remove start-up and certificate trust |
-| `excel-partner help` | Full CLI usage |
+| `office-partner setup [addin\|gateway\|all]` | Register and start (default: add-in) |
+| `office-partner start` / `stop` / `restart` | Control the bridge |
+| `office-partner status` | Show what is running |
+| `office-partner doctor` | Check the installation and say what to fix |
+| `office-partner logs` | Show recent log lines |
+| `office-partner login <name> <url>` / `sessions` / `logout <name>` | Save, list and delete signed-in sessions for the test assistant (see Testing above) |
+| `office-partner knowledge [<url>]` / `show` / `delete` | See and manage what the assistant has learned about each system |
+| `office-partner backups` | List the workbook copies saved before changes Undo cannot reverse (and where the folder is) |
+| `office-partner update [--from <spec\|.tgz>]` | Install the latest release (or the given package); same as Settings > Updates |
+| `office-partner uninstall` | Stop, unregister and remove start-up and certificate trust |
+| `office-partner help` | Full CLI usage |
 
 **Update:** open **Settings > Updates** in the task pane. It shows the installed version, **Check for updates** asks the npm registry, and when a newer release exists **Update now** (click twice to confirm) installs it. Excel does not need to be closed: the add-in is served by the local bridge, so the connection drops for about a minute while the bridge and gateway restart, then the pane reloads by itself and says which version it is now on. It refuses to start while the assistant is working, and only works for the copy installed with `npm install -g` (a source checkout says so; use `scripts/update.ps1` there). If something goes wrong the old version is started again and Settings shows the error; the log is `%LOCALAPPDATA%\Excel Partner\update.log`.
 
-From a terminal: `excel-partner update` does the same (`--from <npm spec or .tgz>` installs that instead of the latest release). Reopen the pane and start a new chat afterwards. Configuration, skills and templates are kept.
+From a terminal: `office-partner update` does the same (`--from <npm spec or .tgz>` installs that instead of the latest release). Reopen the pane and start a new chat afterwards. Configuration, skills and templates are kept.
 
-**Uninstall:** `excel-partner uninstall`, then `npm uninstall -g excel-partner`, then restart Excel. Local data stays on disk (see below).
+**Uninstall:** `office-partner uninstall`, then `npm uninstall -g office-partner` (and `npm uninstall -g excel-partner` if the old name is still installed), then restart Word, Excel and PowerPoint. Local data stays on disk (see below).
 
 ## Optional: Agent Gateway
 
 The same package includes a local **Anthropic Messages-compatible API** backed by the provider CLIs you have installed (for example to sign in to Claude for Excel with a gateway). It does not need the add-in.
 
 ```powershell
-excel-partner setup gateway     # prints the URL (https://localhost:8766) and a token
-excel-partner info --copy       # show them again
-excel-partner gateway models    # list advertised model IDs
+office-partner setup gateway     # prints the URL (https://localhost:8766) and a token
+office-partner info --copy       # show them again
+office-partner gateway models    # list advertised model IDs
 ```
 
-Model IDs look like `claude/default`, `codex/default` or `provider/native-model`. Run `excel-partner doctor gateway` if something fails. `agent-gateway` is an alias for these commands.
+Model IDs look like `claude/default`, `codex/default` or `provider/native-model`. Run `office-partner doctor gateway` if something fails. `agent-gateway` is an alias for these commands.
 
 ## Data and configuration
 
@@ -207,15 +232,15 @@ The bridge listens only on `localhost:8765` over HTTPS. Chat history is stored i
 
 ## Troubleshooting
 
-Start with `excel-partner doctor`. Then:
+Start with `office-partner doctor`. Then:
 
 | Problem | Fix |
 | --- | --- |
-| PowerShell says script execution is disabled | Use the shims: `npm.cmd install -g excel-partner`, `excel-partner.cmd setup` |
-| `excel-partner` is not recognized | Reopen PowerShell. Check `npm.cmd prefix -g` is on `PATH`. Install from Windows PowerShell, not WSL |
-| No **Excel Partner** button | Run `excel-partner setup`, then fully close **all** Excel windows and reopen. Still missing? `npx.cmd --yes --package office-addin-dev-settings office-addin-dev-settings sideload "$env:LOCALAPPDATA\Excel Partner\manifest.xml" desktop --app Excel`. Company policy may block developer add-ins |
-| Task pane stuck on *Connecting* | `excel-partner stop`, `excel-partner start`, open `https://localhost:8765/health`, read `%LOCALAPPDATA%\Excel Partner\bridge.err.log`. If port 8765 is busy, stop the other instance |
-| Certificate error | Run `excel-partner setup` again and restart Excel. If it says the certificate expired: `excel-partner uninstall`, then `excel-partner setup` |
+| PowerShell says script execution is disabled | Use the shims: `npm.cmd install -g office-partner`, `office-partner.cmd setup` |
+| `office-partner` is not recognized | Reopen PowerShell. Check `npm.cmd prefix -g` is on `PATH`. Install from Windows PowerShell, not WSL |
+| No **Office Partner** button | Run `office-partner setup`, then fully close **all** Excel windows and reopen. Still missing? `npx.cmd --yes --package office-addin-dev-settings office-addin-dev-settings sideload "$env:LOCALAPPDATA\Excel Partner\manifest.xml" desktop --app Excel`. Company policy may block developer add-ins |
+| Task pane stuck on *Connecting* | `office-partner stop`, `office-partner start`, open `https://localhost:8765/health`, read `%LOCALAPPDATA%\Excel Partner\bridge.err.log`. If port 8765 is busy, stop the other instance |
+| Certificate error | Run `office-partner setup` again and restart Excel. If it says the certificate expired: `office-partner uninstall`, then `office-partner setup` |
 | Provider shows *Not installed* / *Login required* | Check `claude --version`, `copilot --version`, `codex --version`, `opencode --version` in PowerShell, install or sign in again, restart the bridge and reselect the provider |
 | `would_overwrite` | Target cells already hold data. Tell the assistant which cells it may replace |
 | `disconnected`, `timeout`, `size_limit_exceeded` | Keep the pane open, close Excel dialogs, select a smaller range, and check whether part of the change was already applied. Writes are never replayed automatically |

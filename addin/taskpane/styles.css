@@ -746,6 +746,33 @@ button.ghost { background: none; color: var(--muted); border: 0; }
 .files-row:hover { background: var(--blue-100); }
 .files-icon { width: 16px; height: 16px; flex: none; color: var(--accent-strong); }
 .files-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.files-app { flex: none; font-size: 10px; color: var(--muted); }
 .files-tag { flex: none; font-size: 10px; color: var(--muted); border: 1px solid var(--border); border-radius: 999px; padding: 0 6px; }
 .files-hint { margin: 0; padding: 4px 14px 2px; font-size: 11px; color: var(--muted); line-height: 1.4; }
 .brand { flex: 1; }
+
+/* ---- Word: proposed edits review card (ui/proposal.ts) ---------------------- */
+.proposal-card { padding: 14px; margin: 8px 0; border: 1px solid var(--border); border-radius: 12px; background: var(--panel); }
+.bubble.assistant .proposal-card { padding: 0; margin: 0; border: 0; background: transparent; }
+.proposal-title { margin: 0 0 2px; font-size: 14px; font-weight: 600; color: var(--accent); overflow-wrap: anywhere; }
+.proposal-hint { margin: 0 0 10px; color: var(--muted); font-size: 12px; }
+.proposal-list { display: grid; gap: 10px; max-height: 420px; overflow-y: auto; }
+.proposal-item { padding: 8px; border: 1px solid var(--border); border-radius: 8px; min-width: 0; }
+.proposal-item[data-found="false"] { opacity: 0.75; border-style: dashed; }
+.proposal-item-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; cursor: pointer; }
+.proposal-item-head input { accent-color: var(--accent); }
+.proposal-badge { font-size: 11px; color: var(--warning-text); border: 1px solid var(--border); border-radius: 999px; padding: 0 6px; }
+.proposal-reason { margin: 4px 0 0; color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+.proposal-before, .proposal-after { margin-top: 6px; padding: 6px 8px; border-radius: 6px; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 160px; overflow-y: auto; }
+.proposal-before { background: var(--error-soft); }
+.proposal-after { background: var(--ok-soft); }
+.proposal-del { background: transparent; color: var(--error); text-decoration: line-through; }
+.proposal-ins { background: transparent; color: var(--ok); font-weight: 600; }
+.proposal-choices { border: 0; padding: 0; margin: 8px 0 0; min-width: 0; }
+.proposal-choices legend { font-size: 11px; color: var(--muted); padding: 0; }
+.proposal-choice { display: flex; align-items: flex-start; gap: 6px; padding: 4px 0; cursor: pointer; overflow-wrap: anywhere; }
+.proposal-choice input { margin-top: 3px; accent-color: var(--accent); }
+.proposal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
+.proposal-actions button { padding: 6px 14px; border: 1px solid var(--border); border-radius: 8px; background: var(--subtle-bg); color: var(--text); }
+.proposal-actions button[type="submit"] { background: var(--btn); color: var(--on-mint); }
+.proposal-actions button:disabled { opacity: 0.5; }

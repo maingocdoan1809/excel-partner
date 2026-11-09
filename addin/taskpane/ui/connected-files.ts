@@ -1,8 +1,16 @@
-import { UNNAMED_WORKBOOK, type ConnectedFile } from "../../../protocol/src/index.js";
+import { UNNAMED_FILE, type ConnectedFile } from "../../../protocol/src/index.js";
+
+/** A small picture of the kind of file: a grid for a workbook, text lines for a document, a slide for a presentation. */
+const FILE_ICONS: Record<ConnectedFile["host"], string> = {
+  excel: '<rect x="3.5" y="4.5" width="13" height="11" rx="1.6" fill="none" stroke="currentColor" stroke-width="1.2"/><path d="M3.5 8.5h13M3.5 12h13M8 4.5v11" fill="none" stroke="currentColor" stroke-width="1.2"/>',
+  word: '<rect x="4.5" y="3.5" width="11" height="13" rx="1.6" fill="none" stroke="currentColor" stroke-width="1.2"/><path d="M7 7.5h6M7 10h6M7 12.5h4" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>',
+  powerpoint: '<rect x="3" y="4.5" width="14" height="9" rx="1.6" fill="none" stroke="currentColor" stroke-width="1.2"/><path d="M10 13.5v2.5M7.5 16.5h5" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>',
+};
+const APP_NAMES: Record<ConnectedFile["host"], string> = { excel: "Excel", word: "Word", powerpoint: "PowerPoint" };
 
 /**
- * The "Connected files" button in the header and the list it opens: every workbook open in Excel with this add-in,
- * the current one first. The green dot shows whether the bridge is connected. The list itself comes from the bridge.
+ * The "Connected files" button in the header and the list it opens: every file open in Word, Excel or PowerPoint with
+ * this add-in, the current one first. The green dot shows whether the bridge is connected. The list itself comes from the bridge.
  */
 export function setupConnectedFiles(options: {
   /** The list was just opened: ask the bridge for current names (they arrive through `render`). */
@@ -44,20 +52,24 @@ export function setupConnectedFiles(options: {
     },
     render(files) {
       list.replaceChildren(...files.map((file) => {
-        const name = file.name.trim() || UNNAMED_WORKBOOK;
+        const name = file.name.trim() || UNNAMED_FILE[file.host];
         const row = document.createElement("li");
         row.className = "files-row";
         row.title = name;
+        row.dataset.host = file.host;
         row.dataset.current = String(file.current);
         const icon = document.createElementNS("http://www.w3.org/2000/svg", "svg");
         icon.setAttribute("viewBox", "0 0 20 20");
         icon.setAttribute("aria-hidden", "true");
         icon.classList.add("files-icon");
-        icon.innerHTML = '<rect x="3.5" y="4.5" width="13" height="11" rx="1.6" fill="none" stroke="currentColor" stroke-width="1.2"/><path d="M3.5 8.5h13M3.5 12h13M8 4.5v11" fill="none" stroke="currentColor" stroke-width="1.2"/>';
+        icon.innerHTML = FILE_ICONS[file.host];
         const label = document.createElement("span");
         label.className = "files-name";
         label.textContent = name;
-        row.append(icon, label);
+        const app = document.createElement("span");
+        app.className = "files-app";
+        app.textContent = APP_NAMES[file.host];
+        row.append(icon, label, app);
         if (file.current) {
           const tag = document.createElement("span");
           tag.className = "files-tag";
@@ -68,7 +80,7 @@ export function setupConnectedFiles(options: {
       }));
       hint.textContent = files.length > 1
         ? "The assistant can read these files when you ask, and can ask their assistants to make changes in them. In Ask mode you approve each request first."
-        : "Open another workbook with Excel Partner and the assistant can read it, or ask its assistant to change it, from here.";
+        : "Open another file in Word, Excel or PowerPoint with Office Partner and the assistant can read it, or ask its assistant to change it, from here.";
       button.title = files.length > 1 ? `Connected files (${files.length})` : "Connected files";
     },
   };

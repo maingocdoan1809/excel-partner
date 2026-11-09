@@ -12,7 +12,7 @@ export function describeSavedAge(savedAt: string, now = Date.now()): string {
   return days >= STALE_SIGN_IN_DAYS ? `${age}, may have expired` : age;
 }
 
-/** Sign-ins, notes and regression scripts for the testing workflow: the `excel-partner login/knowledge/scripts` commands as buttons. */
+/** Sign-ins, notes and regression scripts for the testing workflow: the `office-partner login/knowledge/scripts` commands as buttons. */
 export function setupTestingPanel(client: () => BridgeClient): { refresh(): Promise<void> } {
   const get = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
   const status = get<HTMLElement>("testing-status");

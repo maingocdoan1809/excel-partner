@@ -1,4 +1,4 @@
-import type { ClientInfo, ConnectedFile } from "../../protocol/src/index.js";
+import type { ClientInfoInput, ConnectedFile } from "../../protocol/src/index.js";
 import { WorkbookSession } from "./session.js";
 import type { Logger } from "./logger.js";
 
@@ -32,7 +32,7 @@ export class SessionManager {
     return this.sessions.size;
   }
 
-  create(workbookConnectionId: string, clientInfo: ClientInfo | null): WorkbookSession {
+  create(workbookConnectionId: string, clientInfo: ClientInfoInput | null): WorkbookSession {
     const existing = this.byConnection.get(workbookConnectionId);
     if (existing) this.remove(existing, "reconnect");
 
@@ -78,13 +78,14 @@ export class SessionManager {
 
   /**
    * The connected workbooks as `session` sees them: its own first, then the others oldest first. The one list both the
-   * assistant and the pane get; a workbook whose name is not known yet has the name "" (callers show UNNAMED_WORKBOOK).
+   * assistant and the pane get; a file whose name is not known yet has the name "" (callers show UNNAMED_WORKBOOK).
    */
   connectedFiles(session: WorkbookSession): ConnectedFile[] {
     return this.connected()
       // A browser tab has no workbook: it is not a file anyone else can read or send a request to.
       .filter((item) => item.clientInfo?.standalone !== true || item.id === session.id)
-      .map((item) => ({ id: item.fileId, name: item.workbookName ?? "", current: item.id === session.id }))
+      // Every Office app sees every other: a Word document can look something up in a workbook or a deck, and the reverse.
+      .map((item) => ({ id: item.fileId, name: item.workbookName ?? "", host: item.host, current: item.id === session.id }))
       .sort((a, b) => Number(b.current) - Number(a.current));
   }
 

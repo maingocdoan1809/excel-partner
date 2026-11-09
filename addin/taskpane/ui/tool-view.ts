@@ -4,7 +4,7 @@ const names: Record<string, string> = {
   read_range: "Reading cells", get_cell_ranges: "Reading cells", get_selection: "Reading selection",
   get_sheet_info: "Reading worksheet", get_objects: "Reading workbook objects", list_shapes: "Reading shapes",
   write_range: "Writing cells", set_cells: "Writing cells", set_formula: "Writing formulas",
-  execute_office_js: "Running Excel code", read_range_image: "Viewing cells", manage_sheet: "Updating worksheet",
+  execute_office_js: "Running Office code", read_range_image: "Viewing cells", manage_sheet: "Updating worksheet",
   format_range: "Formatting cells", modify_chart: "Updating chart", modify_table: "Updating table",
   get_sheets: "Reading sheets", search_data: "Searching cells", find_errors: "Checking formula errors",
   check_formula_consistency: "Checking formula consistency", find_replace: "Replacing text", get_range_as_csv: "Reading cells as CSV",

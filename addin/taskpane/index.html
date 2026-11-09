@@ -70,17 +70,17 @@
           </section>
           <section class="settings-section">
             <label class="settings-title" for="settings-instructions">Instructions</label>
-            <p class="settings-description">Tell Excel Partner how it should work in Excel.</p>
+            <p class="settings-description">Tell Office Partner how it should work in <span class="host-app">Excel</span>.</p>
             <textarea id="settings-instructions" rows="4" placeholder="e.g. Use Vietnamese. Format numbers with thousand separators. Always bold column headers."></textarea>
-            <div class="settings-save-row"><p id="settings-instructions-status" role="status" aria-live="polite"></p><button id="settings-recommended-instructions" type="button" class="secondary" title="Fill the box with the recommended Excel workflow rules, then press Save">Use recommended</button><button id="settings-save-instructions" type="button" class="secondary">Save</button></div>
+            <div class="settings-save-row"><p id="settings-instructions-status" role="status" aria-live="polite"></p><button id="settings-recommended-instructions" type="button" class="secondary" title="Fill the box with the recommended workflow rules for this app, then press Save">Use recommended</button><button id="settings-save-instructions" type="button" class="secondary">Save</button></div>
           </section>
           <section class="settings-section settings-row">
             <div><h3>Text size</h3><p class="settings-description">Adjust the conversation text size.</p></div>
             <div class="text-size-control"><button id="text-size-decrease" type="button" aria-label="Decrease text size">−</button><button id="text-size-reset" type="button" title="Reset text size to 100%">100%</button><button id="text-size-increase" type="button" aria-label="Increase text size">+</button></div>
           </section>
           <section class="settings-section settings-row">
-            <div><label class="settings-title" for="theme-select">Appearance</label><p class="settings-description">Choose a theme or follow Excel.</p></div>
-            <select id="theme-select" class="theme-select" aria-label="Appearance"><option value="auto">Follow Excel</option><option value="light">Light</option><option value="dark">Dark</option></select>
+            <div><label class="settings-title" for="theme-select">Appearance</label><p class="settings-description">Choose a theme or follow <span class="host-app">Excel</span>.</p></div>
+            <select id="theme-select" class="theme-select" aria-label="Appearance"><option value="auto" data-host-label="Follow {app}">Follow Excel</option><option value="light">Light</option><option value="dark">Dark</option></select>
           </section>
           <section class="settings-section settings-row">
             <div><h3>Chat history</h3><p id="settings-history-count" class="settings-description">Saved on this computer.</p></div>
@@ -159,11 +159,11 @@
         <div class="panel-body login-body">
           <img class="hero-mark" src="../assets/excel-partner-mark.png" alt="" />
           <h2 id="login-heading">Sign in to GitHub Copilot</h2>
-          <p id="login-description">Finish signing in through your browser, then return to Excel.</p>
+          <p id="login-description">Finish signing in through your browser, then return to <span class="host-app">Excel</span>.</p>
           <div id="login-device" class="login-card">
             <strong>GitHub Copilot <span class="badge">DEVICE CODE</span></strong>
             <p id="login-status" role="status" aria-live="polite">Connect your GitHub Copilot account to get started.</p>
-            <div id="login-code-card" hidden><p>1. Copy the device code</p><code id="login-code" class="device-code"></code><button id="login-copy" type="button" class="secondary">Copy code</button><p>2. Open GitHub and enter the code, then return to Excel.</p></div>
+            <div id="login-code-card" hidden><p>1. Copy the device code</p><code id="login-code" class="device-code"></code><button id="login-copy" type="button" class="secondary">Copy code</button><p>2. Open GitHub and enter the code, then return to <span class="host-app">Excel</span>.</p></div>
             <a id="login-browser" class="login-primary" target="_blank" rel="noopener noreferrer" hidden>Open GitHub verification ↗</a>
             <p id="login-timer" class="login-timer"></p>
             <button id="login-start" type="button">Get device code →</button>
@@ -253,7 +253,7 @@
         <div class="template-controls">
           <select id="template-skill" aria-label="Skill"></select>
           <button id="template-add" type="button" class="secondary">Add file</button>
-          <input id="template-input" type="file" accept=".xlsx,.xlsm,.xltx,.xltm,.png,.jpg,.jpeg,.gif,.webp,.md,.txt,.json,.csv,.yaml,.yml" hidden />
+          <input id="template-input" type="file" accept=".xlsx,.xlsm,.xltx,.xltm,.docx,.docm,.pptx,.pptm,.png,.jpg,.jpeg,.gif,.webp,.md,.txt,.json,.csv,.yaml,.yml" hidden />
         </div>
         <div id="template-list" class="panel-body"></div>
       </section>

@@ -14,7 +14,7 @@ const options = () => {
   vi.spyOn(console, "log").mockImplementation(() => undefined);
   vi.spyOn(console, "error").mockImplementation(() => undefined);
   const globalRoot = path.join(dataDir, "global modules");
-  const root = path.join(globalRoot, "excel-partner");
+  const root = path.join(globalRoot, "office-partner");
   return { dataDir, root, globalRoot, nodePath: process.execPath, stop: vi.fn(async () => undefined), wasRunning: true };
 };
 
@@ -29,8 +29,8 @@ describe("CLI update", () => {
       })
       .mockReturnValueOnce({ status: 0 });
     await updatePackage({ ...opts, run });
-    expect(run.mock.calls[1]).toEqual(["npm.cmd", ["install", "--global", "excel-partner@latest"], expect.objectContaining({ cwd: opts.dataDir, shell: true })]);
-    expect(run.mock.calls[2]).toEqual([process.execPath, [path.join(opts.root, "bin", "excel-partner.mjs"), "setup"], expect.objectContaining({ cwd: opts.dataDir })]);
+    expect(run.mock.calls[1]).toEqual(["npm.cmd", ["install", "--global", "office-partner@latest"], expect.objectContaining({ cwd: opts.dataDir, shell: true })]);
+    expect(run.mock.calls[2]).toEqual([process.execPath, [path.join(opts.root, "bin", "office-partner.mjs"), "setup"], expect.objectContaining({ cwd: opts.dataDir })]);
   });
 
   it("leaves a source or npx installation running instead of replacing another global installation", async () => {
@@ -46,7 +46,7 @@ describe("CLI update", () => {
     const failedInstall = vi.fn().mockReturnValueOnce({ status: 0, stdout: opts.globalRoot })
       .mockReturnValueOnce({ status: 1 }).mockReturnValueOnce({ status: 0 });
     await expect(updatePackage({ ...opts, run: failedInstall })).rejects.toThrow(/npm install/);
-    expect(failedInstall.mock.calls[2]?.[1]).toEqual([path.join(opts.root, "bin", "excel-partner.mjs"), "start"]);
+    expect(failedInstall.mock.calls[2]?.[1]).toEqual([path.join(opts.root, "bin", "office-partner.mjs"), "start"]);
     const failedSetup = vi.fn().mockReturnValueOnce({ status: 0, stdout: opts.globalRoot })
       .mockReturnValueOnce({ status: 0 }).mockReturnValueOnce({ status: 1 });
     await expect(updatePackage({ ...opts, run: failedSetup })).rejects.toThrow(/Package updated, but setup failed/);
@@ -58,8 +58,8 @@ describe("CLI update", () => {
     await updatePackage({ ...opts, run, spec: "C:\\My Files\\excel-partner-0.2.0.tgz" });
     expect(run.mock.calls[1]![1]).toEqual(["install", "--global", '"C:\\My Files\\excel-partner-0.2.0.tgz"']);
     run.mockClear().mockReturnValue({ status: 0, stdout: opts.globalRoot });
-    await updatePackage({ ...opts, run, spec: "excel-partner@0.1.20" });
-    expect(run.mock.calls[1]![1]).toEqual(["install", "--global", "excel-partner@0.1.20"]);
+    await updatePackage({ ...opts, run, spec: "office-partner@0.1.20" });
+    expect(run.mock.calls[1]![1]).toEqual(["install", "--global", "office-partner@0.1.20"]);
   });
 
   it("reports each step in order, and a recovery when npm fails", async () => {

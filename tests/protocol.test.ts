@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { ALL_TOOL_DEFINITIONS as TOOL_DEFINITIONS } from "../excel_mcp/src/tool-definitions.js";
 import {
-  EXCEL_TOOL_NAMES,
+  ALL_TOOL_NAMES,
   ToolInputSchemas,
   ClientMessageSchema,
   ServerMessageSchema,
@@ -79,10 +79,10 @@ describe("MCP tool definitions stay in sync with the zod schemas", () => {
   const unwrap = (schema: any): any => (schema._def?.schema ? unwrap(schema._def.schema) : schema);
 
   it("advertises exactly the tools the protocol knows", () => {
-    expect(TOOL_DEFINITIONS.map((t) => t.name).sort()).toEqual([...EXCEL_TOOL_NAMES].sort());
+    expect(TOOL_DEFINITIONS.map((t) => t.name).sort()).toEqual([...ALL_TOOL_NAMES].sort());
   });
 
-  it.each(EXCEL_TOOL_NAMES)("%s: JSON schema properties match the zod input", (name) => {
+  it.each(ALL_TOOL_NAMES)("%s: JSON schema properties match the zod input", (name) => {
     const definition = TOOL_DEFINITIONS.find((t) => t.name === name)!;
     const zodKeys = Object.keys(unwrap(ToolInputSchemas[name]).shape).sort();
     expect(Object.keys(definition.inputSchema.properties ?? {}).sort()).toEqual(zodKeys);

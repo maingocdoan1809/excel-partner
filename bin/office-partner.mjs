@@ -21,7 +21,7 @@ const windowsScript = path.join(root, "scripts", "package-windows.ps1");
 
 function fail(message) { throw new Error(message); }
 function requireWindows() {
-  if (process.platform !== "win32") fail("This package currently supports Excel desktop on Windows. Use the source WSL installer for WSL2.");
+  if (process.platform !== "win32") fail("This package currently supports Word, Excel and PowerPoint desktop on Windows. Use the source WSL installer for WSL2.");
 }
 function powershell(action, extra = []) {
   const result = spawnSync("powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", windowsScript,
@@ -54,7 +54,7 @@ async function ensureCertificate() {
   if (existsSync(cert) && existsSync(key)) {
     const current = new X509Certificate(readFileSync(cert));
     if (new Date(current.validTo).getTime() > Date.now() + 30 * 86400000) return;
-    fail(`Certificate expires soon. Run "excel-partner uninstall", then "excel-partner setup" to renew it.`);
+    fail(`Certificate expires soon. Run "office-partner uninstall", then "office-partner setup" to renew it.`);
   }
   if (existsSync(cert) || existsSync(key)) fail(`Incomplete certificate pair in ${dataDir}; remove it and rerun setup.`);
   mkdirSync(dataDir, { recursive: true });
@@ -81,12 +81,12 @@ async function ensureCertificate() {
   writeFileSync(key, pems.private, { mode: 0o600 });
 }
 async function start() {
-  if (!existsSync(cert) || !existsSync(key)) fail("Run 'excel-partner setup' first.");
+  if (!existsSync(cert) || !existsSync(key)) fail("Run 'office-partner setup' first.");
   if (await health()) {
     if (!livePid()) fail("Port 8765 is already in use by another bridge. Stop it before starting this package.");
     console.log("Bridge is already running at https://localhost:8765"); return;
   }
-  if (livePid()) fail(`Bridge process ${livePid()} exists but is not healthy. Run 'excel-partner stop' and retry.`);
+  if (livePid()) fail(`Bridge process ${livePid()} exists but is not healthy. Run 'office-partner stop' and retry.`);
   if (!existsSync(bridge)) fail("Package is missing its compiled bridge. Reinstall the package.");
   mkdirSync(dataDir, { recursive: true });
   const out = openSync(path.join(dataDir, "bridge.log"), "a");
@@ -121,7 +121,7 @@ const gatewayDir = process.env.AGENT_GATEWAY_HOME ?? path.join(process.env.LOCAL
 
 /** Runs one Agent Gateway CLI command; its own output and exit code are passed through. */
 function gateway(args) {
-  if (!existsSync(gatewayBin)) fail("This installation is missing the gateway. Reinstall excel-partner.");
+  if (!existsSync(gatewayBin)) fail("This installation is missing the gateway. Reinstall office-partner.");
   const result = spawnSync(process.execPath, [gatewayBin, ...args], { stdio: "inherit" });
   if (result.error) throw result.error;
   if (result.status !== 0) { process.exitCode = result.status ?? 1; return false; }
@@ -153,23 +153,23 @@ function allowHost(names, remove) {
   const next = remove ? current.filter(name => !clean.includes(name)) : [...new Set([...current, ...clean])];
   mkdirSync(dataDir, { recursive: true });
   writeFileSync(configFile, JSON.stringify({ ...config, allowedHosts: next }, null, 2) + "\n", { mode: 0o600 });
-  console.log(`${remove ? "Removed" : "Allowed"}: ${clean.join(", ")}. Restart the bridge to apply: excel-partner restart`);
+  console.log(`${remove ? "Removed" : "Allowed"}: ${clean.join(", ")}. Restart the bridge to apply: office-partner restart`);
 }
 async function testSessions(command, rest) {
   const { TestSessions } = await import(pathToFileURL(path.join(root, "dist", "bridge", "src", "test-sessions.js")).href);
   const store = new TestSessions(path.join(dataDir, "sessions"));
   if (command === "sessions") {
     const list = store.list();
-    if (!list.length) { console.log("No saved sign-ins. Create one: excel-partner login <name> <url>"); return; }
+    if (!list.length) { console.log("No saved sign-ins. Create one: office-partner login <name> <url>"); return; }
     for (const item of list) console.log(`${item.name.padEnd(16)} saved ${item.savedAt.slice(0, 16).replace("T", " ")}  sites: ${item.origins.join(", ")}`);
     return;
   }
   const name = rest.find(arg => !arg.startsWith("--"));
-  if (!name || !/^[a-z0-9][a-z0-9_-]{0,31}$/.test(name)) fail(`Usage: excel-partner ${command} <name>${command === "login" ? " <url>" : ""}  (name: lowercase letters, digits, - and _)`);
+  if (!name || !/^[a-z0-9][a-z0-9_-]{0,31}$/.test(name)) fail(`Usage: office-partner ${command} <name>${command === "login" ? " <url>" : ""}  (name: lowercase letters, digits, - and _)`);
   if (command === "logout") { console.log(store.remove(name) ? `Removed the saved sign-in '${name}'.` : `No saved sign-in named '${name}'.`); return; }
   const positional = rest.filter(arg => !arg.startsWith("--"));
   const url = positional[1];
-  if (!url) fail("Usage: excel-partner login <name> <url> [--origin <url>]...   e.g. excel-partner login admin https://staging.example.com");
+  if (!url) fail("Usage: office-partner login <name> <url> [--origin <url>]...   e.g. office-partner login admin https://staging.example.com");
   const extra = rest.flatMap((arg, index) => arg === "--origin" && rest[index + 1] ? [rest[index + 1]] : []);
   const { loginSession } = await import(pathToFileURL(path.join(root, "dist", "bridge", "src", "test-login.js")).href);
   const { createInterface } = await import("node:readline");
@@ -190,7 +190,7 @@ async function siteKnowledge(rest) {
   if (first === "path") { console.log(store.dir); return; }
   const check = url => { if (!siteKey(url)) fail(`'${url}' is not a web address (use https://host, with the port if any).`); return url; };
   if (first === "show" || first === "delete") {
-    if (!second || !third) fail(`Usage: excel-partner knowledge ${first} <url> <note>`);
+    if (!second || !third) fail(`Usage: office-partner knowledge ${first} <url> <note>`);
     try {
       if (first === "delete") { console.log(store.delete(check(second), third) ? `Deleted '${third}'.` : `No note '${third}'.`); return; }
       const { entry, content } = store.read(check(second), third);
@@ -217,7 +217,7 @@ async function testScripts(rest) {
   if (first === "path") { console.log(store.dir); return; }
   const check = url => { if (!siteKey(url)) fail(`'${url}' is not a web address (use https://host, with the port if any).`); return url; };
   if (first === "show" || first === "delete") {
-    if (!second || !third) fail(`Usage: excel-partner scripts ${first} <url> <case id>`);
+    if (!second || !third) fail(`Usage: office-partner scripts ${first} <url> <case id>`);
     try {
       if (first === "delete") { console.log(store.delete(check(second), third) ? `Deleted '${third}'.` : `No script for '${third}'.`); return; }
       console.log(store.read(check(second), third));
@@ -237,35 +237,35 @@ async function testScripts(rest) {
   for (const site of sites) console.log(`  ${site}`);
 }
 async function workbookBackups(rest) {
-  const { WorkbookBackups } = await import(pathToFileURL(path.join(root, "dist", "bridge", "src", "workbook-backups.js")).href);
-  const store = new WorkbookBackups(path.join(dataDir, "backups"));
+  const { DocumentBackups } = await import(pathToFileURL(path.join(root, "dist", "bridge", "src", "document-backups.js")).href);
+  const store = new DocumentBackups(path.join(dataDir, "backups"));
   if (rest[0] === "path") { console.log(store.dir); return; }
   console.log(`Backups folder: ${store.dir}`);
   const list = store.list();
-  if (!list.length) console.log("No backups yet. The assistant saves a copy of the workbook before it does something Undo cannot reverse (free-form Office.js, deleting sheets, charts, pivots...). Only the newest 10 are kept.");
+  if (!list.length) console.log("No backups yet. The assistant saves a copy of the workbook, document or presentation before it does something Undo cannot reverse (free-form Office.js, deleting sheets, charts, pivots...). Only the newest 10 are kept.");
   for (const item of list) console.log(`  ${item.savedAt.slice(0, 19).replace("T", " ")}  ${String(Math.max(1, Math.round(item.size / 1024))).padStart(7)} KB  ${item.file}`);
 }
 async function doctorAddin() {
   const line = (ok, text) => console.log(`${ok === true ? "[ ok ]" : ok === false ? "[fail]" : "[warn]"} ${text}`);
   line(Number(process.versions.node.split(".")[0]) >= 20, `Node.js ${process.versions.node} (20 or later required)`);
   const hasCert = existsSync(cert) && existsSync(key);
-  line(hasCert, hasCert ? "Certificate present" : "Certificate missing. Run: excel-partner setup");
+  line(hasCert, hasCert ? "Certificate present" : "Certificate missing. Run: office-partner setup");
   if (hasCert) {
     const days = Math.floor((new Date(new X509Certificate(readFileSync(cert)).validTo).getTime() - Date.now()) / 86400000);
     line(days > 30 ? true : days > 0 ? null : false, `Certificate valid for ${days} more day(s)`);
   }
   const run = spawnSync("reg.exe", ["query", "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run", "/v", "Excel Partner Bridge"], { stdio: "ignore", windowsHide: true });
-  line(run.status === 0, run.status === 0 ? "Starts automatically at Windows sign-in" : "No sign-in startup entry. Run: excel-partner setup");
+  line(run.status === 0, run.status === 0 ? "Starts automatically at Windows sign-in" : "No sign-in startup entry. Run: office-partner setup");
   const healthy = await health();
-  line(healthy, healthy ? "Bridge running at https://localhost:8765" : "Bridge not running. Run: excel-partner start");
+  line(healthy, healthy ? "Bridge running at https://localhost:8765" : "Bridge not running. Run: office-partner start");
   const extra = readConfig().allowedHosts;
-  line(true, Array.isArray(extra) && extra.length ? `Also answers to: ${extra.join(", ")}` : "Answers to localhost only. To reach it by another name (WSL IP): excel-partner allow-host <name>");
+  line(true, Array.isArray(extra) && extra.length ? `Also answers to: ${extra.join(", ")}` : "Answers to localhost only. To reach it by another name (WSL IP): office-partner allow-host <name>");
 }
 
 const TARGETS = { addin: "addin", app: "addin", gateway: "gateway", all: "all" };
-const HELP = `Usage: excel-partner <command> [addin|gateway|all]
+const HELP = `Usage: office-partner <command> [addin|gateway|all]
 
-  setup      Register and start. No target = the Excel add-in. 'all' sets up both.
+  setup      Register and start. No target = the Office add-in (Word, Excel, PowerPoint). 'all' sets up both.
   start      Start the bridge (add-in) or the gateway.
   stop       Stop it.
   restart    Stop, then start.
@@ -276,14 +276,14 @@ const HELP = `Usage: excel-partner <command> [addin|gateway|all]
   login      Sign in once for the QA assistant: login <name> <url> [--origin <url>]. Also: sessions, logout <name>.
   knowledge  What the assistant has learned about each system: knowledge [<url>] | show <url> <note> | delete <url> <note> | path.
   scripts    Playwright regression scripts saved per test case: scripts [<url>] | show <url> <case id> | delete <url> <case id> | path.
-  backups    Workbook copies saved before changes Undo cannot reverse: backups | path.
+  backups    Copies of workbooks (.xlsx), documents (.docx) and presentations (.pptx) saved before changes Undo cannot reverse: backups | path.
   allow-host Let the bridge answer to another hostname/IP (e.g. a WSL IP): allow-host <name> [--remove]; no name lists them.
   update     Install the latest release and refresh both (always the whole package). --from <spec|.tgz> installs that instead.
   uninstall  Stop and remove registration and startup entries.
 
-Gateway settings use: excel-partner gateway <config|alias|model-name|provider|models|warmup|autostart> ...
-Examples: excel-partner setup            excel-partner setup gateway
-          excel-partner start all        excel-partner info --copy`;
+Gateway settings use: office-partner gateway <config|alias|model-name|provider|models|warmup|autostart> ...
+Examples: office-partner setup            office-partner setup gateway
+          office-partner start all        office-partner info --copy`;
 
 async function main() {
   let args = process.argv.slice(2).filter(arg => arg !== "--help");
@@ -291,7 +291,7 @@ async function main() {
   const fromAt = args.indexOf("--from");
   const updateSpec = fromAt >= 0 ? args[fromAt + 1] : undefined;
   if (fromAt >= 0) {
-    if (!updateSpec || updateSpec.startsWith("--")) fail("Usage: excel-partner update --from <npm spec or path to a .tgz>");
+    if (!updateSpec || updateSpec.startsWith("--")) fail("Usage: office-partner update --from <npm spec or path to a .tgz>");
     args = args.filter((_, index) => index !== fromAt && index !== fromAt + 1);
   }
   const command = args[0] || "help";
@@ -309,7 +309,7 @@ async function main() {
   const everything = ["status", "doctor", "update", "info", "token"].includes(command);
   const target = given ?? (everything ? "all" : "addin");
   const wantAddin = target !== "gateway", wantGateway = target !== "addin";
-  // The add-in needs Excel desktop on Windows; the gateway does not. Each part
+  // The add-in needs Word, Excel or PowerPoint desktop on Windows; the gateway does not. Each part
   // runs on its own, so a failure in one never prevents the other from running.
   const addin = fn => async () => { requireWindows(); await fn(); };
   const steps = [];
@@ -323,7 +323,7 @@ async function main() {
         powershell("register");
         await stop();
         await start();
-        console.log("Restart Excel, then open Home > Excel Partner. Use Settings > Sign in to GitHub Copilot for device-code sign-in; other providers use their own CLI login.");
+        console.log("Restart Word, Excel and PowerPoint, then open Home > Office Partner. Use Settings > Sign in to GitHub Copilot for device-code sign-in; other providers use their own CLI login.");
       }));
       if (wantGateway) add("Gateway", gatewayStep(["setup"]));
       break;
@@ -347,7 +347,7 @@ async function main() {
     case "token":
       if (wantAddin && target === "all") add("Add-in", async () => console.log("Add-in bridge: https://localhost:8765 (the add-in connects automatically; no token needed)"));
       if (wantGateway) add("Gateway", () => {
-        if (!existsSync(path.join(gatewayDir, "token.txt"))) console.log("Gateway: not set up. Run: excel-partner setup gateway");
+        if (!existsSync(path.join(gatewayDir, "token.txt"))) console.log("Gateway: not set up. Run: office-partner setup gateway");
         else gatewayStep([command, ...flags])();
       });
       break;
@@ -356,7 +356,7 @@ async function main() {
       if (wantGateway) add("Gateway", gatewayStep(["logs"]));
       break;
     case "doctor":
-      if (wantAddin) add("Add-in", async () => { console.log("Excel add-in"); await doctorAddin(); });
+      if (wantAddin) add("Add-in", async () => { console.log("Office add-in"); await doctorAddin(); });
       if (wantGateway) add("Gateway", () => { console.log("\nAgent Gateway"); gatewayStep(["doctor"])(); });
       break;
     case "update":
@@ -387,7 +387,7 @@ async function main() {
       }));
       break;
     default:
-      fail(`Unknown command: ${command}. Run excel-partner help.`);
+      fail(`Unknown command: ${command}. Run office-partner help.`);
   }
   for (const [name, step] of steps) {
     try { await step(); }

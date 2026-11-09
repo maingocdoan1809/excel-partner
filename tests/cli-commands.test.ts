@@ -4,11 +4,11 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-const cli = path.resolve("bin/excel-partner.mjs");
+const cli = path.resolve("bin/office-partner.mjs");
 const run = (args: string[], home = fs.mkdtempSync(path.join(os.tmpdir(), "agw-cli-"))) =>
   spawnSync(process.execPath, [cli, ...args], { encoding: "utf8", env: { ...process.env, AGENT_GATEWAY_HOME: home } });
 
-describe("excel-partner command targets", () => {
+describe("office-partner command targets", () => {
   it("lists the gateway targets in help", () => {
     const result = run(["help"]);
     expect(result.status).toBe(0);
@@ -23,8 +23,8 @@ describe("excel-partner command targets", () => {
   });
 
   it("explains how to set up a gateway that does not exist yet", () => {
-    expect(run(["status", "gateway"]).stdout).toContain("excel-partner setup gateway");
-    expect(run(["info", "gateway"]).stdout).toContain("excel-partner setup gateway");
+    expect(run(["status", "gateway"]).stdout).toContain("office-partner setup gateway");
+    expect(run(["info", "gateway"]).stdout).toContain("office-partner setup gateway");
   });
 
   it("passes gateway commands through to the gateway CLI", () => {

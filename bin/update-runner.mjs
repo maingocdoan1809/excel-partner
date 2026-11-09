@@ -10,7 +10,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { setTimeout as sleep } from "node:timers/promises";
-import { installedVersion, stopPackageProcesses, updatePackage, writeUpdateStatus } from "./update.mjs";
+import { installedVersion, packageNameOf, stopPackageProcesses, updatePackage, writeUpdateStatus } from "./update.mjs";
 
 const root = process.env.EP_ROOT;
 const dataDir = process.env.EP_DATA;
@@ -18,7 +18,7 @@ if (!root || !dataDir) {
   console.error("EP_ROOT and EP_DATA are required.");
   process.exit(2);
 }
-const spec = process.env.EP_SPEC || "excel-partner@latest";
+const spec = process.env.EP_SPEC || `${packageNameOf(root)}@latest`;
 const from = process.env.EP_FROM || null;
 const startedAt = new Date().toISOString();
 const status = (patch) => writeUpdateStatus(dataDir, { from, spec, startedAt, ...patch });
@@ -44,7 +44,7 @@ try {
     stop: async () => { stopPackageProcesses({ root }); },
   });
   if (process.env.EP_GATEWAY === "1") {
-    spawnSync(process.execPath, [path.join(result.installedRoot, "bin", "excel-partner.mjs"), "gateway", "start"], { cwd: dataDir, stdio: "inherit", windowsHide: true });
+    spawnSync(process.execPath, [path.join(result.installedRoot, "bin", "office-partner.mjs"), "gateway", "start"], { cwd: dataDir, stdio: "inherit", windowsHide: true });
   }
   status({ state: "done", step: "done", message: "Updated", to: result.version ?? installedVersion(result.installedRoot), finishedAt: new Date().toISOString() });
   removeOwnFolder();

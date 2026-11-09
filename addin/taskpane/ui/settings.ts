@@ -1,5 +1,6 @@
 import type { SkillTextFile } from "../bridge-client.js";
-import { RECOMMENDED_SYSTEM_PROMPT } from "../../../providers/src/prompt.js";
+import { recommendedPromptFor } from "../../../providers/src/host-prompts.js";
+import { activeHost } from "../host/index.js";
 
 interface SettingsOptions {
   loadInstructions(): Promise<SkillTextFile>;
@@ -48,7 +49,7 @@ export function setupSettings(options: SettingsOptions): { open(): Promise<void>
   const recommended = get<HTMLButtonElement>("settings-recommended-instructions");
   recommended.addEventListener("click", () => {
     if (!loaded || busy) return;
-    input.value = RECOMMENDED_SYSTEM_PROMPT;
+    input.value = recommendedPromptFor(activeHost().id);
     status.textContent = "Recommended instructions loaded. Press Save to apply them.";
     updateSave();
   });

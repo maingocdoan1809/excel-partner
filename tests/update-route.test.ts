@@ -16,10 +16,10 @@ beforeEach(() => { folder = fs.mkdtempSync(path.join(os.tmpdir(), "update-route-
 afterEach(async () => { await pane?.close(); pane = null; await bridge?.close(); bridge = null; fs.rmSync(folder, { recursive: true, force: true }); });
 
 function packageFolder() {
-  const root = path.join(folder, "global", "excel-partner");
+  const root = path.join(folder, "global", "office-partner");
   fs.mkdirSync(path.join(root, "bin"), { recursive: true });
   for (const file of ["update.mjs", "update-runner.mjs"]) fs.copyFileSync(path.join("bin", file), path.join(root, "bin", file));
-  fs.writeFileSync(path.join(root, "package.json"), JSON.stringify({ version: "0.1.19" }));
+  fs.writeFileSync(path.join(root, "package.json"), JSON.stringify({ name: "office-partner", version: "0.1.19" }));
   return root;
 }
 

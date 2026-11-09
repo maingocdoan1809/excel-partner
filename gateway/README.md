@@ -13,12 +13,12 @@ optional). Requirements: Node.js 20 or later, and at least one provider CLI
 (Copilot, Claude Code, Codex or OpenCode) installed and signed in.
 
 ```powershell
-npm install -g excel-partner
-excel-partner setup gateway
+npm install -g office-partner
+office-partner setup gateway
 ```
 
 Setup prints the URL and token and copies the token to the clipboard, so you can
-paste it straight into Claude for Excel. Use `excel-partner setup all` to set up the
+paste it straight into Claude for Excel. Use `office-partner setup all` to set up the
 add-in and the gateway together. The `agent-gateway` command is the same CLI.
 
 Setup creates a localhost certificate (or reuses the add-in's, so only one
@@ -29,29 +29,29 @@ installed provider's credentials.
 
 | Command | Description |
 | --- | --- |
-| `excel-partner setup gateway` | First-time setup: certificate, token, startup entry, start, warmup, then print URL and token. |
-| `excel-partner info --copy` | Show the URL and token again and copy the token. `excel-partner token` prints only the token. |
-| `excel-partner start gateway` / `stop gateway` / `restart gateway` | Control the background process. |
-| `excel-partner status` | Show the add-in bridge and the gateway (add `gateway` for only the gateway). |
-| `excel-partner doctor gateway` | Check Node, certificate, trust, startup entry, process, token and each provider, and say what to fix. |
-| `excel-partner logs gateway` | Show recent log lines. |
-| `excel-partner gateway models` | List the model IDs the gateway currently advertises. |
-| `excel-partner gateway warmup` | Run one real minimal inference to fill the model verification cache. |
-| `excel-partner gateway autostart on` / `off` | Add or remove the Windows sign-in startup entry. |
-| `excel-partner update` | Install the latest release and restart the gateway (the whole package updates together). |
-| `excel-partner uninstall gateway` | Stop the gateway and remove its startup entry. |
+| `office-partner setup gateway` | First-time setup: certificate, token, startup entry, start, warmup, then print URL and token. |
+| `office-partner info --copy` | Show the URL and token again and copy the token. `office-partner token` prints only the token. |
+| `office-partner start gateway` / `stop gateway` / `restart gateway` | Control the background process. |
+| `office-partner status` | Show the add-in bridge and the gateway (add `gateway` for only the gateway). |
+| `office-partner doctor gateway` | Check Node, certificate, trust, startup entry, process, token and each provider, and say what to fix. |
+| `office-partner logs gateway` | Show recent log lines. |
+| `office-partner gateway models` | List the model IDs the gateway currently advertises. |
+| `office-partner gateway warmup` | Run one real minimal inference to fill the model verification cache. |
+| `office-partner gateway autostart on` / `off` | Add or remove the Windows sign-in startup entry. |
+| `office-partner update` | Install the latest release and restart the gateway (the whole package updates together). |
+| `office-partner uninstall gateway` | Stop the gateway and remove its startup entry. |
 
 Settings commands (`config`, `alias`, `model-name`, `provider`) apply immediately:
 the gateway restarts itself if it is running. Every command above also works as
 `agent-gateway <command>`, for example `agent-gateway doctor`.
 
-To remove the program, run `excel-partner uninstall all`, then
-`npm uninstall -g excel-partner`. Configuration, certificate and token stay in
-`%LOCALAPPDATA%\Agent Gateway`. Note that `excel-partner uninstall` (add-in) removes
-trust for the shared certificate; run `excel-partner setup gateway` again if the
+To remove the program, run `office-partner uninstall all`, then
+`npm uninstall -g office-partner`. Configuration, certificate and token stay in
+`%LOCALAPPDATA%\Agent Gateway`. Note that `office-partner uninstall` (add-in) removes
+trust for the shared certificate; run `office-partner setup gateway` again if the
 gateway stops being trusted afterwards.
 
-Use `https://localhost:8766` and the token from `excel-partner info` in Claude for
+Use `https://localhost:8766` and the token from `office-partner info` in Claude for
 Excel's Gateway sign-in. Select `copilot/default`, `claude/default`,
 `codex/default`, `opencode/default`, or a discovered `provider/native-model-id`.
 Only enabled providers appear. Native model discovery varies by CLI; a default
@@ -270,34 +270,34 @@ References:
 
 ## Troubleshooting
 
-Run `excel-partner doctor gateway` first. It checks Node, the certificate and its
+Run `office-partner doctor gateway` first. It checks Node, the certificate and its
 trust, the startup entry, the process, the token and every provider, and says what
-to fix. `excel-partner logs gateway` shows recent log lines.
+to fix. `office-partner logs gateway` shows recent log lines.
 
 - **Office says it cannot connect, or shows a certificate error.** The gateway
-  certificate is not trusted. Run `excel-partner setup gateway` again (it is safe to
+  certificate is not trusted. Run `office-partner setup gateway` again (it is safe to
   repeat), then restart Excel. Confirm the URL is `https://localhost:8766` and
-  the token matches `excel-partner info`.
+  the token matches `office-partner info`.
 - **"Enter model name" / the model list cannot be retrieved.** Office waited
-  five seconds and gave up. Run `excel-partner gateway models` to confirm discovery
-  works, and `excel-partner gateway warmup` to fill the verification cache, then
+  five seconds and gave up. Run `office-partner gateway models` to confirm discovery
+  works, and `office-partner gateway warmup` to fill the verification cache, then
   reconnect. Otherwise type `provider/default`, for example `copilot/default`.
 - **"Recorded gateway is still alive but unhealthy".** `server.json` may point to
   a process id that Windows has since reused. Check that the id in
   `%LOCALAPPDATA%\Agent Gateway\server.json` is not a gateway process, delete that
-  file, then run `excel-partner start gateway`.
+  file, then run `office-partner start gateway`.
 - **"Port is occupied by another service".** Another program uses port 8766.
-  Stop it, or run `excel-partner gateway config set port 8767` (the gateway
+  Stop it, or run `office-partner gateway config set port 8767` (the gateway
   restarts itself) and use the new port in Office.
 - **A provider does not appear or fails with a login error.** Install and sign in
-  to its CLI, then run `excel-partner gateway provider enable <provider>`.
+  to its CLI, then run `office-partner gateway provider enable <provider>`.
 - **409 "interrupted or failed turn" for a chat.** A turn that called tools and was
   then cancelled or failed may have changed the workbook, so the gateway refuses to
   replay it. Inspect the workbook, then start a new chat. A cancelled turn that
   never called a tool can simply be sent again.
 - **PowerShell blocks `excel-partner`.** Run `excel-partner.cmd`, or allow scripts
   for your user with `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`.
-- **The gateway does not start at sign-in.** Run `excel-partner gateway autostart on`.
+- **The gateway does not start at sign-in.** Run `office-partner gateway autostart on`.
 
 ## Development and validation
 

@@ -54,8 +54,8 @@ describe("connected files", () => {
     const { gateway, there } = setup();
     const result = await gateway.invoke({ sessionId: there.id, tool: "list_connected_files", args: {} });
     expect(result).toMatchObject({ ok: true, data: { files: [
-      { id: "f2", name: "Actuals.xlsx", current: true },
-      { id: "f1", name: "Budget 2026.xlsx", current: false },
+      { id: "f2", name: "Actuals.xlsx", host: "excel", current: true },
+      { id: "f1", name: "Budget 2026.xlsx", host: "excel", current: false },
     ] } });
   });
 
@@ -159,7 +159,7 @@ describe("connected files messages", () => {
   it("accepts workbook_info from the pane and connected_files from the bridge", () => {
     expect(ClientMessageSchema.parse({ type: "workbook_info", name: " Budget.xlsx " })).toEqual({ type: "workbook_info", name: "Budget.xlsx" });
     expect(() => ClientMessageSchema.parse({ type: "workbook_info", name: "  " })).toThrow();
-    const files = [{ id: "f1", name: "Budget.xlsx", current: true }];
+    const files = [{ id: "f1", name: "Budget.xlsx", host: "excel", current: true }];
     expect(ServerMessageSchema.parse({ type: "connected_files", files })).toEqual({ type: "connected_files", files });
   });
 
@@ -189,13 +189,13 @@ describe("connected files: review fixes", () => {
     there.workbookName = null;
     // What the pane is sent: the unknown name stays empty, and the pane shows UNNAMED_WORKBOOK for it.
     expect(sessions.connectedFiles(here)).toEqual([
-      { id: "f1", name: "Budget 2026.xlsx", current: true },
-      { id: "f2", name: "", current: false },
+      { id: "f1", name: "Budget 2026.xlsx", host: "excel", current: true },
+      { id: "f2", name: "", host: "excel", current: false },
     ]);
     const listed = await gateway.invoke({ sessionId: here.id, tool: "list_connected_files", args: {} });
     expect((listed as { data: { files: unknown[] } }).data.files).toEqual([
-      { id: "f1", name: "Budget 2026.xlsx", current: true },
-      { id: "f2", name: UNNAMED_WORKBOOK, current: false },
+      { id: "f1", name: "Budget 2026.xlsx", host: "excel", current: true },
+      { id: "f2", name: UNNAMED_WORKBOOK, host: "excel", current: false },
     ]);
   });
 
@@ -286,8 +286,8 @@ describe("reading a workbook's name when it is needed", () => {
     pane(there, () => ({ ok: true, data: { name: "Actuals (final).xlsx" } }));
     const listed = await gateway.invoke({ sessionId: here.id, tool: "list_connected_files", args: {} });
     expect((listed as { data: { files: unknown[] } }).data.files).toEqual([
-      { id: "f1", name: "Budget 2026.xlsx", current: true },
-      { id: "f2", name: "Actuals (final).xlsx", current: false },
+      { id: "f1", name: "Budget 2026.xlsx", host: "excel", current: true },
+      { id: "f2", name: "Actuals (final).xlsx", host: "excel", current: false },
     ]);
   });
 

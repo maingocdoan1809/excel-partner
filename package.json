@@ -1,7 +1,7 @@
 {
-  "name": "excel-partner",
+  "name": "office-partner",
   "version": "0.1.21",
-  "description": "Excel Partner: local Excel desktop AI add-in with Claude Code, GitHub Copilot CLI, Codex CLI and OpenCode CLI providers.",
+  "description": "Excel Partner (Office Partner): local Word, Excel and PowerPoint desktop AI add-in with Claude Code, GitHub Copilot CLI, Codex CLI and OpenCode CLI providers.",
   "type": "module",
   "license": "MIT",
   "repository": {
@@ -12,7 +12,7 @@
     "access": "public"
   },
   "bin": {
-    "excel-partner": "bin/excel-partner.mjs",
+    "office-partner": "bin/office-partner.mjs",
     "agent-gateway": "gateway/bin/agent-gateway.mjs"
   },
   "files": [

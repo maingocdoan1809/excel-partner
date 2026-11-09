@@ -6,7 +6,7 @@ export const SESSION_NAME_PATTERN = /^[a-z0-9][a-z0-9_-]{0,31}$/;
 export interface TestSessionInfo { name: string; origins: string[]; savedAt: string; url: string }
 
 /**
- * Signed-in browser sessions saved by `excel-partner login`. The state file holds cookies, which are credentials:
+ * Signed-in browser sessions saved by `office-partner login`. The state file holds cookies, which are credentials:
  * it stays on this computer, is copied into a temporary folder when a browser starts, and is never shown to the assistant.
  */
 export class TestSessions {

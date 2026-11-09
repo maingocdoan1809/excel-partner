@@ -64,6 +64,55 @@ export const SelectionSnapshotSchema = z.object({
 });
 export type SelectionSnapshot = z.infer<typeof SelectionSnapshotSchema>;
 
+/** The Excel snapshot with its host tag. A snapshot without `host` (an older pane) is read as Excel. */
+export const ExcelSelectionSnapshotSchema = SelectionSnapshotSchema.extend({
+  host: z.literal("excel").default("excel"),
+});
+export type ExcelSelectionSnapshot = z.infer<typeof ExcelSelectionSnapshotSchema>;
+
+export const WordSelectionSnapshotSchema = z.object({
+  host: z.literal("word"),
+  text: z.string(),
+  /** True when the selection is a collapsed cursor with no text. */
+  cursor: z.boolean(),
+  style: z.string().optional(),
+  paragraphs: z.number().int(),
+  highlight: z.string().nullable().optional(),
+  comments: z.array(z.object({
+    id: z.string(),
+    text: z.string(),
+    replies: z.number().int(),
+    resolved: z.boolean(),
+  })).optional(),
+  trackChanges: z.boolean().optional(),
+  truncated: z.boolean(),
+});
+export type WordSelectionSnapshot = z.infer<typeof WordSelectionSnapshotSchema>;
+
+export const PptSelectionSnapshotSchema = z.object({
+  host: z.literal("powerpoint"),
+  slides: z.array(z.object({
+    id: z.string(),
+    position: z.number().int(),
+    title: z.string(),
+  })),
+  shapes: z.array(z.object({
+    ref: z.string(),
+    id: z.string(),
+    name: z.string(),
+    type: z.string(),
+  })),
+  truncated: z.boolean(),
+});
+export type PptSelectionSnapshot = z.infer<typeof PptSelectionSnapshotSchema>;
+
+/** A selection snapshot from any host. Legacy snapshots with no `host` are Excel. */
+export const AnySelectionSnapshotSchema = z.preprocess(
+  (value) => (value && typeof value === "object" && !Array.isArray(value) && !("host" in value) ? { ...value, host: "excel" } : value),
+  z.discriminatedUnion("host", [ExcelSelectionSnapshotSchema, WordSelectionSnapshotSchema, PptSelectionSnapshotSchema]),
+);
+export type AnySelectionSnapshot = z.infer<typeof AnySelectionSnapshotSchema>;
+
 export const GetSelectionResultSchema = SelectionSnapshotSchema;
 export type GetSelectionResult = z.infer<typeof GetSelectionResultSchema>;
 
@@ -168,3 +217,9 @@ export const ExecutedToolResultSchema = z.object({
   result: ToolResultSchema,
 });
 export type ExecutedToolResult = z.infer<typeof ExecutedToolResultSchema>;
+
+/**
+ * A selection as handed to a provider: any host's snapshot, or an Excel snapshot that has no `host` tag
+ * (an `ExcelSelectionSnapshot` is assignable to `SelectionSnapshot`, so only the untagged form needs naming).
+ */
+export type PromptSelectionSnapshot = SelectionSnapshot | WordSelectionSnapshot | PptSelectionSnapshot;

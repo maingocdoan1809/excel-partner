@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { cellLinkMarkdown, isA1Range, type ProviderEvent, type ToolResult } from "../../protocol/src/index.js";
+import { cellLinkMarkdown, isA1Range, type HostId, type ProviderEvent, type ToolResult } from "../../protocol/src/index.js";
 import type { WorkbookSession } from "./session.js";
 import { toolError as fail } from "./tool-error.js";
 
@@ -43,7 +43,7 @@ export class Delegations {
   ) {}
 
   /** Deliver the request and wait for the other assistant's reply. Never rejects. */
-  run(target: WorkbookSession, from: { id: string; name: string }, text: string, signal?: AbortSignal): Promise<ToolResult> {
+  run(target: WorkbookSession, from: { id: string; name: string; host?: HostId }, text: string, signal?: AbortSignal): Promise<ToolResult> {
     return new Promise<ToolResult>((resolve) => {
       const id = randomUUID();
       let entry: Pending;

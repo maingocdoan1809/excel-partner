@@ -19,8 +19,8 @@ The pane refuses to load over `https://localhost:8765`.
   `::1` or its configured host, and refuses other web origins with `403`
   (`rejected request from untrusted origin or host` in the log). To reach it
   by another name such as a WSL IP, allow that name and restart:
-  - npm install: `excel-partner allow-host 172.20.0.5`, then `excel-partner restart`
-    (`excel-partner allow-host` alone lists them; `--remove` removes one)
+  - npm install: `office-partner allow-host 172.20.0.5`, then `office-partner restart`
+    (`office-partner allow-host` alone lists them; `--remove` removes one)
   - source install: re-run the installer with `-AllowedHost 172.20.0.5`
     (`scripts/install.ps1`) or `--allowed-host 172.20.0.5`
     (`scripts/install-windows.sh`), or add `"allowedHosts": ["172.20.0.5"]` to
