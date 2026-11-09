@@ -144,6 +144,7 @@ export class GatewayServer {
     if (req.method === "POST" && route === "/v1/messages/count_tokens") throw new ApiError(501, "api_error", "CLI transports do not expose an exact token-count API");
     if (req.method !== "POST" || route !== "/v1/messages") throw new ApiError(404, "not_found_error", "Unknown gateway endpoint");
     const request = parseRequest(await this.body(req));
+    await this.engine.prepareRequest(request);
     const isProbe = request.max_tokens === 1 && !request.stream && !request.system && !request.tools?.length
       && request.messages.length === 1 && request.messages[0]?.role === "user" && request.messages[0]?.content === "x";
     const target = routeModel(request.model, this.options.config, isProbe);

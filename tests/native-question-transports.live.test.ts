@@ -3,6 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
+import { isOpencodeV2 } from "../providers/src/opencode.js";
 import { JsonRpcPeer } from "../providers/src/jsonrpc.js";
 import { reserveOpencodePort } from "../providers/src/opencode-questions.js";
 import { resolveCopilotPath } from "../providers/src/copilot-native.js";
@@ -30,12 +31,13 @@ describe("native question transports (real CLIs, no model)", () => {
     } finally { await client.stop(); fs.rmSync(directory, { recursive: true, force: true }); }
   }, 30_000);
 
-  it.skipIf(!installed(process.env.OPENCODE_BIN ?? "opencode"))("connects OpenCode ACP and its authenticated native question API", async () => {
+  it.skipIf(!installed(process.env.OPENCODE_BIN ?? "opencode"))("connects version-appropriate OpenCode ACP and the v1 authenticated question API", async () => {
     const directory = fs.mkdtempSync(path.join(os.tmpdir(), "opencode-question-handshake-"));
+    const v2 = isOpencodeV2(execFileSync(process.env.OPENCODE_BIN ?? "opencode", ["--version"], { encoding: "utf8", timeout: 5000 }));
     const port = await reserveOpencodePort();
     const password = "isolated-test-password";
     const peer = new JsonRpcPeer({ command: process.env.OPENCODE_BIN ?? "opencode",
-      args: ["acp", "--hostname", "127.0.0.1", "--port", String(port)], cwd: directory, versionField: true,
+      args: ["acp", ...(v2 ? [] : ["--hostname", "127.0.0.1", "--port", String(port)])], cwd: directory, versionField: true,
       env: { ...process.env, XDG_DATA_HOME: directory, XDG_CACHE_HOME: directory, XDG_CONFIG_HOME: directory,
         OPENCODE_CONFIG_CONTENT: JSON.stringify({ plugin: [], permission: { "*": "deny", question: "allow" } }),
         OPENCODE_DISABLE_DEFAULT_PLUGINS: "1", OPENCODE_DISABLE_MODELS_FETCH: "1", OPENCODE_ENABLE_QUESTION_TOOL: "1",
@@ -44,6 +46,12 @@ describe("native question transports (real CLIs, no model)", () => {
     try {
       const initialized = await peer.request<{ protocolVersion: number }>("initialize", { protocolVersion: 1, clientCapabilities: {}, clientInfo: { name: "excel-partner-test", version: "1" } }, 20_000);
       expect(initialized.protocolVersion).toBe(1);
+      if (v2) {
+        // V2 owns a private server and removed the v1 public question API flags.
+        const session = await peer.request<{ sessionId: string }>("session/new", { cwd: directory, mcpServers: [] }, 10_000);
+        expect(session.sessionId).toBeTruthy();
+        return;
+      }
       const url = `http://127.0.0.1:${port}/question?directory=${encodeURIComponent(directory)}`;
       const response = await fetch(url, { headers: { authorization: `Basic ${Buffer.from(`excel-partner:${password}`).toString("base64")}` }, signal: AbortSignal.timeout(5000) });
       expect(response.ok).toBe(true);

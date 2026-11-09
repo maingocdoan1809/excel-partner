@@ -18,6 +18,7 @@
     "types": ["node", "office-js"]
   },
   "include": [
+    "runtime/**/*.ts",
     "protocol/**/*.ts",
     "bridge/**/*.ts",
     "gateway/**/*.ts",

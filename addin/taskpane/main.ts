@@ -21,6 +21,7 @@ import { setupUpdatePanel } from "./ui/update-panel.js";
 import { reloadKeepingChat, takeChatRestore } from "./ui/chat-restore.js";
 import { createSelfUpdater } from "./ui/self-update.js";
 import { setupProviderLogin } from "./ui/provider-login.js";
+import { setupMcp } from "./ui/mcp.js";
 import { setupToolSettings } from "./ui/tool-settings.js";
 import { setupComposerMenu } from "./ui/composer-menu.js";
 import { setupTheme } from "./ui/theme.js";
@@ -275,6 +276,7 @@ const savedReferences = setupSavedReferences(() => client);
 const userSkills = setupUserSkills(() => client, () => slash.reload());
 const testingPanel = setupTestingPanel(() => client);
 const updatePanel = setupUpdatePanel({ getClient: () => client, reload: () => reloadKeepingChat(), appName: () => activeHost().app, announce: (text) => append({ kind: "note", text }) });
+const mcpSettings = setupMcp(() => client);
 const toolSettings = setupToolSettings(() => provider);
 const settings = setupSettings({
   loadInstructions: () => client.systemPrompt(),
@@ -320,6 +322,7 @@ Office.onReady((info) => {
     },
     onState: renderState,
     onHello: ({ addinBuildId }) => {
+      void mcpSettings.restore();
       void publishWorkbookName();
       void refreshSheetNames();
       slash.reload();
@@ -419,13 +422,18 @@ Office.onReady((info) => {
   // Settings menu
   els.menuButton.addEventListener("click", (event) => {
     event.stopPropagation();
-    els.menu.hidden ? openMenu() : closeMenu();
+    showPanel("settings");
   });
   document.addEventListener("click", (event) => {
+    for (const popover of document.querySelectorAll<HTMLElement>('[data-floating-open="true"]')) {
+      if (!popover.contains(event.target as Node) && !document.getElementById(popover.dataset.floatingAnchor ?? "")?.contains(event.target as Node)) closeFloating(popover);
+    }
     if (!els.menu.hidden && !els.menu.contains(event.target as Node)) closeMenu();
   });
   document.addEventListener("keydown", (event) => {
     if (event.key !== "Escape") return;
+    const fallback = document.querySelector<HTMLElement>('[data-floating-open="true"]');
+    if (fallback) { closeFloating(fallback); document.getElementById(fallback.dataset.floatingAnchor ?? "")?.focus(); return; }
     if (!els.menu.hidden) closeMenu();
     else if (!slash.isOpen && openPanel() !== null) backFromPanel();
   });
@@ -464,9 +472,17 @@ Office.onReady((info) => {
   els.menuTemplates.addEventListener("click", () => showPanel("templates"));
   byId("menu-skills").addEventListener("click", () => showPanel("skills"));
   byId("menu-testing").addEventListener("click", () => showPanel("testing"));
-  byId("tools-button").addEventListener("click", () => {
-    showPanel("settings");
-    byId("settings-tools-section").scrollIntoView({ block: "nearest" });
+  byId("changes-button").addEventListener("click", () => showPanel("changes"));
+  byId("tools-button").addEventListener("click", () => openFloating(byId("composer-settings-menu"), byId("tools-button")));
+  byId("composer-skills").addEventListener("click", () => {
+    void userSkills.refresh();
+    openFloating(els.panels.skills, byId("tools-button"));
+  });
+  byId("composer-tools").addEventListener("click", () => {
+    void mcpSettings.refresh();
+    const popover = byId("composer-tools-popover");
+    popover.append(byId("tools-menu"));
+    openFloating(popover, byId("tools-button"));
   });
   els.menuNew.addEventListener("click", () => {
     closeMenu();
@@ -899,6 +915,7 @@ async function submit(queued?: PendingPrompt, delegated?: { delegationId: string
   const selection = result?.ok ? (result.data as never) : null;
   if (cancelRequested) return finishLocalCancel(requestId, delegated?.delegationId);
   try {
+    await mcpSettings.ready();
     const attachmentIds = turnAttachments.flatMap((item) => item.reference.id ? [item.reference.id] : []);
     const referencePaths = turnAttachments.flatMap((item) => item.reference.id ? [] : [item.reference.path]);
     if (cancelRequested) return finishLocalCancel(requestId, delegated?.delegationId);
@@ -1852,11 +1869,51 @@ function backFromPanel(): void {
 }
 
 function openPanel(): PanelName | null {
-  for (const name of Object.keys(els.panels) as PanelName[]) if (!els.panels[name].hidden) return name;
+  for (const name of Object.keys(els.panels) as PanelName[]) if (!els.panels[name].hidden && (!els.panels[name].hasAttribute("popover") || isFloatingOpen(els.panels[name]))) return name;
   return null;
 }
 
+function isFloatingOpen(element: HTMLElement): boolean {
+  return element.matches(":popover-open") || element.dataset.floatingOpen === "true";
+}
+function closeFloating(element: HTMLElement): void {
+  if (typeof element.hidePopover === "function") element.hidePopover();
+  delete element.dataset.floatingOpen;
+  const anchor = document.getElementById(element.dataset.floatingAnchor ?? "");
+  anchor?.setAttribute("aria-expanded", "false");
+}
+
+function openFloating(element: HTMLElement, anchor: HTMLElement): void {
+  const wasOpen = isFloatingOpen(element);
+  for (const popover of document.querySelectorAll<HTMLElement>(':popover-open, [data-floating-open="true"]')) closeFloating(popover);
+  if (wasOpen) return;
+  element.classList.add("compact-popover");
+  element.setAttribute("popover", "auto");
+  element.hidden = false;
+  const rect = anchor.getBoundingClientRect();
+  const width = Math.min(340, window.innerWidth - 24);
+  element.style.width = `${width}px`;
+  element.style.left = `${Math.max(12, Math.min(rect.right - width, window.innerWidth - width - 12))}px`;
+  element.style.right = "auto";
+  const below = rect.bottom < window.innerHeight / 2;
+  element.style.top = below ? `${rect.bottom + 8}px` : "auto";
+  element.style.bottom = below ? "auto" : `${window.innerHeight - rect.top + 8}px`;
+  element.dataset.floatingAnchor = anchor.id;
+  if (typeof element.showPopover === "function") element.showPopover();
+  else element.dataset.floatingOpen = "true";
+  anchor.setAttribute("aria-expanded", "true");
+  element.ontoggle = () => anchor.setAttribute("aria-expanded", String(isFloatingOpen(element)));
+}
+
 function showPanel(name: PanelName | null): void {
+  if (name === "history" || name === "changes") {
+    if (name === "history") renderHistory(); else renderChanges();
+    openFloating(els.panels[name], byId(name === "history" ? "history-button" : "changes-button"));
+    return;
+  }
+  for (const popover of document.querySelectorAll<HTMLElement>(':popover-open, [data-floating-open="true"]')) closeFloating(popover);
+  byId("settings-tools-section").append(byId("tools-menu"));
+  if (name === "skills") { els.panels.skills.removeAttribute("popover"); els.panels.skills.classList.remove("compact-popover"); els.panels.skills.removeAttribute("style"); }
   const previous = openPanel();
   const returningToSettings = name === "settings" && settingsChild;
   if (previous === "settings" && name !== null && name !== "settings") {
@@ -1871,7 +1928,7 @@ function showPanel(name: PanelName | null): void {
   }
   // The small view repeats the large one and takes its height, so it steps aside while the large one is open.
   document.body.classList.toggle("browser-active", name === "browser");
-  if (name === "settings") { persistNow(); void settings.open(returningToSettings); if (!returningToSettings) void updatePanel.refresh(); }
+  if (name === "settings") { void mcpSettings.refresh(); persistNow(); void settings.open(returningToSettings); if (!returningToSettings) void updatePanel.refresh(); }
   if (name !== "preview") { previewFrame.srcdoc = ""; previewing = null; }
   if (name === "references") void savedReferences.refresh();
   if (name === "skills") void userSkills.refresh();
@@ -1888,10 +1945,8 @@ function showPanel(name: PanelName | null): void {
     else loginPanel.close();
   } else loginPanel.close();
   byId("tab-chat").setAttribute("aria-pressed", String(name === null));
-  byId("tab-changes").setAttribute("aria-pressed", String(name === "changes"));
-  byId("tab-history").setAttribute("aria-pressed", String(name === "history" || name === "session"));
-  if (name === "changes") renderChanges();
-  if (name === "history") renderHistory();
+  byId("tab-changes").setAttribute("aria-pressed", "false");
+  byId("tab-history").setAttribute("aria-pressed", String(name === "session"));
   if (name === "templates") void loadTemplateSkills();
 }
 
@@ -1909,7 +1964,13 @@ async function loadTemplateSkills(): Promise<void> {
     if (skills.some((skill) => skill.name === selected)) els.templateSkill.value = selected;
     els.templateAdd.disabled = skills.length === 0;
     if (skills.length) await renderTemplates();
-    else els.templateList.textContent = "No skills found. Add a SKILL.md under the skills folder first.";
+    else {
+      const option = document.createElement("option");
+      option.textContent = "No skills available";
+      els.templateSkill.append(option);
+      els.templateList.innerHTML = '<div class="empty"><strong>Add your first skill</strong><p>Open Skills in Settings to add a skill, then attach example files here.</p></div>';
+    }
+    els.templateSkill.disabled = skills.length === 0;
   } catch (error) { els.templateList.textContent = error instanceof Error ? error.message : String(error); }
 }
 

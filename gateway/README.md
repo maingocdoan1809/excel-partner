@@ -399,3 +399,7 @@ Claude and Codex. Copilot returned incorrect colors despite successful MCP
 delivery; an explicit `gpt-6-luna` passed one run but failed a later run, so
 Copilot image interpretation is not considered reliable. The gateway does not
 silently change models or infer image contents from text metadata.
+
+## Architecture boundary
+
+Gateway is an API endpoint for Anthropic’s official Claude Office add-ins (Excel, PowerPoint and Word). The official client supplies and executes Office tools using the `tool_use` / `tool_result` API cycle. It does not need an Office Partner pane or a document binding. Shared MCP code may handle separately configured external tools without changing that Office execution boundary. See [MCP and gateway architecture](../docs/mcp-runtime.md).

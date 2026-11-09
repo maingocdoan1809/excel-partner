@@ -6,7 +6,7 @@ import type { ProviderEvent, UserInputResponse } from "../protocol/src/index.js"
 import type { StartSessionContext } from "../providers/src/types.js";
 
 const sdk = vi.hoisted(() => ({ config: null as any, client: null as any, session: null as any, handler: null as any,
-  run: null as any, resumeId: undefined as string | undefined }));
+  run: null as any, open: null as any, resumeId: undefined as string | undefined }));
 vi.mock("@github/copilot-sdk", () => ({
   RuntimeConnection: { forStdio: (options: any) => ({ kind: "stdio", ...options }) },
   ToolSet: class {
@@ -18,8 +18,8 @@ vi.mock("@github/copilot-sdk", () => ({
   CopilotClient: class {
     constructor(options: any) { sdk.client = options; }
     async start() {}
-    async createSession(config: any) { sdk.config = config; return sdk.session; }
-    async resumeSession(id: string, config: any) { sdk.resumeId = id; sdk.config = config; return sdk.session; }
+    async createSession(config: any) { sdk.config = config; return sdk.open(config); }
+    async resumeSession(id: string, config: any) { sdk.resumeId = id; sdk.config = config; return sdk.open(config); }
     async stop() { sdk.client.stopped = true; }
   },
 }));
@@ -38,6 +38,7 @@ beforeEach(() => {
     requestUserInput: vi.fn(async () => ({ cancelled: false, answers: { answer: ["New sheet"] } })),
   };
   sdk.resumeId = undefined;
+  sdk.open = async () => sdk.session;
   sdk.session = { sessionId: "native-id", on: (handler: any) => { sdk.handler = handler; return () => { sdk.handler = null; }; },
     sendAndWait: (...args: any[]) => sdk.run(...args), abort: vi.fn(async () => {}), disconnect: vi.fn(async () => {}) };
   sdk.run = async () => {};
@@ -56,6 +57,8 @@ describe("Copilot native question transport", () => {
     expect(manager.has(id)).toBe(true);
     expect(sdk.client.connection.path).toBe(fs.realpathSync(process.execPath));
     expect(sdk.client.connection.args).toContain("--disable-builtin-mcps");
+    expect(sdk.config.mcpServers.excel).toMatchObject({ disableToolCache: true, deferTools: "never" });
+    expect(sdk.config.toolSearch).toEqual({ enabled: false });
     const tools = sdk.config.availableTools.toArray();
     expect(tools).toContain("builtin:ask_user");
     expect(tools).toContain("mcp:excel-read_range");
@@ -144,6 +147,29 @@ describe("Copilot native question transport", () => {
     if (api) ctx.mcp.toolNames = ["read_probe"];
     await manager.start(ctx, process.execPath, process.env);
     expect(sdk.config.reasoningEffort).toBe("high");
+  });
+  it.each([false, true])("retries unsupported model effort without changing model or conversation (resume=%s)", async resume => {
+    ctx.model = "gpt-4.1"; ctx.effort = "low";
+    if (resume) ctx.resumeSessionId = "native-id";
+    const configs: any[] = [];
+    sdk.open = async (config: any) => {
+      configs.push({ ...config });
+      if (config.reasoningEffort) throw new Error("Model 'gpt-4.1' does not support reasoning effort configuration.");
+      return sdk.session;
+    };
+    await manager.start(ctx, process.execPath, process.env);
+    expect(configs).toHaveLength(2);
+    expect(configs[0]).toMatchObject({ model: "gpt-4.1", reasoningEffort: "low" });
+    expect(configs[1].model).toBe("gpt-4.1");
+    expect(configs[1]).not.toHaveProperty("reasoningEffort");
+    expect(sdk.resumeId).toBe(resume ? "native-id" : undefined);
+  });
+  it("does not retry authentication failures as unsupported effort", async () => {
+    ctx.model = "gpt-4.1"; ctx.effort = "low";
+    sdk.open = vi.fn(async () => { throw new Error("Authentication failed"); });
+    await expect(manager.start(ctx, process.execPath, process.env)).rejects.toThrow("Authentication failed");
+    expect(sdk.open).toHaveBeenCalledTimes(1);
+    expect(sdk.client.stopped).toBe(true);
   });
   it.each([["word", false], ["powerpoint", false], ["excel", true]])("exposes only %s tools through the host fallback (Excel tools allowed: %s)", async (host, excel) => {
     ctx.mcp.env = { OFFICE_HOST: host };

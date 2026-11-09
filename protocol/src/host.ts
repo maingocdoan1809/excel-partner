@@ -73,8 +73,7 @@ export interface ToolExposureOptions {
 
 /** Tool names a session of `host` exposes. The single source for MCP `ListTools`, the bridge gate and provider fallbacks. */
 export function toolsForHost(host: HostId, opts: ToolExposureOptions): string[] {
-  return Object.keys(TOOL_HOSTS).filter((name) =>
-    TOOL_HOSTS[name]!.includes(host)
+  return Object.keys(TOOL_HOSTS).filter((name) => TOOL_HOSTS[name]!.includes(host)
     && (opts.allowOptIn || !(OPT_IN_TOOLS as readonly string[]).includes(name))
     && (opts.playwright || !(BROWSER_TOOLS as readonly string[]).includes(name)));
 }

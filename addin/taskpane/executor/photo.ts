@@ -215,6 +215,13 @@ async function resolveGeometries(context: Excel.RequestContext, targets: UndoTar
     const sheet = resolveSheet(context, target.sheet);
     sheet.load("id,name");
     let range = sheet.getRange(target.address);
+    if (target.copySource) {
+      const source = sheet.getRange(target.copySource);
+      source.load("rowCount,columnCount");
+      range.load("rowCount,columnCount");
+      await context.sync();
+      range = range.getCell(0, 0).getResizedRange(Math.max(range.rowCount, source.rowCount) - 1, Math.max(range.columnCount, source.columnCount) - 1);
+    }
     if (target.grow) range = range.getCell(0, 0).getResizedRange(target.grow.rows - 1, target.grow.columns - 1);
     range.load("rowIndex,columnIndex,rowCount,columnCount");
     pending.push({ sheet, range, used: false });

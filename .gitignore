@@ -22,3 +22,7 @@ excel-partner.config.json
 
 # A copy of the excel-report skill bundle, not part of the add-in
 /excel-report.zip
+
+# Local external MCP server configuration
+/mcp-servers.json
+/mcp-servers.json.tmp

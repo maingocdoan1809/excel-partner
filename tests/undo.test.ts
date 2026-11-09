@@ -348,3 +348,9 @@ describe("UndoJournal", () => {
     expect(describeRestore({ ...base, notes: ["merged cells were changed"] })).toContain("Note: merged cells were changed.");
   });
 });
+
+it("includes the source when planning undo for an expanding copy", () => {
+  expect(planUndo("copy_to", { source: "A1:B2", destination: "D1" })).toMatchObject({
+    targets: [{ address: "D1", copySource: "A1:B2" }],
+  });
+});

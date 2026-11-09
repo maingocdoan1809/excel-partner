@@ -18,7 +18,7 @@ export async function authorizeSkillScript(
 }
 
 const OVERWRITE_TOOLS = new Set(["write_range", "set_formula", "set_cells", "copy_to", "merge_range"]);
-const ASK_BEFORE_WRITE = new Set<string>([...WORD_WRITE_TOOLS, ...PPT_WRITE_TOOLS, "execute_office_js"]);
+const ASK_BEFORE_WRITE = new Set<string>([...WORD_WRITE_TOOLS, ...PPT_WRITE_TOOLS, "execute_office_js", "clear_range"]);
 // The proposal card collects approval itself. Slide deletion uses the guarded retry below.
 ASK_BEFORE_WRITE.delete("propose_doc_edits");
 
@@ -44,7 +44,7 @@ export async function executeWithPermission(
 ): Promise<ToolResult> {
   const guardedSlideDelete = tool === "modify_presentation_structure" &&
     args !== null && typeof args === "object" && (args as { operation?: unknown }).operation === "delete";
-  if (mode === "ask" && ASK_BEFORE_WRITE.has(tool) && !guardedSlideDelete) {
+  if (mode === "ask" && (ASK_BEFORE_WRITE.has(tool) || (tool === "modify_structure" && (args as { operation?: string })?.operation === "delete")) && !guardedSlideDelete) {
     const detail = tool === "execute_office_js"
       ? "Run Office.js code? It can read, change or delete content with this task pane's access."
       : `Allow ${tool.replace(/_/g, " ")} to change this file?`;

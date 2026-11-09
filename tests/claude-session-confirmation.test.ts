@@ -78,6 +78,7 @@ describe("Claude persistent sessions", () => {
   it.each([undefined, "", " ", "Custom instructions"])("only overrides native instructions for a non-empty add-in prompt (%j)", async systemPrompt => {
     await start(undefined, { systemPrompt });
     const args = cli.spawn.mock.calls[0]![1] as string[];
+    expect(args[args.indexOf("--system-prompt-snapshot") + 1]).toBe("off");
     if (systemPrompt?.trim()) expect(args[args.indexOf("--system-prompt") + 1]).toBe(systemPrompt);
     else expect(args).not.toContain("--system-prompt");
   });

@@ -196,6 +196,12 @@ From a terminal: `office-partner update` does the same (`--from <npm spec or .tg
 
 **Uninstall:** `office-partner uninstall`, then `npm uninstall -g office-partner` (and `npm uninstall -g excel-partner` if the old name is still installed), then restart Word, Excel and PowerPoint. Local data stays on disk (see below).
 
+## External MCP servers
+
+Settings → **MCP servers** lets you add, edit and test a local stdio command or a Streamable HTTP server. Enable a saved server in the composer's **Tools → Tools** popover for this connected file. Ask/Auto applies to external calls; external changes do not have Office undo. This first version does not support MCP authentication or OAuth.
+
+The bridge serves Office Partner; the gateway is an API for the official Claude Office add-ins and preserves their client-owned Office tools. Shared MCP management does not require a document binding. See [MCP and gateway architecture](docs/mcp-runtime.md).
+
 ## Optional: Agent Gateway
 
 The same package includes a local **Anthropic Messages-compatible API** backed by the provider CLIs you have installed (for example to sign in to Claude for Excel with a gateway). It does not need the add-in.

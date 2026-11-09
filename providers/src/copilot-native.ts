@@ -61,7 +61,7 @@ export class CopilotNativeSessions {
     const web = ctx.mcp.env.EXCEL_WEB_SEARCH === "1";
     const names = ctx.mcp.toolNames ?? exposedToolNamesForHost(hostFromEnv(ctx.mcp.env), ctx.mcp.env.EXCEL_ALLOW_OFFICE_JS === "1", { playwright: ctx.mcp.env.EXCEL_PLAYWRIGHT === "1" });
     const tools = new ToolSet();
-    if (!ctx.mcp.toolNames) tools.addBuiltIn("ask_user");
+    if (!ctx.mcp.toolNames || ctx.mcp.env.OFFICE_HOST) tools.addBuiltIn("ask_user");
     for (const name of names) tools.addMcp(`excel-${name}`);
     if (web) tools.addBuiltIn(["web_search", "web_fetch"]);
     const cliPath = resolveCopilotPath(command, env);
@@ -71,6 +71,10 @@ export class CopilotNativeSessions {
       workingDirectory: ensureWorkspaceDir(), env, logLevel: "error",
     });
     let state: NativeSession | undefined;
+    // The catalog is owned by bridge/gateway and may change when resuming.
+    // Never restore persisted MCP schemas or defer them behind tool search.
+    const mcpServer = { type: "local" as const, command: ctx.mcp.command, args: ctx.mcp.args,
+      env: ctx.mcp.env, tools: names, disableToolCache: true, deferTools: "never" as const };
     const config: SessionConfig = {
       model: ctx.model ?? undefined, streaming: true, availableTools: tools,
       // Auto selects its own reasoning settings. The CLI accepts effort at
@@ -78,7 +82,8 @@ export class CopilotNativeSessions {
       ...(!ctx.model || ctx.model === "auto" ? {} : { reasoningEffort: ctx.effort }),
       workingDirectory: ensureWorkspaceDir(),
       ...(ctx.systemPrompt?.trim() ? { systemMessage: { mode: ctx.systemPromptMode ?? "append", content: ctx.systemPrompt } } : {}),
-      mcpServers: { excel: { type: "local", command: ctx.mcp.command, args: ctx.mcp.args, env: ctx.mcp.env, tools: names } },
+      mcpServers: { excel: mcpServer },
+      toolSearch: { enabled: false },
       onPermissionRequest: request => (request.kind === "mcp" && request.serverName === "excel") || (web && request.kind === "url")
         ? { kind: "approve-once" } : { kind: "reject" },
       onUserInputRequest: async request => {
@@ -97,7 +102,17 @@ export class CopilotNativeSessions {
     try {
       await client.start();
       ctx.signal.throwIfAborted();
-      const session = ctx.resumeSessionId ? await client.resumeSession(ctx.resumeSessionId, config) : await client.createSession(config);
+      const open = () => ctx.resumeSessionId ? client.resumeSession(ctx.resumeSessionId, config) : client.createSession(config);
+      let session: CopilotSession;
+      try { session = await open(); }
+      catch (error) {
+        // Some inexpensive models accept no effort setting. Session creation
+        // rejects it before inference, so retry with the same model and identity.
+        if (!config.reasoningEffort || !/does not support reasoning effort configuration/.test(String(error))) throw error;
+        ctx.signal.throwIfAborted();
+        delete config.reasoningEffort;
+        session = await open();
+      }
       if (ctx.resumeSessionId && session.sessionId !== ctx.resumeSessionId) throw new Error("Copilot resumed a different session");
       const reader = new CopilotUsageReader(path.join(env.COPILOT_HOME ?? path.join(os.homedir(), ".copilot"),
         "session-state", session.sessionId, "events.jsonl"), session.sessionId);

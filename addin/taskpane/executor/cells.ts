@@ -312,9 +312,12 @@ export async function copyTo(input: CopyToInput): Promise<unknown> {
     const sheet = resolveSheet(context, input.sheet);
     sheet.load("name");
     const source = sheet.getRange(input.source);
-    const destination = sheet.getRange(input.destination);
+    let destination = sheet.getRange(input.destination);
     const src = await loadGeometry(context, source);
-    const dest = await loadGeometry(context, destination);
+    let dest = await loadGeometry(context, destination);
+    destination = destination.getCell(0, 0).getResizedRange(Math.max(src.rowCount, dest.rowCount) - 1, Math.max(src.columnCount, dest.columnCount) - 1);
+    dest = await loadGeometry(context, destination);
+    if (dest.rowCount * dest.columnCount > 50_000) throw new ToolFailure("size_limit_exceeded", "Copy destination exceeds 50000 cells");
 
     // Formats-only copies never touch cell contents.
     if (input.copyType !== "formats" && !input.allowOverwrite) {

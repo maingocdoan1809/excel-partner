@@ -1,3 +1,6 @@
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { exposedToolNames } from "../protocol/src/index.js";
@@ -42,6 +45,54 @@ describe.skipIf(!hasClaude())("claude adapter (real CLI, fake model)", () => {
     if (saved.key === undefined) delete process.env.ANTHROPIC_API_KEY;
     else process.env.ANTHROPIC_API_KEY = saved.key;
   });
+
+  it("registers real external tools and removes them on resume without a discovery prompt", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "claude-direct-mcp-"));
+    const script: FakeStep[] = [{ text: "DIRECT_OK" }];
+    fake = new FakeAnthropic(script); await fake.start();
+    process.env.ANTHROPIC_BASE_URL = fake.url; process.env.ANTHROPIC_API_KEY = "sk-ant-fake";
+    harness = await Harness.start("claude", { allowOfficeJs: false, configFile: path.join(dir, "config.json") });
+    const h = harness;
+    try {
+      const token = h.bridge.sessions.list()[0]!.sessionToken;
+      const headers = { authorization: `Bearer ${token}`, "content-type": "application/json" };
+      const post = (body: object) => fetch(h.url + "/session/mcp", { method: "POST", headers, body: JSON.stringify(body) });
+      await post({ action: "save", config: { id: "fixture", name: "Fixture", transport: "stdio", target: process.execPath, args: [path.resolve("tests/support/mcp-fixture.mjs")] } });
+      expect((await post({ action: "select", id: "fixture", enabled: true })).ok).toBe(true);
+      const catalog = await (await fetch(h.url + "/internal/tools", { headers })).json();
+      const echo = catalog.tools.find((tool: any) => tool.name.endsWith("__echo")); expect(echo).toBeDefined();
+      script.unshift({ tool: echo.name, input: { text: "REAL_STDIO_RESULT" } });
+      const normal = h.pane.onMessage;
+      h.pane.onMessage = message => {
+        if (message.type === "tool_request" && message.tool === "__authorize_mcp") h.pane.send({ type: "tool_result", callId: message.callId, result: { ok: true, data: { approved: true } } });
+        else normal?.(message);
+      };
+      const first = await h.turn("Use the external echo tool");
+      expect(first.finished.reason).toBe("completed"); expect(first.text).toBe("DIRECT_OK");
+      expect(fake.requests.some(request => request.body.tools?.some((tool: any) => tool.name.endsWith(echo.name)))).toBe(true);
+      expect(JSON.stringify(fake.requests.at(-1)!.body.messages)).toContain("REAL_STDIO_RESULT");
+      const native = first.events.find(event => event.type === "session_info");
+      await post({ action: "select", id: "fixture", enabled: false });
+      script.splice(0, script.length, { text: "DISABLED_OK" });
+      const before = fake.requests.length;
+      const second = await h.turn("Continue after disabling the server");
+      expect(second.finished.reason).toBe("completed"); expect(second.text).toBe("DISABLED_OK");
+      const requests = fake.requests.slice(before).filter(request => request.body.tools?.length && JSON.stringify(request.body.messages).includes("Continue after disabling the server"));
+      expect(requests.length).toBeGreaterThan(0);
+      expect(requests.flatMap(request => request.body.tools.map((tool: any) => tool.name)).filter((name: string) => name.includes(echo.name) || name.includes("mcp_call_tool"))).toEqual([]);
+      expect(second.events.find(event => event.type === "session_info")).toMatchObject({ providerSessionId: native && "providerSessionId" in native ? native.providerSessionId : "missing" });
+      expect(JSON.stringify(requests.at(-1)!.body.messages)).toContain("Use the external echo tool");
+      expect(JSON.stringify(requests.at(-1)!.body.messages)).toContain("REAL_STDIO_RESULT");
+      await post({ action: "select", id: "fixture", enabled: true });
+      script.splice(0, script.length, { tool: echo.name, input: { text: "REENABLED_RESULT" } }, { text: "REENABLED_OK" });
+      const resumed = await h.turn("Use the external echo tool again");
+      expect(resumed.finished.reason).toBe("completed");
+      expect(resumed.text).toBe("REENABLED_OK");
+      expect(fake.requests.at(-1)!.body.tools.some((tool: any) => tool.name.endsWith(echo.name))).toBe(true);
+      expect(JSON.stringify(fake.requests.at(-1)!.body.messages)).toContain("REENABLED_RESULT");
+      expect(resumed.events.find(event => event.type === "session_info")).toMatchObject({ providerSessionId: native && "providerSessionId" in native ? native.providerSessionId : "missing" });
+    } finally { await h.close(); harness = null; fs.rmSync(dir, { recursive: true, force: true }); }
+  }, 120_000);
 
   it("runs Excel tools through MCP and streams normalised events", async () => {
     const h = await setup([

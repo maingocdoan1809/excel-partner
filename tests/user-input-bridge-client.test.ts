@@ -28,3 +28,32 @@ describe("pane native question lifecycle", () => {
     });
   });
 });
+
+it.each(["stop", "finish", "disconnect"])("dismisses write approval on %s", async reason => {
+  const runTool = vi.fn(async () => ({ ok: true as const, data: {} }));
+  const client = new BridgeClient({ onState() {}, onHello() {}, onProviderStatus() {}, onProviderEvent() {}, onError() {}, runTool }, "ws://localhost");
+  (client as any).ws = { readyState: WebSocket.OPEN, send: vi.fn(), close: vi.fn() };
+  const pending = (client as any).onMessage(JSON.stringify({ type: "tool_request", tool: "execute_office_js", callId: "write", requestId: "turn", timeoutMs: 120000, args: { code: "return 1" } }));
+  expect(document.querySelector(".permission-overlay")).not.toBeNull();
+  if (reason === "stop") client.cancel("turn");
+  else if (reason === "finish") await (client as any).onMessage(JSON.stringify({ type: "turn_finished", requestId: "turn", reason: "cancelled" }));
+  else client.disconnect();
+  await pending;
+  expect(document.querySelector(".permission-overlay")).toBeNull();
+  expect(runTool).not.toHaveBeenCalled();
+});
+
+it("refuses an approved write still queued when stopped", async () => {
+  let release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  const runTool = vi.fn(async (_context, tool, args, execute) => { await gate; return execute(tool, args); });
+  const client = new BridgeClient({ onState() {}, onHello() {}, onProviderStatus() {}, onProviderEvent() {}, onError() {}, runTool }, "ws://localhost");
+  const send = vi.fn();
+  (client as any).ws = { readyState: WebSocket.OPEN, send, close: vi.fn() };
+  client.setPermissionMode("auto");
+  const pending = (client as any).onMessage(JSON.stringify({ type: "tool_request", tool: "clear_range", callId: "write", requestId: "turn", timeoutMs: 120000, args: { address: "A1" } }));
+  client.cancel("turn");
+  release();
+  await pending;
+  expect(send.mock.calls.map(([raw]) => JSON.parse(raw))).toContainEqual({ type: "tool_result", callId: "write", result: { ok: false, error: { code: "cancelled", message: "The request ended before this change could run." } } });
+});

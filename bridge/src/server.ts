@@ -1,3 +1,6 @@
+import { discoverMcpCatalog } from "../../runtime/src/mcp-catalog.js";
+import { officeToolCatalog } from "../../runtime/src/catalog.js";
+import { McpServers } from "../../runtime/src/mcp-servers.js";
 import { cleanSessionTitle } from "../../protocol/src/session-title.js";
 import { TestSessions } from "./test-sessions.js";
 import { Delegations } from "./delegations.js";
@@ -110,6 +113,7 @@ export class Bridge {
   private readonly systemPrompt: SystemPromptStore;
   private readonly testingAdmin: TestingAdmin;
   private readonly backups: DocumentBackups;
+  private readonly mcpServers: McpServers;
   private readonly updater: UpdateService | null;
   private readonly activateWorkbook: (workbookName: string) => Promise<unknown>;
 
@@ -140,6 +144,7 @@ export class Bridge {
     const siteKnowledge = new SiteKnowledge(path.join(dataDir, "knowledge"));
     const testScripts = new TestScripts(path.join(dataDir, "scripts"));
     this.testingAdmin = new TestingAdmin(testSessions, siteKnowledge, testScripts);
+    this.mcpServers = new McpServers(path.join(dataDir, "mcp-servers.json"));
     this.backups = new DocumentBackups(path.join(dataDir, "backups"));
     this.activateWorkbook = options.activateWorkbook ?? activateWorkbook;
     this.updater = options.updater === undefined
@@ -166,6 +171,7 @@ export class Bridge {
       this.delegations,
     );
 
+    this.gateway.mcpServers = this.mcpServers;
     const runtime = {
       bridgeUrl: config.publicBaseUrl,
       mcp: config.mcp,
@@ -264,6 +270,7 @@ export class Bridge {
       return;
     }
     const url = new URL(req.url ?? "/", "http://localhost");
+    if (url.pathname === "/session/mcp") return this.handleMcp(req, res);
 
     if (req.method === "GET" && (url.pathname === "/" || url.pathname === "/index.html")) return this.serveStandalonePage(res);
 
@@ -295,6 +302,12 @@ export class Bridge {
       });
     }
 
+    if (req.method === "GET" && url.pathname === "/internal/tools") {
+      const session = this.workspaceSession(req);
+      if (!session) return this.sendJson(res, 401, { error: "unauthorized" });
+      const external = await this.discoverSessionMcp(session);
+      return this.sendJson(res, 200, { tools: [...officeToolCatalog(session.host, this.config.allowOfficeJs, session.capabilities), ...[...external.values()].map(tool => tool.definition)] });
+    }
     if (req.method === "POST" && url.pathname === "/internal/tool") {
       return this.handleInternalTool(req, res);
     }
@@ -418,6 +431,50 @@ export class Bridge {
     createReadStream(filePath)
       .on("error", () => res.destroy())
       .pipe(res);
+  }
+
+  private async discoverSessionMcp(session: WorkbookSession) {
+    const enabled = JSON.stringify([...session.enabledMcpServers].sort());
+    const catalog = await discoverMcpCatalog(this.mcpServers, session.id, session.enabledMcpServers, new Set(officeToolCatalog(session.host, this.config.allowOfficeJs, session.capabilities).map(tool => tool.name)), session.turnController?.signal);
+    if (enabled !== JSON.stringify([...session.enabledMcpServers].sort())) throw new Error("MCP selection changed during discovery; retry the request");
+    session.externalMcpTools = catalog;
+    return catalog;
+  }
+
+  private async handleMcp(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+    const session = this.workspaceSession(req);
+    if (!session) return this.sendJson(res, 401, { error: "unauthorized" });
+    try {
+      if (req.method === "GET") return this.sendJson(res, 200, { servers: this.mcpServers.list(), enabled: [...session.enabledMcpServers] });
+      if (req.method !== "POST" && req.method !== "DELETE") return this.sendJson(res, 405, { error: "method_not_allowed" });
+      const body = JSON.parse(await readBody(req, 32_000)) as Record<string, unknown>;
+      const id = typeof body.id === "string" ? body.id : "";
+      if (req.method === "DELETE") {
+        await this.mcpServers.remove(id);
+        for (const pane of this.sessions.list()) { pane.enabledMcpServers.delete(id); pane.externalMcpTools.clear(); }
+      } else if (body.action === "select") {
+        if (typeof body.enabled !== "boolean" || !this.mcpServers.list().some(item => item.id === id)) throw new Error("Invalid MCP selection");
+        if (body.enabled) {
+          const alreadyEnabled = session.enabledMcpServers.has(id);
+          const previous = session.externalMcpTools;
+          session.enabledMcpServers.add(id);
+          try { await this.discoverSessionMcp(session); }
+          catch (error) { if (!alreadyEnabled) session.enabledMcpServers.delete(id); session.externalMcpTools = previous; throw error; }
+        } else {
+          session.enabledMcpServers.delete(id);
+          for (const [name, tool] of session.externalMcpTools) if (tool.serverId === id) session.externalMcpTools.delete(name);
+          await this.mcpServers.closeSessionServer(session.id, id);
+        }
+      } else if (body.action === "test") {
+        const testSession = `test-${session.id}`;
+        try { const tools = await this.mcpServers.tools(testSession, id); return this.sendJson(res, 200, { tools: tools.map(({ name, description }) => ({ name, description })) }); }
+        finally { await this.mcpServers.closeSession(testSession); }
+      } else if (body.action === "save") {
+        await this.mcpServers.save(body.config);
+        for (const pane of this.sessions.list()) { pane.enabledMcpServers.delete((body.config as { id: string }).id); pane.externalMcpTools.clear(); }
+      } else throw new Error("Unknown MCP action");
+      return this.sendJson(res, 200, { ok: true });
+    } catch (error) { this.sendJson(res, 400, { error: error instanceof Error ? error.message : String(error) }); }
   }
 
   private async handleSavedReferences(req: http.IncomingMessage, res: http.ServerResponse, url: URL): Promise<void> {
@@ -939,6 +996,7 @@ export class Bridge {
       if (state.session) {
         this.logins.forget(state.session.id);
         void this.gateway.externalTools.closeSession(state.session.id);
+        void this.mcpServers.closeSession(state.session.id);
         state.session.detachSocket(ws);
         this.delegations.sessionClosed(state.session);
         state.session.abortTurn();
@@ -1246,9 +1304,11 @@ export class Bridge {
         command = parsed;
       }
       controller.signal.throwIfAborted();
+      const externalCatalog = await this.discoverSessionMcp(session);
+      const catalogRevision = createHash("sha256").update(JSON.stringify([...externalCatalog.values()].map(tool => tool.definition))).digest("hex");
       await this.providerSessions.ensure(session, {
         model: selectedModel, effort, chatSessionId, resumeSessionId, capabilities,
-        systemPromptRevision: promptSettings.revision,
+        systemPromptRevision: `${promptSettings.revision}:${catalogRevision}`,
       }, () => ({
         requestUserInput: (request, signal) => session.requestUserInput(request, signal),
         authorizeTool: async (args) => {
@@ -1377,6 +1437,7 @@ export class Bridge {
       bridgeUrl: this.config.publicBaseUrl,
       sessionId: session.id,
       token: session.sessionToken,
+      ...(session.provider === "copilot" && session.externalMcpTools.size ? { toolNames: [...officeToolCatalog(session.host, this.config.allowOfficeJs, session.capabilities).map(tool => tool.name), ...session.externalMcpTools.keys()] } : {}),
       command: this.config.mcp.command,
       args: this.config.mcp.args,
       env: {
@@ -1384,6 +1445,7 @@ export class Bridge {
         EXCEL_SESSION_ID: session.id,
         EXCEL_SESSION_TOKEN: session.sessionToken,
         OFFICE_HOST: session.host,
+        ...(session.enabledMcpServers.size ? { EXCEL_DYNAMIC_TOOLS: "1" } : {}),
         ...(session.capabilities.webSearch ? { EXCEL_WEB_SEARCH: "1" } : {}),
         ...(session.capabilities.playwright ? { EXCEL_PLAYWRIGHT: "1" } : {}),
         ...(this.config.allowOfficeJs ? { EXCEL_ALLOW_OFFICE_JS: "1" } : {}),
@@ -1420,6 +1482,7 @@ export class Bridge {
     if (this.heartbeat) clearInterval(this.heartbeat);
     if (this.reaper) clearInterval(this.reaper);
     for (const [ws] of this.sockets) ws.close(1001, "server_shutdown");
+    await this.mcpServers.close();
     await this.gateway.externalTools.close();
     await this.providers.disposeAll();
     await new Promise<void>((resolve) => {

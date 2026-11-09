@@ -1,7 +1,9 @@
+import { ListToolsResultSchema } from "@modelcontextprotocol/sdk/types.js";
 import { SEND_TO_CONNECTED_FILE_MAX_MS, type ToolResult } from "../../protocol/src/index.js";
 
 /** Forwards a validated Excel tool call to the bridge that owns the workbook. */
 export interface ToolForwarder {
+  listTools?(): Promise<import("@modelcontextprotocol/sdk/types.js").Tool[]>;
   call(tool: string, args: unknown): Promise<ToolResult>;
 }
 
@@ -18,6 +20,12 @@ export interface HttpForwarderOptions {
  */
 export class HttpToolForwarder implements ToolForwarder {
   constructor(private readonly options: HttpForwarderOptions) {}
+
+  async listTools() {
+    const response = await fetch(`${this.options.bridgeUrl}/internal/tools`, { headers: { authorization: `Bearer ${this.options.token}` }, signal: AbortSignal.timeout(20_000) });
+    if (!response.ok) throw new Error(`Tool catalog returned HTTP ${response.status}`);
+    return ListToolsResultSchema.parse(await response.json()).tools;
+  }
 
   async call(tool: string, args: unknown): Promise<ToolResult> {
     const controller = new AbortController();

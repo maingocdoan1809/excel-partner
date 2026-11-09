@@ -74,3 +74,15 @@ describe("permission mode", () => {
     expect(result).toMatchObject({ ok: false, error: { code: "sheet_not_found" } });
   });
 });
+
+it.each([
+  ["clear_range", { address: "A1" }],
+  ["modify_structure", { operation: "delete", dimension: "rows", reference: "1" }],
+])("Ask refuses %s before execution when declined", async (tool, args) => {
+  let executed = false;
+  const result = await executeWithPermission(tool as string, args, "ask", async () => {
+    executed = true; return { ok: true, data: {} };
+  }, async () => false);
+  expect(executed).toBe(false);
+  expect(result.ok).toBe(false);
+});

@@ -1,3 +1,4 @@
+import type { ExternalMcpCatalog } from "../../runtime/src/mcp-catalog.js";
 import { randomBytes, randomUUID } from "node:crypto";
 import type { WebSocket } from "ws";
 import type { ProviderSessionState } from "../../providers/src/session-manager.js";
@@ -88,6 +89,8 @@ export class WorkbookSession implements ProviderSessionState {
   providerChatSessionId: string | null = null;
   providerModel: string | null = null;
   systemPromptRevision: string | null = null;
+  externalMcpTools: ExternalMcpCatalog = new Map();
+  readonly enabledMcpServers = new Set<string>();
   capabilities = { webSearch: false, playwright: false };
   providerEffort: "low" | "medium" | "high" = "medium";
   activeRequestId: string | null = null;

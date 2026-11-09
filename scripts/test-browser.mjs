@@ -15,8 +15,10 @@ await mkdir(output, { recursive: true });
 const config = loadConfig({ host: '127.0.0.1', port: 0, tls: null, publicBaseUrl: 'http://127.0.0.1',
   logLevel: 'error', configFile: path.join(temporary, 'config.json'), skillDirs: [], referenceDirs: [] });
 const registry = new ProviderRegistry();
+const mockCalls = new Map();
 for (const id of ['claude', 'copilot', 'codex', 'opencode']) {
-  registry.register(new MockAdapter({ id, reply: 'WEB_SMOKE_OK', delayMs: 150 }));
+  const toolCalls = []; mockCalls.set(id, toolCalls);
+  registry.register(new MockAdapter({ id, toolCalls, reply: 'WEB_SMOKE_OK', delayMs: 150 }));
 }
 const bridge = new Bridge(config, { registry, usageFile: null, updater: null,
   systemPromptFile: path.join(temporary, 'prompt.txt'), savedReferencesFile: path.join(temporary, 'references.json'),
@@ -36,7 +38,7 @@ try {
   page.setDefaultTimeout(10000);
   page.on('pageerror', error => errors.push(error.message));
   page.on('requestfailed', request => failedRequests.push({ url: request.url(), error: request.failure()?.errorText }));
-  const settings = async () => { await page.locator('#menu-button').click(); await page.locator('#menu-settings').click(); };
+  const settings = async () => { await page.locator('#menu-button').click(); await page.locator('#panel-settings').waitFor({ state: 'visible' }); };
   const connected = () => page.waitForFunction(() => document.querySelector('#connection-status')?.dataset.state === 'open');
   const send = async text => {
     await page.locator('#prompt-input').fill(text);
@@ -44,6 +46,17 @@ try {
     await page.getByText('WEB_SMOKE_OK', { exact: true }).waitFor();
   };
   await check('index.html boots and connects', async () => { await page.goto(`${url}/index.html`); await connected(); });
+  await check('header icons share geometry and alignment', async () => {
+    const icons = await page.locator('.header-actions .icon-button').evaluateAll(buttons => buttons.map(button => {
+      const box = button.getBoundingClientRect(), svg = button.querySelector('svg')?.getBoundingClientRect();
+      return { width: box.width, height: box.height, svgWidth: svg?.width, svgHeight: svg?.height,
+        dx: svg ? svg.x + svg.width / 2 - box.x - box.width / 2 : null,
+        dy: svg ? svg.y + svg.height / 2 - box.y - box.height / 2 : null };
+    }));
+    assert.equal(icons.length, 4);
+    for (const icon of icons) assert.deepEqual(icon, { width: 30, height: 30, svgWidth: 20, svgHeight: 20, dx: 0, dy: 0 });
+    await page.locator('.header-actions').screenshot({ path: path.join(output, 'header-icons.png') });
+  });
   await check('chat through bridge and deterministic provider', () => send('Browser review message'));
   await check('save instructions and switch theme', async () => {
     await settings();
@@ -63,7 +76,61 @@ try {
     await page.reload(); await connected();
     await page.locator('#history-button').click();
     await page.locator('.history-item').filter({ hasText: 'Browser review message' }).waitFor();
-    await page.locator('[data-close="history"]').click();
+    await page.keyboard.press('Escape');
+  });
+  await check('add, test and enable an external MCP server', async () => {
+    await settings();
+    assert.equal(await page.locator('.mcp-copy-binding').count(), 0);
+    assert.equal(await page.getByText('Gateway access', { exact: true }).count(), 0);
+    await page.locator('.mcp-settings summary').click();
+    await page.locator('.mcp-form [name="name"]').fill('Fixture MCP');
+    await page.locator('.mcp-form [name="target"]').fill(process.execPath);
+    await page.locator('.mcp-form [name="args"]').fill(JSON.stringify([path.resolve('tests/support/mcp-fixture.mjs')]));
+    for (const width of [1200, 320]) {
+      await page.setViewportSize({ width, height: 900 });
+      await page.locator('.mcp-form').scrollIntoViewIfNeeded();
+      await page.screenshot({ path: path.join(output, `mcp-settings-${width}.png`), fullPage: true, animations: 'disabled' });
+    }
+    await page.setViewportSize({ width: 1200, height: 900 });
+    const savedResponse = page.waitForResponse(response => response.url().endsWith('/session/mcp') && response.request().method() === 'POST' && response.request().postDataJSON()?.action === 'save');
+    await page.locator('.mcp-form button[type="submit"]').click();
+    const savedId = (await savedResponse).request().postDataJSON().config.id;
+    await page.locator('.mcp-server-row').filter({ hasText: 'Fixture MCP' }).waitFor();
+    await page.getByRole('button', { name: 'Test connection', exact: true }).click();
+    await page.getByRole('status').filter({ hasText: '3 tools available' }).waitFor();
+    await page.locator('[data-close="settings"]').click();
+    await page.locator('#tools-button').click();
+    await page.locator('#composer-tools').click();
+    const selectedResponse = page.waitForResponse(response => response.url().endsWith('/session/mcp') && response.request().method() === 'POST' && response.request().postDataJSON()?.action === 'select');
+    await page.locator('.mcp-picker label').filter({ hasText: 'Fixture MCP' }).locator('input').check();
+    await selectedResponse;
+    await page.keyboard.press('Escape');
+    const auth = (await savedResponse).request().headers().authorization;
+    const registered = await (await page.request.get(`${url}/internal/tools`, { headers: { authorization: auth } })).json();
+    const echo = registered.tools.find(tool => tool.name.endsWith('__echo'));
+    assert.ok(echo); assert.ok(!registered.tools.some(tool => tool.name === 'mcp_call_tool'));
+    mockCalls.get('codex').push({ tool: echo.name, args: { text: 'MCP_UI_RESULT' } });
+    await page.locator('#prompt-input').fill('Use the selected MCP echo tool');
+    await page.locator('#send-button').click();
+    await page.getByRole('dialog', { name: 'Allow external MCP tool?' }).waitFor();
+    await page.getByRole('button', { name: 'Allow', exact: true }).click();
+    await page.getByText('WEB_SMOKE_OK', { exact: true }).waitFor();
+    assert.equal(await page.locator('.bubble.error').count(), 0);
+    mockCalls.get('codex').length = 0;
+    await page.reload(); await connected();
+    await page.locator('#tools-button').click(); await page.locator('#composer-tools').click();
+    await page.locator('.mcp-picker label').filter({ hasText: 'Fixture MCP' }).locator('input').waitFor();
+    assert.equal(await page.locator('.mcp-picker label').filter({ hasText: 'Fixture MCP' }).locator('input').isChecked(), true);
+    await page.keyboard.press('Escape');
+  });
+  await check('History and Changes remain compact popovers', async () => {
+    for (const name of ['history', 'changes']) {
+      await page.locator(`#${name}-button`).click();
+      assert.equal(await page.locator(`#panel-${name}`).evaluate(el => el.matches(':popover-open')), true);
+      const box = await page.locator(`#panel-${name}`).boundingBox();
+      assert.ok(box.width <= 340);
+      await page.keyboard.press('Escape');
+    }
   });
   await check('Settings child preserves draft, scroll and back navigation', async () => {
     await settings();
@@ -92,7 +159,7 @@ try {
             await page.locator('#testing-signin-url').fill('https://staging.example.com');
             // Do not submit: that would open an external sign-in browser.
           }
-          await page.screenshot({ path: path.join(output, `${panel}-${width}-${theme}.png`), fullPage: true });
+          await page.screenshot({ path: path.join(output, `${panel}-${width}-${theme}.png`), fullPage: true, animations: 'disabled' });
           if (panel === 'testing') await page.locator('#panel-testing [data-close]').click();
         }
       }

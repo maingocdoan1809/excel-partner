@@ -37,7 +37,7 @@ button:focus-visible, select:focus-visible, textarea:focus-visible { outline: 2p
 .status .dot { width: 5px; height: 5px; }
 #connection-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
 .header-actions { display: flex; align-items: center; gap: 8px; }
-.header-actions .icon-button { width: 26px; height: 28px; border: 0; background: transparent; color: var(--muted); }
+.header-actions .icon-button { width: 30px; height: 30px; border: 0; background: transparent; color: var(--muted); }
 .header-actions svg { width: 17px; height: 17px; }
 .pane-tabs { display: none; }
 .layout { padding: 0 20px; }
@@ -308,3 +308,15 @@ body.browser-active .browser-dock { display: none; }
 .received-arrow { flex: none; width: 16px; height: 16px; color: var(--muted); }
 .received-source { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .received-text { margin: 0 0 0 10px; padding: 2px 0 2px 12px; border-left: 2px solid var(--border); color: var(--text); font-style: italic; font-size: 13px; line-height: 1.45; white-space: pre-wrap; word-break: break-word; }
+
+.composer-disclaimer { margin: 7px 4px 0; color: var(--text-secondary); font-size: 10px; line-height: 1.45; text-align: center; text-wrap: pretty; }
+.mcp-form { display: grid; gap: 12px; padding-top: 14px; }
+.mcp-form label { display: grid; gap: 6px; font-size: 12px; }
+.mcp-form :is(input,select,textarea) { width: 100%; }
+.mcp-status { color: var(--text-secondary); font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
+.mcp-server-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 12px 0; border-bottom: 1px solid var(--border); }
+.mcp-server-row strong { flex: 1; }
+.mcp-server-row small { flex-basis: 100%; color: var(--muted); overflow-wrap: anywhere; }
+.mcp-server-row button { font-size: 11px; }
+.mcp-picker { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border); font-size: 12px; color: var(--text-secondary); }
+.mcp-picker h3 { margin: 0 0 10px; font-size: 12px; color: var(--text); }

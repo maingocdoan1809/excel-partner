@@ -1,3 +1,5 @@
+import { toolResultToMcp } from "../../runtime/src/results.js";
+import { officeToolCatalog } from "../../runtime/src/catalog.js";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import {
   CallToolRequestSchema,
@@ -7,33 +9,11 @@ import {
 import { ZodError } from "zod";
 import { DEFAULT_HOST, exposedToolNamesForHost, isKnownToolName, parseToolInputForHost, type HostId, type ToolError } from "../../protocol/src/index.js";
 import type { ToolForwarder } from "./forwarder.js";
-import { definitionForHost } from "./host-overrides.js";
-import { ALL_TOOL_DEFINITIONS } from "./tool-definitions.js";
 
 export const SERVER_INFO = { name: "excel-ai-addin", version: "0.1.0" } as const;
 
-/** Tool results may carry one rendered image (`image: {mimeType, data}`); it becomes an MCP image block. */
-interface ImagePayload {
-  mimeType: string;
-  data: string;
-}
-
-function ok(data: unknown): CallToolResult {
-  if (data && typeof data === "object" && "mcpResult" in data) return (data as { mcpResult: CallToolResult }).mcpResult;
-  const image = (data as { image?: ImagePayload } | null)?.image;
-  if (image?.data && image.mimeType) {
-    const { image: _omit, ...rest } = data as Record<string, unknown>;
-    return {
-      content: [
-        { type: "image", data: image.data, mimeType: image.mimeType },
-        { type: "text", text: JSON.stringify(rest) },
-      ],
-    };
-  }
-  return { content: [{ type: "text", text: JSON.stringify(data ?? null) }] };
-}
-
 export interface ExcelMcpOptions {
+  dynamicTools?: boolean;
   /** Expose opt-in tools such as execute_office_js. */
   allowOptInTools?: boolean;
   capabilities?: { webSearch?: boolean; playwright?: boolean };
@@ -41,12 +21,7 @@ export interface ExcelMcpOptions {
   host?: HostId;
 }
 
-function fail(error: ToolError): CallToolResult {
-  return {
-    isError: true,
-    content: [{ type: "text", text: JSON.stringify({ error }) }],
-  };
-}
+function fail(error: ToolError): CallToolResult { return toolResultToMcp({ ok: false, error }); }
 
 /**
  * Build the Excel MCP server. Every tool call is validated against the shared
@@ -59,16 +34,15 @@ export function createExcelMcpServer(forwarder: ToolForwarder, options: ExcelMcp
   const server = new Server(SERVER_INFO, { capabilities: { tools: {} } });
 
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
-    tools: ALL_TOOL_DEFINITIONS.filter((tool) => exposed.has(tool.name)).map((tool) => definitionForHost(host, tool)).map((tool) => ({
-      name: tool.name,
-      description: tool.description,
-      inputSchema: tool.inputSchema as Record<string, unknown>,
-      annotations: tool.annotations,
-    })),
+    tools: options.dynamicTools && forwarder.listTools ? await forwarder.listTools() : officeToolCatalog(host, options.allowOptInTools ?? false, options.capabilities ?? {}),
   }));
 
   server.setRequestHandler(CallToolRequestSchema, async (request): Promise<CallToolResult> => {
     const name = request.params.name;
+    if (options.dynamicTools && name.startsWith("ext_") && forwarder.listTools) {
+      if (!(await forwarder.listTools()).some(tool => tool.name === name)) return fail({ code: "unknown_tool", message: `unknown tool '${name}'` });
+      return toolResultToMcp(await forwarder.call(name, request.params.arguments ?? {}));
+    }
     if (!isKnownToolName(name) || !exposed.has(name)) {
       return fail({ code: "unknown_tool", message: `unknown tool '${name}'` });
     }
@@ -88,11 +62,7 @@ export function createExcelMcpServer(forwarder: ToolForwarder, options: ExcelMcp
     }
 
     const result = await forwarder.call(name, parsed);
-    const response = result.ok ? ok(result.data) : fail(result.error);
-    if (result.additional_user_messages?.length) {
-      response.content.push({ type: "text", text: "Additional messages sent directly by the user while this request was running. Read them before your next action:\n" + JSON.stringify({ additional_user_messages: result.additional_user_messages }) });
-    }
-    return response;
+    return toolResultToMcp(result);
   });
 
   return server;

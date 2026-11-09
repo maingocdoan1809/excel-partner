@@ -10,6 +10,7 @@ export interface RangeTarget {
   address: string;
   /** Use only the top-left cell of `address` and grow it to this many rows/columns (write_range). */
   grow?: { rows: number; columns: number };
+  copySource?: string;
 }
 
 /** Every visible sheet's used range (find_replace without a sheet). */
@@ -171,7 +172,7 @@ export function planUndo(tool: string, input: unknown): UndoPlan {
       const formats = copyType === "all" || copyType === "formats";
       return {
         kind: "cells",
-        targets: [{ sheet, address: args.destination }],
+        targets: [{ sheet, address: args.destination, copySource: args.source }],
         style: formats,
         merged: formats,
         ...(formats ? { caveats: ["conditional formats and data validation copied from the source are not removed"] } : {}),

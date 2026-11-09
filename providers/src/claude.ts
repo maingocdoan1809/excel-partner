@@ -215,6 +215,9 @@ export class ClaudeAdapter extends BaseCliAdapter {
           "--output-format", "stream-json", "--verbose", "--include-partial-messages",
           ...(ctx.resumeSessionId ? ["--resume", conversationId] : ["--session-id", conversationId]),
           "--mcp-config", mcpConfigPath, "--strict-mcp-config",
+          // Rebuild current prompt/tool schemas on resume instead of restoring
+          // the CLI snapshot. Native conversation messages remain intact.
+          "--system-prompt-snapshot", "off",
           "--tools", [...(ctx.mcp.toolNames ? [] : ["AskUserQuestion"]), ...webTools].join(","),
           "--allowedTools", `mcp__${MCP_SERVER_NAME}`, ...webTools,
           "--permission-mode", "default",

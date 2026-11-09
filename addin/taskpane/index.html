@@ -20,8 +20,9 @@
         <div class="brand-text"><strong>Excel Partner</strong><span id="connection-status" class="status" data-state="idle"><i class="dot"></i><span id="connection-label">Waiting for Excel</span></span></div>
       </div>
       <div class="header-actions">
-        <button id="history-button" type="button" class="icon-button" aria-label="Chat history" title="Chat history"><svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="6.5" fill="none" stroke="currentColor" stroke-width="1.2"/><path d="M10 6v4l3 2" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg></button>
-        <button id="new-chat-button" type="button" class="icon-button" aria-label="New chat" title="New chat">＋</button>
+        <button id="changes-button" type="button" class="icon-button" aria-label="Changes" title="Changes"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 7a6.5 6.5 0 1 1-.3 5M4 3.5V7h3.5"/></svg></button>
+        <button id="history-button" aria-haspopup="dialog" aria-controls="panel-history" aria-expanded="false" type="button" class="icon-button" aria-label="Chat history" title="Chat history"><svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="6.5" fill="none" stroke="currentColor" stroke-width="1.2"/><path d="M10 6v4l3 2" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg></button>
+        <button id="new-chat-button" type="button" class="icon-button" aria-label="New chat" title="New chat"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 3.5v13M3.5 10h13"/></svg></button>
         <button id="menu-button" type="button" class="icon-button" aria-haspopup="menu" aria-expanded="false" aria-label="Settings" title="Settings">
           <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="4" r="1" fill="currentColor"/><circle cx="10" cy="10" r="1" fill="currentColor"/><circle cx="10" cy="16" r="1" fill="currentColor"/></svg>
           <span id="menu-dot" class="menu-dot" hidden></span>
@@ -223,7 +224,7 @@
         <p class="template-help">Click the picture for actual size, click again to fit. Pictures stay in memory while this chat is open. They are not saved in history and are not sent to the AI.</p>
       </section>
 
-      <section id="panel-changes" class="panel" hidden aria-label="Changes">
+      <section id="panel-changes" class="panel compact-popover" popover="auto" hidden aria-label="Changes">
         <header class="panel-head">
           <button type="button" class="back" data-close="changes" aria-label="Back to chat">←</button>
           <h2>Changes</h2>
@@ -231,9 +232,9 @@
         <div id="changes-list" class="panel-body"></div>
       </section>
 
-      <section id="panel-history" class="panel" hidden aria-label="History">
+      <section id="panel-history" class="panel history-popover" popover="auto" role="dialog" hidden aria-label="History">
         <header class="panel-head">
-          <button type="button" class="back" data-close="history" aria-label="Back to chat">←</button>
+          <button type="button" class="back" data-close="history" aria-label="Close history">×</button>
           <h2>History</h2>
           <button id="history-clear" type="button" class="ghost">Delete all</button>
         </header>
@@ -367,9 +368,12 @@
           </button>
         </div>
       </div>
+      <p class="composer-disclaimer">AI can make mistakes. Review changes before relying on them.</p>
       <div class="composer-hint"><span><b>/</b> skills &nbsp; <b>@</b> attachments</span><span>Enter to send · Ctrl+Enter for new line</span></div>
     </footer>
 
+  <div id="composer-settings-menu" class="compact-popover composer-options" popover="auto"><button id="composer-skills" type="button">Skills <span>›</span></button><button id="composer-tools" type="button">Tools <span>›</span></button></div>
+<div id="composer-tools-popover" class="compact-popover" popover="auto"><h2>Tools</h2></div>
     <script src="../dist/taskpane.js"></script>
-  </body>
+</body>
 </html>

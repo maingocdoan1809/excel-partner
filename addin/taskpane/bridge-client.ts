@@ -91,6 +91,8 @@ export class BridgeClient {
   private workbookConnectionId = randomId();
   private sessionToken: string | null = null;
   private permissionMode: PermissionMode = "ask";
+  private readonly operations = new Set<AbortController>();
+  private readonly approvals = new Set<() => void>();
   private readonly questions = new Map<string, { requestId: string; controller: AbortController }>();
 
   constructor(
@@ -175,6 +177,10 @@ export class BridgeClient {
 
   sendPrompt(requestId: string, prompt: string, selection: PromptSelectionSnapshot | null, context?: string, attachmentIds?: string[], model?: string | null, referencePaths?: string[], effort: "low" | "medium" | "high" = "medium", chatSessionId?: string, resumeSessionId?: string, capabilities?: ToolCapabilities, command?: boolean, delegationId?: string): void {
     this.send({ type: "prompt", requestId, prompt, selection, chatSessionId, resumeSessionId, capabilities, command, model: model ?? null, effort, ...(delegationId ? { delegationId } : {}), ...(context ? { context } : {}), ...(attachmentIds?.length ? { attachmentIds } : {}), ...(referencePaths?.length ? { referencePaths } : {}) });
+  }
+
+  async mcpRequest<T>(method = "GET", body?: unknown): Promise<T> {
+    return this.sessionFetch<T>("/session/mcp", { method, ...(body ? { body: JSON.stringify(body) } : {}) });
   }
 
   async listCommands(provider: ProviderId): Promise<import("../../protocol/src/commands.js").ProviderCommand[]> {
@@ -452,7 +458,14 @@ export class BridgeClient {
       this.send({ type: "tool_result", callId: message.callId, result: { ok: true, data: { name } } });
       return;
     }
-    const result = message.tool === "__authorize_provider_tool"
+    const controller = new AbortController();
+    this.operations.add(controller);
+    const execute = (name: string, input: unknown): Promise<ToolResult> => controller.signal.aborted
+      ? Promise.resolve({ ok: false, error: { code: "cancelled", message: "The request ended before this change could run." } })
+      : activeHost().execute(name, input, controller.signal);
+    const result = message.tool === "__authorize_mcp"
+      ? { ok: true as const, data: { approved: this.permissionMode === "auto" || await this.askPermission("Allow external MCP tool?", "This tool can access external services or local files. Office undo does not apply.", "Allow", message.timeoutMs, JSON.stringify(message.args, null, 2)) } }
+      : message.tool === "__authorize_provider_tool"
       ? { ok: true as const, data: { approved: this.permissionMode === "auto" || await this.askPermission(
         "Allow OpenCode tool?", "OpenCode requests permission to run this tool on your computer.", "Allow tool", message.timeoutMs,
         JSON.stringify(message.args, null, 2).slice(0, 8000)) } }
@@ -487,16 +500,19 @@ export class BridgeClient {
         message.args,
         this.permissionMode,
         (tool, args) => this.handlers.runTool
-          ? this.handlers.runTool({ callId: message.callId, requestId: message.requestId }, tool, args, (name, input) => activeHost().execute(name, input))
-          : activeHost().execute(tool, args),
+          ? this.handlers.runTool({ callId: message.callId, requestId: message.requestId }, tool, args, execute)
+          : execute(tool, args),
         (detail) => this.askPermission(`Allow ${activeHost().noun} change?`, detail, "Allow change", message.timeoutMs,
           JSON.stringify(message.args, null, 2).slice(0, 8000)),
       );
+    this.operations.delete(controller);
     this.send({ type: "tool_result", callId: message.callId, result });
     if (!message.tool.startsWith("__authorize_")) this.handlers.onToolExecuted?.(message.tool, message.args, result, { callId: message.callId, requestId: message.requestId });
   }
 
   private closeQuestions(requestId?: string): void {
+    for (const controller of this.operations) controller.abort();
+    for (const cancel of [...this.approvals]) cancel();
     for (const question of this.questions.values()) {
       if (!requestId || question.requestId === requestId) question.controller.abort();
     }
@@ -575,10 +591,13 @@ export class BridgeClient {
       document.body.append(overlay);
       const finish = (approved: boolean) => {
         window.clearTimeout(timer);
+        this.approvals.delete(cancel);
         overlay.remove();
         resolve(approved);
       };
-      const timer = window.setTimeout(() => finish(false), Math.max(1000, timeoutMs - 1000));
+      const cancel = () => finish(false);
+      this.approvals.add(cancel);
+      const timer = window.setTimeout(cancel, Math.max(1000, timeoutMs - 1000));
       deny.addEventListener("click", () => finish(false), { once: true });
       allow.addEventListener("click", () => finish(true), { once: true });
       deny.focus();

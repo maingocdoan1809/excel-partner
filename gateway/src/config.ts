@@ -8,6 +8,9 @@ import { ApiError } from "./protocol.js";
 const RouteSchema = z.object({ provider: ProviderIdSchema, model: z.string().min(1).nullable().default(null), effort: z.enum(["low", "medium", "high"]).default("medium") });
 export type Route = z.infer<typeof RouteSchema>;
 export const ConfigSchema = z.object({
+  mcpConfigFile: z.string().min(1).nullable().default(null),
+  enabledMcpServers: z.array(z.string().regex(/^[a-z0-9][a-z0-9_-]{0,47}$/)).max(30).default([]),
+  mcpApprovalMode: z.enum(["deny", "auto"]).default("deny"),
   port: z.number().int().min(1).max(65535).default(8766),
   defaultRoute: RouteSchema.default({ provider: "copilot", model: null, effort: "medium" }),
   aliases: z.record(RouteSchema).default({}),

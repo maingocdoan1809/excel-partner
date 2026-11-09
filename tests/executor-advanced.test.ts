@@ -324,3 +324,15 @@ describe("opt-in tool gating", () => {
     expect(exposedToolNames(true)).toContain("execute_office_js");
   });
 });
+
+it("checks the expanded copy destination before overwriting", async () => {
+  book.fill("Sheet1", [["keep"]], "F2");
+  expectError(await call("copy_to", { source: "A1:B2", destination: "E1" }), "would_overwrite");
+  expect(book.get("Sheet1", "F2")).toBe("keep");
+});
+
+it("copies the full source to a single destination anchor", async () => {
+  const result = await call("copy_to", { source: "A1:B2", destination: "E1" });
+  expect(result.ok).toBe(true);
+  expect(book.get("Sheet1", "F2")).toBe(2);
+});

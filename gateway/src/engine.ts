@@ -1,3 +1,8 @@
+import { McpServers } from "../../runtime/src/mcp-servers.js";
+import { discoverMcpCatalog, invokeRegisteredMcpTool, type ExternalMcpCatalog } from "../../runtime/src/mcp-catalog.js";
+import { inferOfficeHost } from "../../runtime/src/catalog.js";
+import { toolResultToMcp } from "../../runtime/src/results.js";
+import { isHostId } from "../../protocol/src/index.js";
 import { clientToolResult, CONVERSION_ERROR } from "./tool-result.js";
 import { gatewayToolInstructions } from "./tool-instructions.js";
 import { matchesHistory, snapshotHistory, type HistorySnapshot } from "./history.js";
@@ -69,12 +74,34 @@ export class GatewayEngine {
   private readonly running = new Set<Promise<void>>();
   private readonly retiring = new Set<Promise<void>>();
   private closed = false;
+  private readonly mcpServers?: McpServers;
+  private readonly mcpRequests = new WeakMap<MessagesRequest, ExternalMcpCatalog>();
+  async prepareRequest(request: MessagesRequest): Promise<void> {
+    if (!this.mcpServers || !this.config.enabledMcpServers.length) return;
+    await this.mcpServers.reload();
+    let catalog: ExternalMcpCatalog;
+    try { catalog = await discoverMcpCatalog(this.mcpServers, "gateway-discovery", new Set(this.config.enabledMcpServers), new Set((request.tools ?? []).map(tool => tool.name))); }
+    catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      throw new ApiError(message.startsWith("Duplicate registered MCP tool") ? 400 : 502, "invalid_request_error", message);
+    }
+    request.tools = [...(request.tools ?? []), ...[...catalog.values()].map(({ definition }) => ({ name: definition.name, description: definition.description, input_schema: definition.inputSchema }))];
+    if (request.tools.length > 256) throw new ApiError(400, "invalid_request_error", "Combined tool catalog exceeds 256 tools");
+    this.mcpRequests.set(request, catalog);
+  }
+
+  private officeHost(request: MessagesRequest) {
+    const explicit = request.metadata?.office_host;
+    return isHostId(explicit) ? explicit : inferOfficeHost((request.tools ?? []).map(tool => tool.name));
+  }
+
   private readonly sessions: ProviderSessionManager;
   constructor(readonly config: GatewayConfig, private readonly registry: ProviderRegistry,
     private readonly relay: { url: string; token: string; entry: string; ca?: string },
     private readonly log: (entry: object) => void = () => {},
     private readonly conversations = new ConversationStore()) {
-    this.sessions = new ProviderSessionManager(registry, async () => {}, {
+    if (config.mcpConfigFile) this.mcpServers = new McpServers(config.mcpConfigFile);
+    this.sessions = new ProviderSessionManager(registry, async session => { await this.mcpServers?.closeSession(session.id); }, {
       debug: (action, details) => log({ event: "provider_session", action, ...details }),
       warn: (action, details) => log({ event: "provider_session_warning", action, ...details }),
     });
@@ -97,12 +124,12 @@ export class GatewayEngine {
       : (request.system ?? []).filter(b => b.type === "text").map(b => String(b.text ?? "")).join("\n");
     const choice = { type: request.tool_choice?.type ?? "auto", disable_parallel_tool_use: request.tool_choice?.disable_parallel_tool_use ?? false,
       ...(request.tool_choice?.type === "tool" ? { name: request.tool_choice.name } : {}) };
-    return fingerprint({ contract: CLIENT_TOOL_CONTRACT_REVISION, route, tools: [...this.clientTools(request)].sort((a, b) => a.name.localeCompare(b.name)), tool_choice: choice, system });
+    return fingerprint({ officeHost: this.officeHost(request), contract: CLIENT_TOOL_CONTRACT_REVISION, route, tools: [...this.clientTools(request)].sort((a, b) => a.name.localeCompare(b.name)), tool_choice: choice, system });
   }
   private turnContent(request: MessagesRequest, route: Route, messages: ChatMessage[]) {
     const clientSystem = typeof request.system === "string" ? request.system : (request.system ?? []).filter(b => b.type === "text").map(b => String(b.text ?? "")).join("\n");
     const officeJs = this.clientTools(request).some(tool => tool.name === "execute_office_js");
-    const system = [clientSystem, `<gateway_tool_contract>\n${gatewayToolInstructions(route.provider, officeJs)}\n</gateway_tool_contract>`].filter(Boolean).join("\n\n");
+    const system = [clientSystem, `<gateway_tool_contract>\n${gatewayToolInstructions(route.provider, officeJs, this.officeHost(request))}\n</gateway_tool_contract>`].filter(Boolean).join("\n\n");
     const prompt = transcriptPrompt({ ...request, messages });
     if (system.length + prompt.length > this.config.maxPromptChars) throw new ApiError(413, "invalid_request_error", "Conversation text exceeds the gateway prompt limit. Compact the conversation or start a new chat; no provider turn was sent.");
     return { system, prompt };
@@ -307,6 +334,16 @@ export class GatewayEngine {
     const job = this.jobs.get(id);
     if (!job || job.disposed || job.idle) throw new ApiError(404, "not_found_error", "Tool session expired");
     if (!this.clientTools(job.request).some(t => t.name === name)) throw new ApiError(403, "permission_error", "Client did not register this tool");
+    const external = this.mcpRequests.get(job.request)?.get(name);
+    if (this.mcpServers && external) {
+      job.sideEffects = true;
+      const result = await invokeRegisteredMcpTool(this.mcpServers, {
+        sessionId: job.id, enabled: new Set(this.config.enabledMcpServers), signal: job.turnController.signal,
+        isActive: () => !job.disposed && !job.idle,
+        authorize: async () => this.config.mcpApprovalMode === "auto",
+      }, external, input);
+      return toolResultToMcp(result);
+    }
     job.sideEffects = true;
     const callId = `toolu_agw_${randomUUID().replaceAll("-", "")}`;
     const promise = new Promise((resolve, reject) => {
@@ -328,7 +365,7 @@ export class GatewayEngine {
       onDiagnostic: event => this.trace(job, "provider_status", { statusPhase: event.phase, attempt: event.attempt, status: event.status, errorType: event.errorType, nextRetryAt: event.nextRetryAt }),
       requestUserInput: async () => ({ cancelled: true, answers: {} }), authorizeTool: async () => false,
       mcp: { bridgeUrl: this.relay.url, sessionId: job.id, token: this.relay.token, command: process.execPath, args: [this.relay.entry], toolNames: names,
-        env: { AGENT_GATEWAY_RELAY_URL: this.relay.url, AGENT_GATEWAY_RELAY_TOKEN: this.relay.token, AGENT_GATEWAY_RELAY_SESSION: job.id, AGENT_GATEWAY_PROVIDER: job.route.provider,
+        env: { ...(this.officeHost(job.request) ? { AGENT_GATEWAY_OFFICE_HOST: this.officeHost(job.request)! } : {}), AGENT_GATEWAY_RELAY_URL: this.relay.url, AGENT_GATEWAY_RELAY_TOKEN: this.relay.token, AGENT_GATEWAY_RELAY_SESSION: job.id, AGENT_GATEWAY_PROVIDER: job.route.provider,
           ...(names.includes("execute_office_js") ? { AGENT_GATEWAY_OFFICE_JS: "1" } : {}),
           ...(this.relay.ca ? { NODE_EXTRA_CA_CERTS: this.relay.ca } : {}) } } }; });
     if (job.disposed) return;
@@ -412,5 +449,6 @@ export class GatewayEngine {
     // Initializers cancelled during startup still own a process until ensure()
     // discards their late result. Wait for that shared-manager cleanup as well.
     await Promise.all([...this.running, ...this.retiring]);
+    await this.mcpServers?.close();
   }
 }

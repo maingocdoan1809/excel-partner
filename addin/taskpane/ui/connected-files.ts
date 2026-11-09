@@ -28,6 +28,9 @@ export function setupConnectedFiles(options: {
   };
   const open = () => {
     popover.hidden = false;
+    const anchor = button.getBoundingClientRect();
+    popover.style.top = `${anchor.bottom + 8}px`;
+    popover.style.left = `${Math.max(8, Math.min(anchor.left, window.innerWidth - Math.min(340, window.innerWidth - 16) - 8))}px`;
     button.setAttribute("aria-expanded", "true");
     options.onOpen?.();
   };
@@ -79,8 +82,8 @@ export function setupConnectedFiles(options: {
         return row;
       }));
       hint.textContent = files.length > 1
-        ? "The assistant can read these files when you ask, and can ask their assistants to make changes in them. In Ask mode you approve each request first."
-        : "Open another file in Word, Excel or PowerPoint with Office Partner and the assistant can read it, or ask its assistant to change it, from here.";
+        ? "Read or make changes across files. In Ask mode, approve each request."
+        : "Open another file with Office Partner to connect it here.";
       button.title = files.length > 1 ? `Connected files (${files.length})` : "Connected files";
     },
   };
