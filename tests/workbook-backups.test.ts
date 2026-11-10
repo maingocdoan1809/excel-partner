@@ -6,7 +6,7 @@ import { Bridge } from "../bridge/src/server.js";
 import { loadConfig } from "../bridge/src/config.js";
 import { MockAdapter } from "../providers/src/mock.js";
 import { ProviderRegistry } from "../providers/src/registry.js";
-import { BackupError, MAX_BACKUP_BYTES, WorkbookBackups, safeBaseName } from "../bridge/src/workbook-backups.js";
+import { BackupError, DocumentBackups, MAX_BACKUP_BYTES, safeBaseName } from "../bridge/src/document-backups.js";
 import { PaneClient, getFreePort } from "./helpers.js";
 
 const zip = (extra = 8) => Buffer.concat([Buffer.from([0x50, 0x4b, 0x03, 0x04]), Buffer.alloc(extra, 1)]);
@@ -15,9 +15,9 @@ let folder = "";
 beforeEach(() => { folder = fs.mkdtempSync(path.join(os.tmpdir(), "backups-")); });
 afterEach(() => fs.rmSync(folder, { recursive: true, force: true }));
 
-describe("WorkbookBackups", () => {
+describe("DocumentBackups", () => {
   it("saves a workbook copy as an .xlsx named after the workbook and the time", () => {
-    const store = new WorkbookBackups(path.join(folder, "b"), 10, () => new Date("2026-11-04T15:02:37.123Z"));
+    const store = new DocumentBackups(path.join(folder, "b"), 10, () => new Date("2026-11-04T15:02:37.123Z"));
     const saved = store.save("Q3 Budget.xlsx", zip());
     expect(saved.file).toBe("Q3 Budget-20261104-150237.xlsx");
     expect(fs.readFileSync(path.join(folder, "b", saved.file)).equals(zip())).toBe(true);
@@ -25,7 +25,7 @@ describe("WorkbookBackups", () => {
   });
 
   it("never overwrites an earlier copy taken in the same second", () => {
-    const store = new WorkbookBackups(folder, 10, () => new Date("2026-11-04T15:02:37Z"));
+    const store = new DocumentBackups(folder, 10, () => new Date("2026-11-04T15:02:37Z"));
     const first = store.save("Book1", zip(1));
     const second = store.save("Book1", zip(2));
     expect(second.file).not.toBe(first.file);
@@ -35,14 +35,14 @@ describe("WorkbookBackups", () => {
 
   it("keeps only the newest copies", () => {
     let minute = 0;
-    const store = new WorkbookBackups(folder, 3, () => new Date(Date.UTC(2026, 10, 4, 15, minute++, 0)));
+    const store = new DocumentBackups(folder, 3, () => new Date(Date.UTC(2026, 10, 4, 15, minute++, 0)));
     const files = Array.from({ length: 5 }, () => store.save("Book1", zip()).file);
     expect(store.list().map((b) => b.file).sort()).toEqual(files.slice(2).sort());
     expect(fs.readdirSync(folder).sort()).toEqual(files.slice(2).sort());
   });
 
   it("refuses data that is not a workbook, an empty copy, or one over the limit", () => {
-    const store = new WorkbookBackups(folder);
+    const store = new DocumentBackups(folder);
     expect(() => store.save("Book1", Buffer.from("hello"))).toThrow(BackupError);
     expect(() => store.save("Book1", Buffer.alloc(0))).toThrow(/empty/);
     expect(() => store.save("Book1", Buffer.concat([zip(), Buffer.alloc(MAX_BACKUP_BYTES)]))).toThrow(/limit/);
@@ -59,7 +59,7 @@ describe("WorkbookBackups", () => {
   });
 
   it("lists nothing before the first backup", () => {
-    expect(new WorkbookBackups(path.join(folder, "missing")).list()).toEqual([]);
+    expect(new DocumentBackups(path.join(folder, "missing")).list()).toEqual([]);
   });
 });
 

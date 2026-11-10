@@ -2,8 +2,8 @@ import { describe, expect, it } from "vitest";
 import { hostSystemPrompt, recommendedPromptFor } from "../providers/src/host-prompts.js";
 import { RECOMMENDED_SYSTEM_PROMPT } from "../providers/src/prompt.js";
 import { ALL_TOOL_NAMES, toolsForHost } from "../protocol/src/index.js";
-import { definitionForHost } from "../excel_mcp/src/host-overrides.js";
-import { ALL_TOOL_DEFINITIONS } from "../excel_mcp/src/tool-definitions.js";
+import { definitionForHost } from "../runtime/src/host-overrides.js";
+import { ALL_TOOL_DEFINITIONS } from "../runtime/src/tool-definitions.js";
 
 describe("host system prompts", () => {
   it("leave Excel's prompt exactly as the user has it", () => {

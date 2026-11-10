@@ -2,9 +2,9 @@ import { describe, expect, it, vi } from "vitest";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { createExcelMcpServer } from "../excel_mcp/src/server.js";
-import { ALL_TOOL_DEFINITIONS } from "../excel_mcp/src/tool-definitions.js";
+import { ALL_TOOL_DEFINITIONS } from "../runtime/src/tool-definitions.js";
 import { SessionManager } from "../bridge/src/session-manager.js";
-import { ToolGateway } from "../bridge/src/tool-gateway.js";
+import { OfficeRuntime } from "../runtime/src/office-runtime.js";
 import { disconnectedMidCall, DISCONNECTED_MID_CALL, isDisconnectedMidCall } from "../bridge/src/session.js";
 import { buildTurnPrompt } from "../providers/src/prompt.js";
 import {
@@ -255,12 +255,12 @@ const limits = { maxReadCells: 100, maxWriteCells: 100, maxSheets: 10, maxSelect
 function gatewayWith(host: HostId | undefined, enrich = vi.fn(async (selection: never) => selection)) {
   const sessions = new SessionManager({ ttlMs: 60_000 });
   const session = sessions.create(`conn-${host ?? "legacy"}`, host ? { host } : null);
-  const gateway = new ToolGateway(sessions, limits, 1000, undefined, true, null, null, null, enrich as never);
+  const gateway = new OfficeRuntime(sessions, limits, 1000, undefined, true, null, null, null, enrich as never);
   const requestTool = vi.spyOn(session, "requestTool");
   return { session, gateway, enrich, requestTool };
 }
 
-describe("ToolGateway host gate", () => {
+describe("OfficeRuntime host gate", () => {
   it("defaults a session without clientInfo or host to Excel", () => {
     expect(gatewayWith(undefined).session.host).toBe("excel");
     expect(gatewayWith("word").session.host).toBe("word");
@@ -297,7 +297,7 @@ describe("ToolGateway host gate", () => {
   it("keeps execute_office_js behind the opt-in on every host", async () => {
     const sessions = new SessionManager({ ttlMs: 60_000 });
     const session = sessions.create("conn-off", { host: "word" });
-    const gateway = new ToolGateway(sessions, limits, 1000);
+    const gateway = new OfficeRuntime(sessions, limits, 1000);
     const result = await gateway.invoke({ sessionId: session.id, tool: "execute_office_js", args: { code: "return 1;" } });
     expect(result).toMatchObject({ ok: false, error: { code: "unsupported" } });
   });

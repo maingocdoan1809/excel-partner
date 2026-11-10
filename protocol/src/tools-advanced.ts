@@ -65,7 +65,6 @@ export const CellSpecSchema = z
   })
   .strict()
   .refine((c) => !(c.value !== undefined && c.formula !== undefined), { message: "give either value or formula, not both" });
-export type CellSpec = z.infer<typeof CellSpecSchema>;
 
 export const MAX_SET_CELLS = 2_000;
 
@@ -559,7 +558,6 @@ export const ReadSkillInputSchema = z.object({
   file: z.string().min(1).max(200).optional().describe("Reference file listed by a previous read_skill, e.g. references/diagram-style.md."),
   forEditing: z.boolean().optional().describe("Return the exact UTF-8 file and its revision for update_skill; use this before changing any installed skill file."),
 });
-export type ReadSkillInput = z.infer<typeof ReadSkillInputSchema>;
 
 export const RunSkillScriptInputSchema = z.object({
   name: z.string().regex(/^[a-z0-9][a-z0-9_-]{0,63}$/).describe("Installed skill name."),
@@ -596,7 +594,6 @@ export type RunPythonInput = z.infer<typeof RunPythonInputSchema>;
 export const ListReferenceFilesInputSchema = z.object({
   path: z.string().min(1).max(500).optional().describe("Folder to list (Windows or WSL path). Omit to see the folders you are allowed to read."),
 });
-export type ListReferenceFilesInput = z.infer<typeof ListReferenceFilesInputSchema>;
 
 export const ReadWorkbookFileInputSchema = z.object({
   path: z.string().min(1).max(500).describe("Path of a closed .xlsx, e.g. C:\\Users\\me\\Template.xlsx."),
@@ -606,13 +603,11 @@ export const ReadWorkbookFileInputSchema = z.object({
   includeShapes: z.boolean().default(true).describe("Drawn shapes and connectors with geometry, text, fill, line and anchors."),
   maxCells: z.number().int().min(1).max(10_000).default(3_000),
 });
-export type ReadWorkbookFileInput = z.infer<typeof ReadWorkbookFileInputSchema>;
 
 export const ReadAttachedImageInputSchema = z.object({
   path: z.string().min(1).max(500)
     .describe("attachment:// path, selected local image path, or skill-template:// path listed by read_skill."),
 });
-export type ReadAttachedImageInput = z.infer<typeof ReadAttachedImageInputSchema>;
 
 export const ReadAttachedFileInputSchema = z.object({
   path: z.string().min(1).max(500).describe("attachment:// path or selected local file path."),
@@ -620,7 +615,6 @@ export const ReadAttachedFileInputSchema = z.object({
   offset: z.number().int().min(0).default(0).describe("Byte offset for large files."),
   maxBytes: z.number().int().min(1).max(65536).default(16384),
 });
-export type ReadAttachedFileInput = z.infer<typeof ReadAttachedFileInputSchema>;
 
 export const ReadDocumentFileInputSchema = z.object({
   path: z.string().min(1).max(500).describe("Path of a closed .docx or .pptx (Windows or WSL path), or an attachment:// path. Use list_reference_files to find files."),
@@ -659,7 +653,6 @@ export type CreateArtifactInput = z.infer<typeof CreateArtifactInputSchema>;
 
 /** Reading tools that may be pointed at another connected workbook. Writing is never allowed across files. */
 export const CONNECTED_READ_TOOLS = ["get_sheets", "read_range", "get_cell_ranges", "search_data", "find_errors", "check_formula_consistency", "get_objects"] as const;
-export type ConnectedReadTool = (typeof CONNECTED_READ_TOOLS)[number];
 
 /**
  * The same, per kind of file. Another file may be a workbook, a Word document or a presentation, and only its own
@@ -688,7 +681,6 @@ export const UNNAMED_WORKBOOK = "Untitled workbook";
 export const UNNAMED_FILE = { excel: UNNAMED_WORKBOOK, word: "Untitled document", powerpoint: "Untitled presentation" } as const;
 
 export const ListConnectedFilesInputSchema = z.object({});
-export type ListConnectedFilesInput = z.infer<typeof ListConnectedFilesInputSchema>;
 
 // Strict: a `sheet` or `address` passed next to `tool` must fail loudly, not be dropped so that the other file is scanned whole.
 export const ReadConnectedFileInputSchema = z.object({

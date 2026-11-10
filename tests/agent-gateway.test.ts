@@ -89,6 +89,12 @@ describe("Anthropic-compatible CLI gateway", () => {
     expect(() => routeModel("claude-haiku-4-5-20251001", config)).toThrow("provider/model");
     expect(routeModel("claude-haiku-4-5-20251001", config, true).provider).toBe("copilot");
     expect(routeModel("claude-opus-4-7", ConfigSchema.parse({ advertiseCompatibilityModels: true })).provider).toBe("copilot");
+    // The IDs a client insists on are configuration; the old switch becomes the list it used to stand for.
+    expect(ConfigSchema.parse({ advertiseCompatibilityModels: true }).compatibilityModels).toEqual(["claude-opus-4-7", "claude-sonnet-4-6", "claude-haiku-4-5-20251001"]);
+    const listed = ConfigSchema.parse({ compatibilityModels: ["claude-sonnet-4-5"], aliases: { "claude-sonnet-4-5": { provider: "copilot", model: "small" } } });
+    expect(routeModel("claude-sonnet-4-5", listed).model).toBe("small");
+    expect(routeModel("claude-sonnet-4-5", ConfigSchema.parse({ compatibilityModels: ["claude-sonnet-4-5"] }))).toMatchObject({ provider: "copilot", model: null });
+    expect(() => routeModel("claude-sonnet-4-5", config)).toThrow("provider/model");
     expect(() => routeModel("codex/default", config)).toThrow("not enabled");
     expect(() => routeModel("unknown/default", config)).toThrow("Unknown provider");
   });
@@ -136,6 +142,12 @@ describe("Anthropic-compatible CLI gateway", () => {
     const h = await start();
     const list = await (await fetch(`${h.url}/v1/models`, { headers: { "x-api-key": token } })).json();
     expect(list.data.some((m: { id: string }) => m.id === "copilot/default [Claude API]")).toBe(true);
+    expect(list.data.some((m: { id: string }) => m.id === "claude-opus-4-7")).toBe(false);
+  });
+  it("publishes the configured compatibility IDs as they are", async () => {
+    const h = await start({ compatibilityModels: ["claude-sonnet-4-5"] });
+    const list = await (await fetch(`${h.url}/v1/models`, { headers: { "x-api-key": token } })).json();
+    expect(list.data.some((m: { id: string }) => m.id === "claude-sonnet-4-5")).toBe(true);
     expect(list.data.some((m: { id: string }) => m.id === "claude-opus-4-7")).toBe(false);
   });
   it("advertises friendly names once while accepting technical model IDs", async () => {

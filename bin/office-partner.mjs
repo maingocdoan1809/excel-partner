@@ -21,7 +21,7 @@ const windowsScript = path.join(root, "scripts", "package-windows.ps1");
 
 function fail(message) { throw new Error(message); }
 function requireWindows() {
-  if (process.platform !== "win32") fail("This package currently supports Word, Excel and PowerPoint desktop on Windows. Use the source WSL installer for WSL2.");
+  if (process.platform !== "win32") fail("This package currently supports Word, Excel and PowerPoint desktop on Windows. Run it from Windows PowerShell, not from WSL or another OS.");
 }
 function powershell(action, extra = []) {
   const result = spawnSync("powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", windowsScript,
@@ -178,7 +178,7 @@ async function testSessions(command, rest) {
     rl.question("When you are signed in and can see the home page, press Enter here to save the session... ", () => { rl.close(); resolve(); });
   });
   try {
-    const { origins } = await loginSession({ name, url, extraOrigins: extra, store, waitForPerson, out: line => console.log(line) });
+    const { origins } = await loginSession({ name, url, extraOrigins: extra, store, toolsDir: path.join(dataDir, "tools"), waitForPerson, out: line => console.log(line) });
     console.log(`Saved sign-in '${name}'. The assistant can use it on: ${origins.join(", ")}`);
     console.log("Next: in Excel, open the chat and type /qa. A saved sign-in expires like any login; if the assistant lands on a sign-in page, run this command again.");
   } catch (error) { fail(error instanceof Error ? error.message : String(error)); }

@@ -1,17 +1,22 @@
+import { setupPanels } from "./ui/panels.js";
+import { setupProviderPicker, loadProvider, PROVIDER_KEY, PROVIDER_NAMES } from "./ui/provider-picker.js";
+import { setupWorkspaceMenu } from "./ui/workspace-menu.js";
+import { byId } from "./ui/dom.js";
+import { setupChangesPanel } from "./ui/changes-panel.js";
+import { setupUsagePanel } from "./ui/usage-panel.js";
+import { setupHistoryPanel } from "./ui/history-panel.js";
+import { setupTemplatePanel } from "./ui/template-panel.js";
 import { watchShapeSelectionEvents } from "./executor/selection-events.js";
 import { activeHost, initHost } from "./host/index.js";
 import { HOST_BASELINE, isSupported } from "./host/requirements.js";
 import { monitorSelection } from "./ui/selection.js";
-import type { UsageSummary, TokenUsage, ProviderEvent, ProviderId, ProviderConnectionStatus, ToolResult } from "../../protocol/src/index.js";
-import { BridgeClient, type ModelCatalog, type SavedReference, type SkillTemplate, type UploadedAttachment, type WorkspaceEntry, type WorkspaceRoot } from "./bridge-client.js";
+import type { ProviderEvent, ProviderId } from "../../protocol/src/index.js";
+import { BridgeClient, type UploadedAttachment } from "./bridge-client.js";
 import type { PermissionMode } from "./permissions.js";
 import { UndoJournal } from "./executor/journal.js";
-import { undoBar, undoControl, type UndoView } from "./ui/undo-controls.js";
 import { setProposalReviewer } from "./executor/word/index.js";
 import { showProposalReview } from "./ui/proposal.js";
-import { formatCredits, formatDuration, usageCsv } from "./ui/usage.js";
 import { setupUsagePopover } from "./ui/usage-popover.js";
-import { describeChange } from "./ui/changes.js";
 import { setupInputResizer } from "./ui/input-resizer.js";
 import { renderMarkdown } from "./ui/markdown.js";
 import { buildPreviewDocument, renderArtifactCard, type StoredArtifact } from "./ui/artifact.js";
@@ -37,9 +42,7 @@ import {
   SessionStore,
   buildContextPreface,
   bindProviderSession,
-  formatWhen,
   newSession,
-  type StoredChange,
   type StoredMessage,
   type StoredSession,
   type StoredTool,
@@ -47,8 +50,8 @@ import {
 import { createSlashMenu } from "./ui/slash-menu.js";
 import { leadingCommand, slashBadgeRange } from "./ui/slash.js";
 import { parseNativeCommand, type ProviderCommand } from "../../protocol/src/commands.js";
-import { activeFileMention, atomicBadgeDeletion, fileMentionRanges } from "./ui/file-mentions.js";
-import { filesFromClipboard, filesFromDrop, isFileDrag } from "./ui/transfer-files.js";
+import { atomicBadgeDeletion, fileMentionRanges } from "./ui/file-mentions.js";
+import { filesFromClipboard } from "./ui/transfer-files.js";
 import { setupConnectedFiles } from "./ui/connected-files.js";
 import { delegatedPrompt } from "./ui/delegation.js";
 import { renderReceivedMessage } from "./ui/received-message.js";
@@ -113,52 +116,17 @@ const els = {
   sendLabel: document.querySelector<HTMLSpanElement>("#send-button .label")!,
 };
 
-const PROVIDER_KEY = "excelPartner.provider";
-const MODEL_KEY = "excelPartner.models.v1";
 const PERMISSION_MODE_KEY = "excelPartner.permissionMode";
 const NARROW_BELOW = 330;
 /** After the pane reloaded itself, a chat younger than this is reopened automatically. */
 const RESTORE_WITHIN_MS = 12 * 3_600_000;
 
-const PROVIDER_NAMES: Record<ProviderId, string> = { claude: "Claude Code", copilot: "GitHub Copilot", codex: "Codex", opencode: "OpenCode" };
-/** Short label used in the model picker. */
-const PROVIDER_SHORT_NAMES: Record<ProviderId, string> = { claude: "Claude", copilot: "Copilot", codex: "Codex", opencode: "OpenCode" };
-/** CLI command that signs the provider in on the bridge machine. */
-const PROVIDER_LOGIN_COMMANDS: Record<ProviderId, string> = {
-  claude: "claude",
-  copilot: "copilot login",
-  codex: "codex login",
-  opencode: "opencode auth login",
-};
-/** Hint shown under the manual login command. */
-const PROVIDER_LOGIN_HINTS: Record<ProviderId, string> = {
-  claude: "Open a terminal, run the command below and use /login. To install the CLI: npm install -g @anthropic-ai/claude-code",
-  copilot: "",
-  codex: "Open a terminal and run the command below. To install the CLI: npm install -g @openai/codex",
-  opencode: "Open a terminal and run the command below. To install the CLI: npm install -g opencode-ai",
-};
-const MODEL_ID = /^[a-zA-Z0-9][a-zA-Z0-9._/-]{0,79}$/;
-
-function loadModels(): Partial<Record<ProviderId, string>> {
-  try {
-    const parsed = JSON.parse(localStorage.getItem(MODEL_KEY) ?? "{}") as Record<string, unknown>;
-    return Object.fromEntries(Object.entries(parsed).filter(([key, value]) =>
-      (key === "claude" || key === "copilot" || key === "codex" || key === "opencode") && typeof value === "string" && MODEL_ID.test(value),
-    )) as Partial<Record<ProviderId, string>>;
-  } catch { return {}; }
-}
-
 const store = new SessionStore(localStorage, undefined, () => activeHost().id);
 const journal = new UndoJournal((tool) => activeHost().writeTools.has(tool), async () => client.saveBackup((await currentWorkbookName()) || activeHost().noun, await activeHost().readFile()));
 // Handle for end-to-end checks against a live workbook; it grants nothing execute_office_js does not already have.
 (globalThis as { __undoJournal?: UndoJournal }).__undoJournal = journal;
-/** Result of the last undo, shown above the change list until the next one. */
-let undoNote: { ok: boolean; text: string } | null = null;
 let client: BridgeClient;
 let provider: ProviderId = loadProvider();
-const models = loadModels();
-const modelCatalogs = new Map<ProviderId, ModelCatalog>();
-const modelErrors = new Map<ProviderId, boolean>();
 let activeModel: string | null | undefined;
 let activeEffort: string | undefined;
 let permissionMode: PermissionMode = localStorage.getItem(PERMISSION_MODE_KEY) === "auto" ? "auto" : "ask";
@@ -221,27 +189,7 @@ const CONNECTED_FILE_TOOLS: ReadonlySet<string> = new Set(["list_connected_files
 let sheetNames: string[] = [];
 const cellLinkOptions = (text: string, aboutOtherFiles = false) => ({ plain: !aboutOtherFiles && !mentionsFile(text, otherFiles) && !mentionsSheet(text, sheetNames) });
 const pendingAttachments: Array<{ reference: UploadedAttachment; name: string }> = [];
-let workspaceRoots: WorkspaceRoot[] | null = null;
-let mentionReferences: SavedReference[] = [];
-let workspaceStack: { path: string; name: string }[] = [];
-let workspaceEntries: WorkspaceEntry[] = [];
-let workspaceError: string | null = null;
-let workspaceDefaultError: string | null = null;
-let workspaceLoading = false;
-let workspaceRequest = 0;
-let localPickerLoading = false;
-let viewing: StoredSession | null = null;
 let persistTimer: number | undefined;
-let usageSummary: UsageSummary | undefined;
-let usageSessionId: string | null = null;
-let usageRequestId: string | null = null;
-let usageStartedAt: number | null = null;
-let turnUsage: TokenUsage | null = null;
-let usageTimer: number | undefined;
-const providerHints = new Map<ProviderId, string>();
-const providerStatuses = new Map<ProviderId, ProviderConnectionStatus>();
-const modelLoginRequired = new Set<ProviderId>();
-let modelPicker: ReturnType<typeof setupComposerMenu> | undefined;
 let permissionPicker: ReturnType<typeof setupComposerMenu> | undefined;
 let selectedSlashToken: string | null = null;
 
@@ -250,13 +198,11 @@ const loginPanel = setupProviderLogin({
   client: () => client,
   isBusy: () => currentRequestId !== null,
   onSuccess: () => {
-    modelLoginRequired.delete("copilot");
-    providerStatuses.set("copilot", "ready");
-    renderAuthNotice();
+    providerPicker.signedIn("copilot");
     if (provider !== "copilot") selectProvider("copilot");
     else {
       client.setProvider("copilot");
-      modelCatalogs.delete("copilot");
+      providerPicker.invalidateCatalog("copilot");
       void refreshModelCatalog("copilot");
     }
     showPanel(null);
@@ -283,6 +229,57 @@ const settings = setupSettings({
   saveInstructions: (content, revision) => client.saveSystemPrompt(content, revision),
   historyCount: () => store.list().length,
   clearHistory: () => els.historyClear.click(), historyClearButton: els.historyClear,
+});
+
+const { showPanel, openPanel, backFromPanel, openFloating, closeFloating, openMenu, closeMenu } = setupPanels({
+  getProvider: () => provider, elements: els, loginPanel,
+  renderHistory: () => renderHistory(), renderChanges: () => renderChanges(), renderProviderMenu: () => renderProviderMenu(),
+  openSettings: returning => {
+    void mcpSettings.refresh();
+    persistNow();
+    void settings.open(returning);
+    if (!returning) void updatePanel.refresh();
+  },
+  closePreview: () => { previewFrame.srcdoc = ""; previewing = null; },
+  refreshReferences: () => savedReferences.refresh(), refreshSkills: () => userSkills.refresh(),
+  refreshTesting: () => testingPanel.refresh(), loadTemplateSkills: () => loadTemplateSkills(),
+});
+
+const providerPicker = setupProviderPicker({
+  getClient: () => client, getProvider: () => provider,
+  setProvider: next => { provider = next; activeModel = undefined; },
+  closeMenu, openPanel, startNewChat, refreshTools: () => toolSettings.refreshProvider(), append, elements: els,
+});
+const { renderProviderMenu, renderAuthNotice, selectProvider, renderModelPicker, refreshModelCatalog, saveModelChoice } = providerPicker;
+
+const { loadTemplateSkills, renderTemplates, addTemplate } = setupTemplatePanel({ getClient: () => client, elements: els });
+
+const usagePanel = setupUsagePanel({
+  getClient: () => client, getSession: () => session, getProvider: () => provider,
+  store, elements: els, persistNow, append,
+});
+const { refreshUsage, renderUsage, exportUsage } = usagePanel;
+
+const { recordChange, renderChanges } = setupChangesPanel({
+  getSession: () => session, journal, schedulePersist, goTo, elements: els,
+});
+
+const { renderHistory, continueViewedSession, deleteViewedSession, clearHistory } = setupHistoryPanel({
+  getClient: () => client, getSession: () => session, getRequestId: () => currentRequestId,
+  store, providerNames: PROVIDER_NAMES, elements: els,
+  persistNow, abandonRequest, refreshUsage, loadSession, renderMessage, showPanel,
+  resetChat: () => {
+    session = newSession(provider);
+    needsContext = false;
+    els.messages.replaceChildren();
+    renderWelcome();
+    renderChanges();
+  },
+});
+
+const { updateMentionMenu, ensureWorkspaces, resetWorkspaces, chooseLocalFiles, setupFileDrop } = setupWorkspaceMenu({
+  getClient: () => client, getWorkbookName: currentWorkbookName, closeSlash: () => slash.close(),
+  renderComposerPreview, append, attachments: pendingAttachments, elements: els,
 });
 
 Office.onReady((info) => {
@@ -331,21 +328,12 @@ Office.onReady((info) => {
       void refreshModelCatalog(provider);
       if (session.messages.length) needsContext = true;
       activeModel = undefined;
-      workspaceRoots = null;
-      workspaceStack = [];
+      resetWorkspaces();
       void ensureWorkspaces();
       updater.check(addinBuildId);
       void updatePanel.afterReload();
     },
-    onProviderStatus: ({ provider: id, detection }) => {
-      providerStatuses.set(id, detection.status === "ready" && modelLoginRequired.has(id) ? "login_required" : detection.status);
-      providerHints.set(id, `${detection.version ?? "not found"} · ${detection.status.replace("_", " ")}`);
-      renderProviderMenu();
-      renderAuthNotice();
-      if (id === provider && detection.status === "error") {
-        append({ kind: "error", text: detection.hint ?? `${PROVIDER_NAMES[id]} is ${detection.status}.` });
-      }
-    },
+    onProviderStatus: ({ provider: id, detection }) => providerPicker.onStatus(id, detection),
     onProviderEvent: handleEvent,
     runTool: (context, tool, args, execute) => journal.run(context, tool, args, execute),
     onBrowserFrame: (frame) => { if (frame.requestId === currentRequestId) browserView.push(frame); },
@@ -393,7 +381,7 @@ Office.onReady((info) => {
   client.connect();
 
   setupTheme(byId<HTMLSelectElement>("theme-select"));
-  modelPicker = setupComposerMenu(els.modelSelect, byId<HTMLButtonElement>("model-button"), byId("model-menu"), (label) => `${PROVIDER_SHORT_NAMES[provider]} · ${label}`);
+  providerPicker.setupModelPicker();
   const savedEffort = localStorage.getItem("excelPartner.effort");
   els.effortSelect.value = savedEffort === "low" || savedEffort === "high" ? savedEffort : "medium";
   const effortButton = byId<HTMLButtonElement>("effort-button");
@@ -976,333 +964,8 @@ function finishLocalCancel(requestId: string, delegationId?: string): void {
   updater.reloadIfIdle();
 }
 
-function updateMentionMenu(): void {
-  const before = els.input.value.slice(0, els.input.selectionStart);
-  const mention = activeFileMention(before, pendingAttachments.map((item) => item.name));
-  const show = !!mention;
-  const opening = show && els.mentionMenu.hidden;
-  els.mentionMenu.hidden = !show;
-  if (show) {
-    slash.close();
-    void ensureWorkspaces();
-    if (opening) void refreshMentionReferences();
-    renderWorkspaceMenu();
-  }
-}
-
-/** Saved reference files are listed in the @ menu; reload them each time it opens so edits show up. */
-async function refreshMentionReferences(): Promise<void> {
-  try { mentionReferences = await client.listSavedReferences(); }
-  catch { mentionReferences = []; }
-  renderWorkspaceMenu();
-}
-
-async function ensureWorkspaces(): Promise<void> {
-  if (workspaceRoots || workspaceLoading) return;
-  workspaceLoading = true;
-  workspaceError = null;
-  renderWorkspaceMenu();
-  try {
-    const [documentUrl, workbookName] = await Promise.all([currentWorkbookUrl(), activeHost().hasSheets ? currentWorkbookName() : Promise.resolve("")]);
-    const result = await client.listWorkspaces(documentUrl, workbookName);
-    workspaceRoots = result.roots;
-    workspaceDefaultError = result.defaultError;
-  } catch (error) {
-    workspaceError = error instanceof Error ? error.message : String(error);
-  } finally {
-    workspaceLoading = false;
-    renderWorkspaceMenu();
-  }
-}
-
-async function currentWorkbookUrl(): Promise<string> {
-  const direct = Office.context.document.url;
-  if (direct) return direct;
-  return new Promise((resolve) => {
-    const timer = window.setTimeout(() => resolve(""), 2500);
-    try {
-      Office.context.document.getFilePropertiesAsync((result) => {
-        window.clearTimeout(timer);
-        resolve(result.status === Office.AsyncResultStatus.Succeeded ? result.value.url ?? "" : "");
-      });
-    } catch { window.clearTimeout(timer); resolve(""); }
-  });
-}
-
 async function currentWorkbookName(): Promise<string> {
   return (await activeHost().readName()) ?? "";
-}
-
-async function openWorkspaceFolder(path: string, name: string): Promise<void> {
-  const before = els.input.value.slice(0, els.input.selectionStart);
-  const mention = activeFileMention(before, pendingAttachments.map((item) => item.name));
-  if (mention) {
-    const cursor = mention.start + 1;
-    els.input.value = `${before.slice(0, cursor)}${els.input.value.slice(els.input.selectionStart)}`;
-    els.input.setSelectionRange(cursor, cursor);
-    renderComposerPreview();
-  }
-  workspaceStack.push({ path, name });
-  const request = ++workspaceRequest;
-  workspaceLoading = true;
-  workspaceError = null;
-  renderWorkspaceMenu();
-  try {
-    const listing = await client.listWorkspaceEntries(path);
-    if (request === workspaceRequest) workspaceEntries = listing.entries;
-  } catch (error) {
-    if (request === workspaceRequest) workspaceError = error instanceof Error ? error.message : String(error);
-  } finally {
-    if (request === workspaceRequest) {
-      workspaceLoading = false;
-      renderWorkspaceMenu();
-    }
-  }
-}
-
-function renderWorkspaceMenu(): void {
-  if (els.mentionMenu.hidden) return;
-  const menu = els.mentionMenu;
-  menu.replaceChildren();
-  const heading = document.createElement("div");
-  heading.className = "workspace-heading";
-  if (workspaceStack.length) {
-    const back = document.createElement("button");
-    back.type = "button";
-    back.textContent = "←";
-    back.title = "Back";
-    back.addEventListener("click", () => {
-      workspaceStack.pop();
-      if (workspaceStack.length) {
-        const parent = workspaceStack.pop()!;
-        void openWorkspaceFolder(parent.path, parent.name);
-      }
-      else renderWorkspaceMenu();
-    });
-    heading.append(back);
-  }
-  const title = document.createElement("strong");
-  title.textContent = workspaceStack.length ? workspaceStack.map((part) => part.name).join(" / ") : "Workspaces";
-  title.title = workspaceStack[workspaceStack.length - 1]?.path ?? "Workspaces";
-  heading.append(title);
-  menu.append(heading);
-
-  if (workspaceLoading) menu.append(workspaceNote("Loading…"));
-  else if (workspaceError) menu.append(workspaceNote(workspaceError));
-  else {
-    const rows = workspaceStack.length ? workspaceEntries : workspaceRoots ?? [];
-    const before = els.input.value.slice(0, els.input.selectionStart);
-    const query = activeFileMention(before, pendingAttachments.map((item) => item.name))?.query.toLowerCase().trim() ?? "";
-    const visible = workspaceStack.length && query ? rows.filter((entry) => entry.name.toLowerCase().includes(query)) : rows;
-    if (!visible.length) menu.append(workspaceNote(workspaceStack.length ? "No matching files or folders." : "No workbook folder found. Choose local files below."));
-    for (const entry of visible) {
-      const button = document.createElement("button");
-      button.type = "button";
-      button.className = "workspace-row";
-      button.title = entry.path;
-      const isFolder = !workspaceStack.length || ("type" in entry && entry.type === "folder");
-      const supported = isFolder || ("supported" in entry && entry.supported);
-      setWorkspaceRow(button, `${entry.name}${!workspaceStack.length && "isDefault" in entry && entry.isDefault ? " · current workbook" : ""}${!supported ? " · unsupported" : ""}`, isFolder);
-      button.disabled = !supported;
-      button.addEventListener("click", () => {
-        if (isFolder) void openWorkspaceFolder(entry.path, entry.name);
-        else void chooseWorkspaceFile(entry.path);
-      });
-      if (!workspaceStack.length && "removable" in entry && entry.removable) {
-        const line = document.createElement("div");
-        line.className = "workspace-root";
-        const remove = document.createElement("button");
-        remove.type = "button";
-        remove.className = "workspace-remove";
-        remove.textContent = "×";
-        remove.title = `Remove workspace ${entry.name}`;
-        remove.setAttribute("aria-label", `Remove workspace ${entry.name}`);
-        remove.addEventListener("click", () => void removeWorkspace(entry.path));
-        line.append(button, remove);
-        menu.append(line);
-      } else menu.append(button);
-    }
-    if (!workspaceStack.length && workspaceDefaultError && visible.length) menu.append(workspaceNote("Workbook folder unavailable. Choose local files below."));
-  }
-
-  // The saved references (files and folders) are always offered, even when the workspace folders could not be listed.
-  if (!workspaceStack.length && !workspaceLoading) {
-    const before = els.input.value.slice(0, els.input.selectionStart);
-    const query = activeFileMention(before, pendingAttachments.map((item) => item.name))?.query.toLowerCase().trim() ?? "";
-    const refs = query ? mentionReferences.filter((ref) => `${ref.name} ${ref.path}`.toLowerCase().includes(query)) : mentionReferences;
-    if (refs.length) {
-      const label = document.createElement("div");
-      label.className = "workspace-heading";
-      label.textContent = "References";
-      menu.append(label);
-      for (const ref of refs) {
-        const kind = ref.kind === "folder" ? "Folder" : "File";
-        const button = document.createElement("button");
-        button.type = "button";
-        button.className = "workspace-row";
-        button.title = ref.available ? `${ref.path}${ref.description ? `\n${ref.description}` : ""}` : `${kind} not found: ${ref.path}`;
-        setWorkspaceRow(button, `${ref.name}${ref.available ? "" : ` · ${kind.toLowerCase()} not found`}`, ref.kind === "folder");
-        button.disabled = !ref.available;
-        // A file is attached by its path, like any workspace file. A folder is only pointed at: its path goes to the assistant,
-        // which lists and reads inside it itself, so there is nothing to open or attach here.
-        button.addEventListener("click", () => ref.kind === "folder"
-          ? addAttachment({ reference: { name: ref.name, kind: "folder", path: ref.path }, name: ref.name })
-          : void chooseWorkspaceFile(ref.path));
-        menu.append(button);
-      }
-    }
-  }
-
-  const actions = document.createElement("div");
-  actions.className = "workspace-actions";
-  const pick = document.createElement("button");
-  pick.type = "button";
-  setWorkspaceRow(pick, "Choose local files…", false);
-  pick.addEventListener("click", openLocalFilePicker);
-  actions.append(pick);
-  menu.append(actions);
-}
-
-function setWorkspaceRow(button: HTMLButtonElement, text: string, folder: boolean): void {
-  const icon = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-  icon.setAttribute("viewBox", "0 0 20 20");
-  icon.setAttribute("aria-hidden", "true");
-  icon.classList.add("workspace-icon");
-  const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
-  path.setAttribute("d", folder ? "M2.5 6V4.5h6l2 2h7v10h-15z" : "M5 2.5h6l4 4v11H5z M11 2.5v4h4 M7.5 10h5 M7.5 13h5");
-  icon.append(path);
-  const label = document.createElement("span");
-  label.className = "workspace-row-label";
-  label.textContent = text;
-  button.replaceChildren(icon, label);
-}
-
-async function removeWorkspace(path: string): Promise<void> {
-  workspaceLoading = true;
-  workspaceError = null;
-  renderWorkspaceMenu();
-  try {
-    await client.removeWorkspace(path);
-    workspaceRoots = workspaceRoots?.filter((root) => root.path !== path) ?? null;
-    workspaceStack = [];
-  } catch (error) {
-    workspaceError = error instanceof Error ? error.message : String(error);
-  } finally {
-    workspaceLoading = false;
-    renderWorkspaceMenu();
-  }
-}
-
-function workspaceNote(message: string): HTMLElement {
-  const note = document.createElement("div");
-  note.className = "slash-empty";
-  note.textContent = message;
-  return note;
-}
-
-async function chooseWorkspaceFile(path: string): Promise<void> {
-  workspaceLoading = true;
-  renderWorkspaceMenu();
-  try {
-    const attachment = await client.attachWorkspaceFile(path);
-    selectWorkspaceAttachment(attachment);
-  } catch (error) {
-    workspaceError = error instanceof Error ? error.message : String(error);
-  } finally {
-    workspaceLoading = false;
-    renderWorkspaceMenu();
-  }
-}
-
-function selectWorkspaceAttachment(attachment: UploadedAttachment): void {
-  addAttachment({ reference: attachment, name: attachment.name });
-}
-
-function openLocalFilePicker(): void {
-  if (localPickerLoading) return;
-  const input = document.createElement("input");
-  input.type = "file";
-  input.multiple = true;
-  input.onchange = () => {
-    const files = Array.from(input.files ?? []);
-    if (files.length) void chooseLocalFiles(files);
-  };
-  input.click();
-}
-
-/**
- * Drop files anywhere on the pane to attach them. The whole window listens because a file dropped outside
- * the message box would otherwise make the browser open it and replace the pane.
- */
-function setupFileDrop(): void {
-  const card = els.input.closest<HTMLElement>(".composer-card");
-  let depth = 0;
-  const reset = () => { depth = 0; card?.classList.remove("drop-active"); };
-  const composerVisible = () => els.input.getClientRects().length > 0;
-  document.addEventListener("dragenter", (event) => {
-    if (!isFileDrag(event.dataTransfer)) return;
-    event.preventDefault();
-    depth++;
-    if (composerVisible()) card?.classList.add("drop-active");
-  });
-  document.addEventListener("dragover", (event) => {
-    if (!isFileDrag(event.dataTransfer)) return;
-    event.preventDefault();
-    if (event.dataTransfer) event.dataTransfer.dropEffect = composerVisible() ? "copy" : "none";
-  });
-  document.addEventListener("dragleave", (event) => {
-    if (!isFileDrag(event.dataTransfer)) return;
-    depth = Math.max(0, depth - 1);
-    if (!depth) reset();
-  });
-  document.addEventListener("dragend", reset);
-  document.addEventListener("drop", (event) => {
-    if (!isFileDrag(event.dataTransfer)) return;
-    event.preventDefault();
-    reset();
-    if (!composerVisible()) return;
-    const { files, folders } = filesFromDrop(event.dataTransfer);
-    if (folders) append({ kind: "error", text: "Folders cannot be attached. Drop the files inside the folder instead." });
-    if (files.length) void chooseLocalFiles(files);
-  });
-}
-
-async function chooseLocalFiles(files: File[]): Promise<void> {
-  if (localPickerLoading) return;
-  if (pendingAttachments.length + files.length > 10) {
-    append({ kind: "error", text: "Choose at most 10 files per message." });
-    return;
-  }
-  localPickerLoading = true;
-  els.mentionMenu.hidden = true;
-  try {
-    for (const file of files) selectWorkspaceAttachment(await client.uploadAttachment(file));
-  } catch (error) {
-    append({ kind: "error", text: error instanceof Error ? error.message : String(error) });
-  } finally {
-    localPickerLoading = false;
-  }
-}
-
-function addAttachment(item: { reference: UploadedAttachment; name: string }): void {
-  if (pendingAttachments.length >= 10) {
-    append({ kind: "error", text: "Choose at most 10 files per message." });
-    return;
-  }
-  els.mentionMenu.hidden = true;
-  const cursor = els.input.selectionStart;
-  const before = els.input.value.slice(0, cursor);
-  const after = els.input.value.slice(cursor);
-  const token = `@${item.name}`;
-  const mention = activeFileMention(before, pendingAttachments.map((selected) => selected.name));
-  const prefix = mention ? before.slice(0, mention.start) : `${before}${before && !/\s$/.test(before) ? " " : ""}`;
-  const separator = !after || !/^\s/.test(after) ? " " : "";
-  els.input.value = `${prefix}${token}${separator}${after}`;
-  const nextCursor = prefix.length + token.length + 1;
-  els.input.setSelectionRange(nextCursor, nextCursor);
-  pendingAttachments.push(item);
-  renderComposerPreview();
-  els.input.focus();
 }
 
 function appendFileMentions(container: HTMLElement, text: string, names: readonly string[]): void {
@@ -1398,8 +1061,7 @@ function handleEvent(event: ProviderEvent): void {
       session = bound.current;
       requestSession = session;
       if (oldId !== session.id) {
-        usageSummary = undefined;
-        if (usageRequestId === event.requestId) usageSessionId = session.id;
+        usagePanel.rebind(event.requestId);
         // Metadata precedes output, so redraw only when a request moves to another native session.
         clearThinking();
         els.messages.replaceChildren();
@@ -1417,19 +1079,10 @@ function handleEvent(event: ProviderEvent): void {
       if (event.requestId !== currentRequestId) return;
       void refreshSheetNames();
       setThinkingLabel(null);
-      usageSessionId = session.id;
-      usageRequestId = event.requestId;
-      usageStartedAt = Date.now();
-      turnUsage = null;
-      window.clearInterval(usageTimer);
-      usageTimer = window.setInterval(renderUsage, 1000);
-      renderUsage();
+      usagePanel.start(event.requestId);
       return;
     case "usage_update":
-      if (event.requestId === usageRequestId) {
-        turnUsage = event.usage;
-        renderUsage();
-      }
+      usagePanel.update(event.requestId, event.usage);
       return;
     case "thinking_delta":
       thoughts.add(event.text);
@@ -1488,12 +1141,7 @@ function handleEvent(event: ProviderEvent): void {
     case "turn_finished":
       if (event.requestId !== currentRequestId) return;
       autoQueueAllowed = event.reason === "completed";
-      if (event.requestId === usageRequestId) {
-        window.clearInterval(usageTimer);
-        usageStartedAt = null;
-        turnUsage = null;
-        usageRequestId = null;
-      }
+      usagePanel.finish(event.requestId);
       void refreshUsage();
       slash.reload();
       void userSkills.refresh();
@@ -1518,96 +1166,12 @@ function handleEvent(event: ProviderEvent): void {
     case "error":
       clearThinking();
       if (event.code === "login_required") {
-        modelLoginRequired.add(provider);
-        providerStatuses.set(provider, "login_required");
-        renderAuthNotice();
+        providerPicker.requireLogin(provider);
       }
       append({ kind: "error", text: event.message });
       return;
     default:
       return;
-  }
-}
-
-async function refreshUsage(): Promise<void> {
-  const id = session.id;
-  if (usageSummary?.sessionId !== id) usageSummary = undefined;
-  renderUsage();
-  if (!client?.connected) return;
-  try {
-    const summaries = await client.usageSummaries(id);
-    if (session.id !== id) return;
-    usageSummary = summaries[0];
-    if (usageSummary?.title) {
-      session.providerTitle = usageSummary.title;
-      session.title = usageSummary.title;
-      store.save(session);
-    }
-    renderUsage();
-  } catch {
-    if (session.id === id) els.usageStats.textContent = "Usage statistics unavailable";
-  }
-}
-
-function renderUsage(): void {
-  const running = usageSessionId === session.id && usageStartedAt !== null;
-  const summary = usageSummary?.sessionId === session.id ? usageSummary : undefined;
-  const reported = (summary?.reportedTurns ?? 0) + (running && turnUsage ? 1 : 0);
-  const turns = (summary?.turns ?? 0) + (running ? 1 : 0);
-  const tokens = (summary?.totalTokens ?? 0) + (running ? turnUsage?.totalTokens ?? 0 : 0);
-  const partial = reported > 0 && reported < turns;
-  const duration = (summary?.durationMs ?? 0) + (running ? Date.now() - usageStartedAt! : 0);
-  els.usageStats.textContent = `Session tokens: ${reported || !turns ? tokens.toLocaleString() : "N/A"}${partial ? " (partial)" : ""} · AI time: ${formatDuration(duration)}`;
-  const input = (summary?.inputTokens ?? 0) + (running ? turnUsage?.inputTokens ?? 0 : 0);
-  const cached = (summary?.cachedInputTokens ?? 0) + (running ? turnUsage?.cachedInputTokens ?? 0 : 0);
-  const output = (summary?.outputTokens ?? 0) + (running ? turnUsage?.outputTokens ?? 0 : 0);
-  els.usageBreakdown.textContent = reported || !turns
-    ? `Input: ${input.toLocaleString()} · Cache read: ${cached.toLocaleString()} · Output: ${output.toLocaleString()}`
-    : "Provider has not reported token usage";
-  els.usageBreakdown.title = "Cached tokens are included in input, not added again. Input includes instructions, tools, workbook context and conversation history.";
-  const splitTurns = (summary?.cacheSplitReportedTurns ?? 0) + (running && turnUsage?.cacheWriteTokens !== undefined && turnUsage?.uncachedInputTokens !== undefined ? 1 : 0);
-  const uncached = (summary?.uncachedInputTokens ?? 0) + (running ? turnUsage?.uncachedInputTokens ?? 0 : 0);
-  const cacheWrite = (summary?.cacheWriteTokens ?? 0) + (running ? turnUsage?.cacheWriteTokens ?? 0 : 0);
-  els.usageCacheSplit.textContent = splitTurns
-    ? `Uncached input: ${uncached.toLocaleString()} · Cache write: ${cacheWrite.toLocaleString()}${splitTurns < turns ? " (partial)" : ""}`
-    : "Uncached input / cache write: not reported";
-  els.usageCacheSplit.title = "Input = uncached input + cache read + cache write when the full split is available. Both cache buckets are already included in input.";
-  const creditTurns = (summary?.creditReportedTurns ?? 0) + (running && turnUsage?.copilotCredits !== undefined ? 1 : 0);
-  const credits = (summary?.copilotCredits ?? 0) + (running ? turnUsage?.copilotCredits ?? 0 : 0);
-  const exactCreditTurns = (summary?.exactCreditReportedTurns ?? 0) + (running && turnUsage?.copilotCreditNanoAiu !== undefined ? 1 : 0);
-  els.usageCredits.hidden = provider !== "copilot" && creditTurns === 0;
-  els.usageCredits.textContent = creditTurns
-    ? `Copilot credits: ${exactCreditTurns === creditTurns ? "" : "≈ "}${formatCredits(credits)}${creditTurns < turns ? " (partial)" : ""}${exactCreditTurns < creditTurns ? " (includes rounded legacy data)" : ""}`
-    : "Copilot credits: not reported";
-  els.usageCredits.title = "Original Copilot credits retain integer nano AI units (1 credit = 1,000,000,000 nano units). Old /usage records remain marked rounded. Credits are never estimated from tokens.";
-  const originalTurns = (summary?.originalReportedTurns ?? 0) + (running && turnUsage?.source && turnUsage.source !== "copilot_acp" ? 1 : 0);
-  const cliSessions = new Set(summary?.providerSessionIds ?? []);
-  if (running && turnUsage?.providerSessionId) cliSessions.add(turnUsage.providerSessionId);
-  els.usageSource.hidden = cliSessions.size === 0;
-  els.usageSource.textContent = `Original provider data: ${originalTurns}/${turns} turns · CLI sessions: ${cliSessions.size}`;
-  els.usageSource.title = `Each native CLI session has separate history and accounting. Session: ${[...cliSessions].join(", ") || "not recorded"}. Resuming keeps its ID and previously recorded usage. Background calls after turn completion are outside this report.`;
-  els.usageStats.title = `This chat session: ${reported}/${turns} turns with token data. Total includes cached tokens. AI time includes provider/tool/approval waits while processing; idle time is excluded.`;
-}
-
-async function exportUsage(): Promise<void> {
-  els.usageExport.disabled = true;
-  try {
-    persistNow();
-    const summaries = await client.usageSummaries();
-    const titles = new Map(store.list().map((item) => [item.id, item.title]));
-    const blob = new Blob([usageCsv(summaries, titles)], { type: "text/csv;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `excel-partner-usage-${new Date().toISOString().slice(0, 10)}.csv`;
-    document.body.append(link);
-    link.click();
-    link.remove();
-    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
-  } catch (error) {
-    append({ kind: "error", text: `Could not export usage: ${error instanceof Error ? error.message : String(error)}` });
-  } finally {
-    els.usageExport.disabled = false;
   }
 }
 
@@ -1719,19 +1283,8 @@ function loadSession(stored: StoredSession): void {
 }
 
 /* -------------------------------------------------------------------------- */
-/* Settings menu + provider                                                    */
+/* Tool permissions                                                           */
 /* -------------------------------------------------------------------------- */
-
-function loadProvider(): ProviderId {
-  const saved = localStorage.getItem(PROVIDER_KEY);
-  return saved === "claude" || saved === "copilot" || saved === "codex" || saved === "opencode" ? saved : "copilot";
-}
-
-function openMenu(): void {
-  renderProviderMenu();
-  els.menu.hidden = false;
-  els.menuButton.setAttribute("aria-expanded", "true");
-}
 
 function selectPermissionMode(mode: PermissionMode): void {
   if (mode !== "ask" && mode !== "auto") return;
@@ -1741,96 +1294,9 @@ function selectPermissionMode(mode: PermissionMode): void {
   els.permissionMode.value = mode;
   permissionPicker?.refresh();
 }
-
-function closeMenu(): void {
-  els.menu.hidden = true;
-  els.menuButton.setAttribute("aria-expanded", "false");
-}
-
-function renderProviderMenu(): void {
-  toolSettings.refreshProvider();
-  byId<HTMLSelectElement>("provider-select").value = provider;
-  els.providerHint.textContent = providerHints.get(provider) ?? "";
-  byId("menu-login").textContent = `Sign in to ${PROVIDER_NAMES[provider]}`;
-}
-
-function renderAuthNotice(): void {
-  const status = providerStatuses.get(provider);
-  byId("auth-notice").hidden = status !== "login_required" && status !== "not_installed";
-  byId("auth-notice-title").textContent = status === "not_installed" ? `Set up ${PROVIDER_NAMES[provider]}` : `Sign in to ${PROVIDER_NAMES[provider]}`;
-  byId("auth-notice-detail").textContent = status === "not_installed" ? "Install the CLI on the bridge machine." : "Connect your account to start chatting.";
-  byId("provider-login-button").textContent = status === "not_installed" ? "Set up ↗" : "Sign in ↗";
-}
-
-function selectProvider(next: ProviderId): void {
-  closeMenu();
-  if (next === provider) return;
-  provider = next;
-  activeModel = undefined;
-  localStorage.setItem(PROVIDER_KEY, next);
-  renderProviderMenu();
-  renderAuthNotice();
-  renderModelPicker();
-  // A provider keeps its own conversation: switching starts a fresh chat (the old one stays in History).
-  startNewChat(openPanel() === "settings");
-  client.setProvider(next);
-  void refreshModelCatalog(next);
-}
-
-function renderModelPicker(): void {
-  const catalog = modelCatalogs.get(provider);
-  const defaultOption = document.createElement("option");
-  defaultOption.value = "";
-  defaultOption.textContent = "Default";
-  els.modelSelect.replaceChildren(defaultOption, ...(catalog?.models ?? []).map((model) => {
-    const option = document.createElement("option");
-    option.value = model.id;
-    option.textContent = model.name;
-    return option;
-  }));
-  if (!catalog) {
-    const info = document.createElement("option");
-    info.disabled = true;
-    info.textContent = modelErrors.get(provider) ? "Models unavailable" : "Loading models…";
-    els.modelSelect.append(info);
-  }
-  const saved = models[provider];
-  els.modelSelect.value = saved && catalog?.models.some((model) => model.id === saved) ? saved : "";
-  els.modelSelect.title = `${PROVIDER_NAMES[provider]} model${catalog?.defaultModelId ? `; default: ${catalog.defaultModelId}` : ""}`;
-  modelPicker?.refresh();
-}
-
-async function refreshModelCatalog(forProvider: ProviderId): Promise<void> {
-  try {
-    const catalog = await client.listModels(forProvider);
-    modelLoginRequired.delete(forProvider);
-    if (providerStatuses.get(forProvider) === "login_required") providerStatuses.set(forProvider, "ready");
-    renderAuthNotice();
-    modelCatalogs.set(forProvider, catalog);
-    modelErrors.delete(forProvider);
-    if (provider === forProvider) renderModelPicker();
-  } catch (error) {
-    modelErrors.set(forProvider, true);
-    if ((error as { code?: string }).code === "login_required") {
-      modelLoginRequired.add(forProvider);
-      providerStatuses.set(forProvider, "login_required");
-      renderAuthNotice();
-    }
-    if (provider === forProvider) renderModelPicker();
-  }
-}
-
-function saveModelChoice(): void {
-  const model = els.modelSelect.value;
-  if (model) models[provider] = model;
-  else delete models[provider];
-  localStorage.setItem(MODEL_KEY, JSON.stringify(models));
-}
-
 /* -------------------------------------------------------------------------- */
-/* Panels: changes, history, past chat                                         */
+/* Artifact preview                                                           */
 /* -------------------------------------------------------------------------- */
-
 
 function showSource(on: boolean): void {
   previewToggle.setAttribute("aria-pressed", String(on));
@@ -1856,238 +1322,6 @@ previewCopy.addEventListener("click", () => {
     () => { previewCopy.textContent = "Copy failed"; },
   ).finally(() => window.setTimeout(() => { previewCopy.textContent = "Copy"; }, 1500));
 });
-
-type PanelName = keyof typeof els.panels;
-let settingsChild = false;
-let settingsOpener: HTMLElement | null = null;
-
-function backFromPanel(): void {
-  const returning = settingsChild;
-  showPanel(returning ? "settings" : null);
-  if (returning) settingsOpener?.focus({ preventScroll: true });
-  else els.menuButton.focus({ preventScroll: true });
-}
-
-function openPanel(): PanelName | null {
-  for (const name of Object.keys(els.panels) as PanelName[]) if (!els.panels[name].hidden && (!els.panels[name].hasAttribute("popover") || isFloatingOpen(els.panels[name]))) return name;
-  return null;
-}
-
-function isFloatingOpen(element: HTMLElement): boolean {
-  return element.matches(":popover-open") || element.dataset.floatingOpen === "true";
-}
-function closeFloating(element: HTMLElement): void {
-  if (typeof element.hidePopover === "function") element.hidePopover();
-  delete element.dataset.floatingOpen;
-  const anchor = document.getElementById(element.dataset.floatingAnchor ?? "");
-  anchor?.setAttribute("aria-expanded", "false");
-}
-
-function openFloating(element: HTMLElement, anchor: HTMLElement): void {
-  const wasOpen = isFloatingOpen(element);
-  for (const popover of document.querySelectorAll<HTMLElement>(':popover-open, [data-floating-open="true"]')) closeFloating(popover);
-  if (wasOpen) return;
-  element.classList.add("compact-popover");
-  element.setAttribute("popover", "auto");
-  element.hidden = false;
-  const rect = anchor.getBoundingClientRect();
-  const width = Math.min(340, window.innerWidth - 24);
-  element.style.width = `${width}px`;
-  element.style.left = `${Math.max(12, Math.min(rect.right - width, window.innerWidth - width - 12))}px`;
-  element.style.right = "auto";
-  const below = rect.bottom < window.innerHeight / 2;
-  element.style.top = below ? `${rect.bottom + 8}px` : "auto";
-  element.style.bottom = below ? "auto" : `${window.innerHeight - rect.top + 8}px`;
-  element.dataset.floatingAnchor = anchor.id;
-  if (typeof element.showPopover === "function") element.showPopover();
-  else element.dataset.floatingOpen = "true";
-  anchor.setAttribute("aria-expanded", "true");
-  element.ontoggle = () => anchor.setAttribute("aria-expanded", String(isFloatingOpen(element)));
-}
-
-function showPanel(name: PanelName | null): void {
-  if (name === "history" || name === "changes") {
-    if (name === "history") renderHistory(); else renderChanges();
-    openFloating(els.panels[name], byId(name === "history" ? "history-button" : "changes-button"));
-    return;
-  }
-  for (const popover of document.querySelectorAll<HTMLElement>(':popover-open, [data-floating-open="true"]')) closeFloating(popover);
-  byId("settings-tools-section").append(byId("tools-menu"));
-  if (name === "skills") { els.panels.skills.removeAttribute("popover"); els.panels.skills.classList.remove("compact-popover"); els.panels.skills.removeAttribute("style"); }
-  const previous = openPanel();
-  const returningToSettings = name === "settings" && settingsChild;
-  if (previous === "settings" && name !== null && name !== "settings") {
-    settingsChild = true;
-    settingsOpener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-  } else if (name === null || name === "settings") settingsChild = false;
-  closeMenu();
-  for (const key of Object.keys(els.panels) as PanelName[]) els.panels[key].hidden = key !== name;
-  document.body.classList.toggle("settings-active", name === "settings" || settingsChild);
-  for (const button of document.querySelectorAll<HTMLButtonElement>("[data-close]")) {
-    button.setAttribute("aria-label", settingsChild ? "Back to settings" : "Back to chat");
-  }
-  // The small view repeats the large one and takes its height, so it steps aside while the large one is open.
-  document.body.classList.toggle("browser-active", name === "browser");
-  if (name === "settings") { void mcpSettings.refresh(); persistNow(); void settings.open(returningToSettings); if (!returningToSettings) void updatePanel.refresh(); }
-  if (name !== "preview") { previewFrame.srcdoc = ""; previewing = null; }
-  if (name === "references") void savedReferences.refresh();
-  if (name === "skills") void userSkills.refresh();
-  if (name === "testing") void testingPanel.refresh();
-  document.body.classList.toggle("login-active", name === "login");
-  if (name === "login") {
-    byId("login-heading").textContent = `Sign in to ${PROVIDER_NAMES[provider]}`;
-    byId("login-description").textContent = provider === "copilot" ? `Finish signing in through your browser, then return to ${activeHost().app}.` : "Sign in through the CLI on the bridge machine, then check the connection again.";
-    byId("login-device").hidden = provider !== "copilot";
-    byId("login-manual").hidden = provider === "copilot";
-    byId("login-command").textContent = PROVIDER_LOGIN_COMMANDS[provider];
-    byId("login-manual-hint").textContent = PROVIDER_LOGIN_HINTS[provider];
-    if (provider === "copilot") loginPanel.open();
-    else loginPanel.close();
-  } else loginPanel.close();
-  byId("tab-chat").setAttribute("aria-pressed", String(name === null));
-  byId("tab-changes").setAttribute("aria-pressed", "false");
-  byId("tab-history").setAttribute("aria-pressed", String(name === "session"));
-  if (name === "templates") void loadTemplateSkills();
-}
-
-async function loadTemplateSkills(): Promise<void> {
-  els.templateList.textContent = "Loading skills…";
-  try {
-    const selected = els.templateSkill.value;
-    const skills = await client.listTemplateSkills();
-    els.templateSkill.replaceChildren(...skills.map((skill) => {
-      const option = document.createElement("option");
-      option.value = skill.name;
-      option.textContent = skill.name;
-      return option;
-    }));
-    if (skills.some((skill) => skill.name === selected)) els.templateSkill.value = selected;
-    els.templateAdd.disabled = skills.length === 0;
-    if (skills.length) await renderTemplates();
-    else {
-      const option = document.createElement("option");
-      option.textContent = "No skills available";
-      els.templateSkill.append(option);
-      els.templateList.innerHTML = '<div class="empty"><strong>Add your first skill</strong><p>Open Skills in Settings to add a skill, then attach example files here.</p></div>';
-    }
-    els.templateSkill.disabled = skills.length === 0;
-  } catch (error) { els.templateList.textContent = error instanceof Error ? error.message : String(error); }
-}
-
-async function renderTemplates(): Promise<void> {
-  const skill = els.templateSkill.value;
-  if (!skill) return;
-  els.templateList.textContent = "Loading templates…";
-  try {
-    const templates = await client.listSkillTemplates(skill);
-    if (skill !== els.templateSkill.value) return;
-    els.templateList.replaceChildren(...templates.map((item) => templateRow(skill, item)));
-    if (!templates.length) els.templateList.textContent = "No templates for this skill yet.";
-  } catch (error) { els.templateList.textContent = error instanceof Error ? error.message : String(error); }
-}
-
-function templateRow(skill: string, item: SkillTemplate): HTMLElement {
-  const row = document.createElement("div");
-  row.className = "template-row";
-  const label = document.createElement("span");
-  label.textContent = `${item.name} · ${item.kind} · ${Math.max(1, Math.round(item.size / 1024))} KB`;
-  label.title = item.path;
-  const remove = document.createElement("button");
-  remove.type = "button";
-  remove.className = "ghost";
-  remove.textContent = "Delete";
-  remove.setAttribute("aria-label", `Delete template ${item.name}`);
-  remove.addEventListener("click", async () => {
-    remove.disabled = true;
-    try { await client.deleteSkillTemplate(skill, item.name); await renderTemplates(); }
-    catch (error) { els.templateList.textContent = error instanceof Error ? error.message : String(error); }
-  });
-  row.append(label, remove);
-  return row;
-}
-
-async function addTemplate(file: File): Promise<void> {
-  const skill = els.templateSkill.value;
-  if (!skill) return;
-  els.templateAdd.disabled = true;
-  try { await client.addSkillTemplate(skill, file); await renderTemplates(); }
-  catch (error) { els.templateList.textContent = error instanceof Error ? error.message : String(error); }
-  finally { els.templateAdd.disabled = false; }
-}
-
-function recordChange(tool: string, args: unknown, result: ToolResult, context: { callId: string; requestId: string }): void {
-  const change = describeChange(tool, args, result, activeHost().writeTools);
-  if (!change) return;
-  session.changes.push({ at: Date.now(), tool: change.tool, ok: change.ok, summary: change.summary, target: change.target, callId: context.callId, requestId: context.requestId });
-  renderChanges();
-  schedulePersist();
-}
-
-function renderChanges(): void {
-  const total = session.changes.length;
-  els.changesCount.hidden = total === 0;
-  els.changesCount.textContent = String(total);
-  const tabCount = byId("tab-changes-count");
-  tabCount.hidden = total === 0;
-  tabCount.textContent = String(total);
-  els.menuDot.hidden = total === 0;
-  if (els.panels.changes.hidden) return;
-
-  if (total === 0) {
-    els.changesList.innerHTML = '<div class="empty">No changes yet. Edits made to the workbook in this chat will be listed here.</div>';
-    return;
-  }
-  const bar = undoBar(session.changes, undoView());
-  els.changesList.replaceChildren(...(bar ? [bar] : []), ...[...session.changes].reverse().map((entry) => changeRow(entry)));
-}
-
-let undoBusy = false;
-
-async function runUndo(work: () => Promise<{ ok: boolean; message: string }>): Promise<void> {
-  if (undoBusy) return;
-  undoBusy = true;
-  undoNote = { ok: true, text: "Undoing…" };
-  renderChanges();
-  try {
-    const outcome = await work();
-    undoNote = { ok: outcome.ok, text: outcome.message };
-  } catch (error) {
-    undoNote = { ok: false, text: `Could not undo: ${error instanceof Error ? error.message : String(error)}` };
-  } finally {
-    undoBusy = false;
-  }
-  renderChanges();
-}
-
-const undoView = (): UndoView => ({
-  journal, busy: undoBusy, note: undoNote,
-  undoCall: (callId) => void runUndo(() => journal.undoCall(callId)),
-  undoReply: (requestId) => void runUndo(() => journal.undoRequest(requestId)),
-});
-
-function changeRow(entry: StoredChange): HTMLElement {
-  const row = document.createElement("div");
-  row.className = "change";
-  row.dataset.ok = String(entry.ok);
-  const time = document.createElement("span");
-  time.className = "time";
-  time.textContent = new Date(entry.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
-  const summary = document.createElement("span");
-  summary.className = "summary";
-  summary.textContent = entry.summary;
-  row.append(time, summary);
-  if (entry.target) {
-    const target = entry.target;
-    const go = document.createElement("button");
-    go.className = "secondary";
-    go.textContent = "Go to";
-    go.addEventListener("click", () => void goTo(target));
-    row.append(go);
-  }
-  const undo = undoControl(entry, undoView());
-  if (undo) row.append(undo);
-  return row;
-}
 
 /**
  * Read the sheet names from Excel. True when they changed. With `redraw`, a changed list also draws the chat again, since which
@@ -2149,144 +1383,6 @@ async function goToLink(target: { file?: string; sheet?: string; address: string
     const reason = error instanceof Error ? error.message : String(error);
     append({ kind: "error", text: `Cannot go to ${placeLabel(target)}: ${reason}` });
   }
-}
-
-function renderHistory(refreshTitles = true): void {
-  persistNow(); // so the current chat is listed too
-  if (refreshTitles) void refreshHistoryTitles();
-  const items = store.list();
-  els.historyClear.hidden = items.length === 0;
-  if (items.length === 0) {
-    els.historyList.innerHTML = '<div class="empty">No saved chats yet. Your conversations are kept on this computer.</div>';
-    return;
-  }
-  els.historyList.replaceChildren(
-    ...items.map((item) => {
-      const row = document.createElement("div");
-      row.style.position = "relative";
-      const open = document.createElement("button");
-      open.type = "button";
-      open.className = "history-item";
-      open.dataset.current = String(item.id === session.id);
-      const title = document.createElement("span");
-      title.className = "history-title";
-      title.textContent = item.title;
-      const meta = document.createElement("span");
-      meta.className = "history-meta";
-      meta.textContent = [
-        item.id === session.id ? "Current" : null,
-        PROVIDER_NAMES[item.provider as ProviderId] ?? item.provider,
-        item.providerSessionId ? null : "Legacy chat",
-        formatWhen(item.updatedAt),
-        `${item.messageCount} message${item.messageCount === 1 ? "" : "s"}`,
-        item.changeCount > 0 ? `${item.changeCount} change${item.changeCount === 1 ? "" : "s"}` : null,
-      ]
-        .filter(Boolean)
-        .join(" · ");
-      open.append(title, meta);
-      open.addEventListener("click", () => openSession(item.id));
-      const remove = document.createElement("button");
-      remove.type = "button";
-      remove.className = "history-delete";
-      remove.title = "Delete this chat";
-      remove.setAttribute("aria-label", "Delete this chat");
-      remove.textContent = "✕";
-      remove.addEventListener("click", () => deleteSession(item.id));
-      row.append(open, remove);
-      return row;
-    }),
-  );
-}
-
-async function refreshHistoryTitles(): Promise<void> {
-  if (!client?.connected) return;
-  try {
-    const summaries = await client.usageSummaries();
-    let changed = false;
-    for (const summary of summaries) {
-      if (!summary.title) continue;
-      const stored = summary.sessionId === session.id ? session : store.get(summary.sessionId);
-      if (!stored || stored.providerTitle === summary.title) continue;
-      stored.providerTitle = summary.title;
-      stored.title = summary.title;
-      store.save(stored);
-      changed = true;
-    }
-    if (changed) renderHistory(false);
-  } catch { /* The local history remains usable while disconnected. */ }
-}
-
-function openSession(id: string): void {
-  persistNow();
-  const stored = store.get(id);
-  if (!stored) return renderHistory();
-  viewing = stored;
-  els.sessionTitle.textContent = stored.title;
-  els.sessionMeta.textContent = `${PROVIDER_NAMES[stored.provider as ProviderId] ?? stored.provider} · ${new Date(stored.startedAt).toLocaleString()}`;
-  els.sessionTranscript.replaceChildren();
-  for (const message of stored.messages) renderMessage(els.sessionTranscript, message);
-  els.sessionContinue.textContent = stored.id === session.id ? "Back to chat" : "Continue this chat";
-  showPanel("session");
-  els.sessionTranscript.scrollTop = 0;
-}
-
-function continueViewedSession(): void {
-  if (!viewing) return;
-  if (viewing.id !== session.id) {
-    if (currentRequestId) client.cancel(currentRequestId);
-    persistNow();
-    loadSession(viewing);
-  }
-  viewing = null;
-  showPanel(null);
-  els.input.focus();
-}
-
-function deleteViewedSession(): void {
-  if (viewing) deleteSession(viewing.id);
-}
-
-function deleteSession(id: string): void {
-  store.delete(id);
-  if (id === session.id) {
-    abandonRequest();
-    // The open chat was removed: carry on in an empty one.
-    session = newSession(provider);
-    needsContext = false;
-    els.messages.replaceChildren();
-    renderWelcome();
-    renderChanges();
-    void refreshUsage();
-  }
-  viewing = null;
-  showPanel("history");
-}
-
-let confirmClearTimer: number | undefined;
-function clearHistory(): void {
-  // Two clicks instead of a dialog (dialogs are unreliable inside task panes).
-  if (els.historyClear.dataset.confirm !== "1") {
-    els.historyClear.dataset.confirm = "1";
-    els.historyClear.textContent = "Click again to delete all";
-    confirmClearTimer = window.setTimeout(resetClearButton, 3_000);
-    return;
-  }
-  window.clearTimeout(confirmClearTimer);
-  resetClearButton();
-  store.clear();
-  abandonRequest();
-  session = newSession(provider);
-  needsContext = false;
-  els.messages.replaceChildren();
-  renderWelcome();
-  renderChanges();
-  renderHistory();
-  void refreshUsage();
-}
-
-function resetClearButton(): void {
-  els.historyClear.dataset.confirm = "0";
-  els.historyClear.textContent = "Delete all";
 }
 
 /* -------------------------------------------------------------------------- */
@@ -2404,10 +1500,7 @@ function renderState(state: string): void {
     autoQueueAllowed = false;
     holdPendingPrompts();
     // The bridge dropped mid-turn; the running request can no longer finish, so free the UI.
-    window.clearInterval(usageTimer);
-    usageStartedAt = null;
-    turnUsage = null;
-    usageRequestId = null;
+    usagePanel.reset();
     renderUsage();
     currentRequestId = null;
     live = null;
@@ -2439,10 +1532,7 @@ function abandonRequest(): void {
   pendingPrompts.clear();
   currentRequestId = null;
   requestSession = null;
-  window.clearInterval(usageTimer);
-  usageStartedAt = null;
-  usageRequestId = null;
-  turnUsage = null;
+  usagePanel.reset();
   setBusy(false);
 }
 
@@ -2469,12 +1559,6 @@ function summarize(value: unknown): string {
   } catch {
     return "";
   }
-}
-
-function byId<T extends HTMLElement>(id: string): T {
-  const element = document.getElementById(id);
-  if (!element) throw new Error(`missing element #${id}`);
-  return element as T;
 }
 
 function randomId(): string {

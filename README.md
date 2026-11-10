@@ -119,7 +119,7 @@ office-partner sessions                                   # list saved sign-ins 
 office-partner logout admin                               # delete one
 ```
 
-The password is typed into the site itself. Only the browser's session (cookies) is saved, in `%LOCALAPPDATA%\Excel Partner\sessions`, and the assistant never sees it. If the sign-in page is on another host (single sign-on), the hosts visited during login are saved with it; add more with `--origin https://sso.example.com`. A saved sign-in expires like any login: run the command again.
+The first sign-in downloads the browser driver (`playwright-core`) once into `%LOCALAPPDATA%\Excel Partner\tools`; it is not part of the add-in because most people never use it. The password is typed into the site itself. Only the browser's session (cookies) is saved, in `%LOCALAPPDATA%\Excel Partner\sessions`, and the assistant never sees it. If the sign-in page is on another host (single sign-on), the hosts visited during login are saved with it; add more with `--origin https://sso.example.com`. A saved sign-in expires like any login: run the command again.
 
 **Every time (in Excel):**
 
@@ -190,7 +190,7 @@ Cells that already hold something are not overwritten unless you agree; cells th
 | `office-partner uninstall` | Stop, unregister and remove start-up and certificate trust |
 | `office-partner help` | Full CLI usage |
 
-**Update:** open **Settings > Updates** in the task pane. It shows the installed version, **Check for updates** asks the npm registry, and when a newer release exists **Update now** (click twice to confirm) installs it. Excel does not need to be closed: the add-in is served by the local bridge, so the connection drops for about a minute while the bridge and gateway restart, then the pane reloads by itself and says which version it is now on. It refuses to start while the assistant is working, and only works for the copy installed with `npm install -g` (a source checkout says so; use `scripts/update.ps1` there). If something goes wrong the old version is started again and Settings shows the error; the log is `%LOCALAPPDATA%\Excel Partner\update.log`.
+**Update:** open **Settings > Updates** in the task pane. It shows the installed version, **Check for updates** asks the npm registry, and when a newer release exists **Update now** (click twice to confirm) installs it. Excel does not need to be closed: the add-in is served by the local bridge, so the connection drops for about a minute while the bridge and gateway restart, then the pane reloads by itself and says which version it is now on. It refuses to start while the assistant is working, and only works for the copy installed with `npm install -g` (a source checkout says so; run `git pull` and `npm run build` there). If something goes wrong the old version is started again and Settings shows the error; the log is `%LOCALAPPDATA%\Excel Partner\update.log`.
 
 From a terminal: `office-partner update` does the same (`--from <npm spec or .tgz>` installs that instead of the latest release). Reopen the pane and start a new chat afterwards. Configuration, skills and templates are kept.
 

@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ReferenceError_, ReferenceFiles, toLocalPath, workbookFolderFromUrl } from "../bridge/src/reference-files.js";
 import { readSheetDetails, readWorkbookOverview } from "../bridge/src/xlsx-reader.js";
 import { SessionManager } from "../bridge/src/session-manager.js";
-import { ToolGateway } from "../bridge/src/tool-gateway.js";
+import { OfficeRuntime } from "../runtime/src/office-runtime.js";
 import { executeTool } from "../addin/taskpane/executor/index.js";
 import { parseToolInput } from "../protocol/src/index.js";
 import { MockWorkbook, installOfficeMock } from "./support/office-mock.js";
@@ -137,7 +137,7 @@ describe("gateway file tools", () => {
     const sessions = new SessionManager({ ttlMs: 60_000 });
     const session = sessions.create("0123456789abcdef", null);
     const limits = { maxReadCells: 1, maxWriteCells: 1, maxSheets: 1, maxSelectionCells: 1 };
-    const gateway = new ToolGateway(sessions, limits, 1000, undefined, false, null, new ReferenceFiles(roots));
+    const gateway = new OfficeRuntime(sessions, limits, 1000, undefined, false, null, new ReferenceFiles(roots));
     return { session, gateway };
   }
   const file = () => path.join(root, "templates", "t.xlsx");
@@ -251,7 +251,7 @@ describe("gateway file tools", () => {
   it("asks for one file, reads it after approval, and never grants its folder", async () => {
     const sessions = new SessionManager({ ttlMs: 60_000 });
     const session = sessions.create("0123456789abcdef", null);
-    const gateway = new ToolGateway(sessions, { maxReadCells: 1, maxWriteCells: 1, maxSheets: 1, maxSelectionCells: 1 }, 1000, undefined, false, null, new ReferenceFiles([]));
+    const gateway = new OfficeRuntime(sessions, { maxReadCells: 1, maxWriteCells: 1, maxSheets: 1, maxSelectionCells: 1 }, 1000, undefined, false, null, new ReferenceFiles([]));
     const requests: unknown[] = [];
     session.requestTool = async (tool, args) => {
       requests.push({ tool, args });
@@ -273,7 +273,7 @@ describe("gateway file tools", () => {
     const sessions = new SessionManager({ ttlMs: 60_000 });
     const session = sessions.create("0123456789abcdef", null);
     session.requestTool = async () => ({ ok: true, data: { approved: false } });
-    const gateway = new ToolGateway(sessions, { maxReadCells: 1, maxWriteCells: 1, maxSheets: 1, maxSelectionCells: 1 }, 1000, undefined, false, null, new ReferenceFiles([]));
+    const gateway = new OfficeRuntime(sessions, { maxReadCells: 1, maxWriteCells: 1, maxSheets: 1, maxSelectionCells: 1 }, 1000, undefined, false, null, new ReferenceFiles([]));
     const read = await gateway.invoke({ sessionId: session.id, tool: "read_workbook_file", args: { path: file() } });
     expect(read).toMatchObject({ ok: false, error: { code: "cancelled" } });
     expect(session.referenceGrants.size).toBe(0);

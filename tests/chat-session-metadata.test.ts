@@ -23,7 +23,7 @@ function setup() {
   const context = vm.createContext({
     session, requestSession: session, currentRequestId: "request", store, bindProviderSession,
     requestMessageIndex: 0, requestChangeIndex: 0, requestStartedAt: 1,
-    usageRequestId: null, usageSummary: undefined,
+    usagePanel: { rebind: vi.fn() },
     clearThinking: vi.fn(), showThinking: vi.fn(), renderChanges: vi.fn(), renderMessage: vi.fn(),
     els: { messages: { replaceChildren: vi.fn() } },
   });
@@ -46,6 +46,7 @@ describe("task pane session metadata ownership", () => {
     expect(context.session).toBe(next);
     expect(store.get(original.id)?.messages).toEqual(original.messages);
     expect(store.get("claude:native")).toBeNull();
+    expect(context.usagePanel.rebind).not.toHaveBeenCalled();
   });
 
   it("ignores late metadata after switching to a new or saved chat, preserving native history", () => {
@@ -61,6 +62,7 @@ describe("task pane session metadata ownership", () => {
       expect(context.session).toBe(next);
       expect(next.providerSessionId).toBeUndefined();
       expect(store.get("claude:native")).toEqual(original);
+      expect(context.usagePanel.rebind).toHaveBeenCalledTimes(1);
     }
   });
 
@@ -72,5 +74,7 @@ describe("task pane session metadata ownership", () => {
     expect(store.get("claude:native")?.title).toBe("Confirmed title");
     metadata("Stale title", "older-request");
     expect(store.get("claude:native")?.title).toBe("Confirmed title");
+    expect(context.usagePanel.rebind).toHaveBeenCalledTimes(1);
+    expect(context.usagePanel.rebind).toHaveBeenCalledWith("request");
   });
 });

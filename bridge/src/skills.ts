@@ -73,8 +73,8 @@ export function parseFrontmatter(text: string): { meta: Record<string, string>; 
   return { meta, body: normalised.slice(match[0].length) };
 }
 
-export function defaultSkillDirs(projectRoot: string, extra: string[] = []): string[] {
-  return [path.join(projectRoot, "skills"), path.join(os.homedir(), ".excel-partner", "skills"), ...extra];
+export function defaultSkillDirs(extra: string[] = []): string[] {
+  return [path.join(os.homedir(), ".excel-partner", "skills"), ...extra];
 }
 
 /**

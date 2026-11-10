@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { ProviderSessionManager, type ProviderSessionSettings } from "../bridge/src/provider-session-manager.js";
+import { ProviderSessionManager, type ProviderSessionSettings } from "../providers/src/session-manager.js";
 import { WorkbookSession } from "../bridge/src/session.js";
 import { ProviderRegistry } from "../providers/src/registry.js";
 import { MockAdapter } from "../providers/src/mock.js";

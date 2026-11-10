@@ -1,17 +1,17 @@
 import { describe, expect, it } from "vitest";
 import { SessionManager } from "../bridge/src/session-manager.js";
-import { ToolGateway } from "../bridge/src/tool-gateway.js";
+import { OfficeRuntime } from "../runtime/src/office-runtime.js";
 
 const limits = { maxReadCells: 100, maxWriteCells: 100, maxSheets: 10, maxSelectionCells: 10 };
 
 function setup() {
   const sessions = new SessionManager({ ttlMs: 60_000 });
   const session = sessions.create("conn-1", null);
-  const gateway = new ToolGateway(sessions, limits, 1000);
+  const gateway = new OfficeRuntime(sessions, limits, 1000);
   return { sessions, session, gateway };
 }
 
-describe("ToolGateway", () => {
+describe("OfficeRuntime", () => {
   it("rejects an unknown session", async () => {
     const { gateway } = setup();
     const result = await gateway.invoke({ sessionId: "missing", tool: "get_sheets", args: {} });

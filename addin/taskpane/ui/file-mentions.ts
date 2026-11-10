@@ -78,14 +78,3 @@ export function atomicBadgeDeletion(
   if (text[end] === " " && (start === 0 || text[start - 1] === " ")) end++;
   return { start, end };
 }
-
-/** Compatibility wrapper for file-only deletion checks. */
-export function atomicFileMentionDeletion(
-  text: string,
-  selectionStart: number,
-  selectionEnd: number,
-  inputType: string,
-  selectedNames: readonly string[],
-): { start: number; end: number } | null {
-  return atomicBadgeDeletion(text, selectionStart, selectionEnd, inputType, fileMentionRanges(text, selectedNames));
-}

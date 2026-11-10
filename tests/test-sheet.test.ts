@@ -3,7 +3,7 @@ import { executeTool, WRITE_TOOLS } from "../addin/taskpane/executor/index.js";
 import { describeTestBrowserApproval } from "../addin/taskpane/permissions.js";
 import { describeChange } from "../addin/taskpane/ui/changes.js";
 import { SessionManager } from "../bridge/src/session-manager.js";
-import { ToolGateway } from "../bridge/src/tool-gateway.js";
+import { OfficeRuntime } from "../runtime/src/office-runtime.js";
 import { TestSessions } from "../bridge/src/test-sessions.js";
 import { SiteKnowledge, siteKey } from "../bridge/src/site-knowledge.js";
 import { describeSiteKnowledgeApproval } from "../addin/taskpane/permissions.js";
@@ -99,7 +99,7 @@ describe("open_test_browser", () => {
     const session = sessions.create("test-browser", null);
     session.capabilities.playwright = true;
     Object.defineProperty(session, "isConnected", { get: () => true, configurable: true });
-    const gateway = new ToolGateway(sessions, { maxReadCells: 100, maxWriteCells: 100, maxSheets: 10, maxSelectionCells: 10 }, 1000,
+    const gateway = new OfficeRuntime(sessions, { maxReadCells: 100, maxWriteCells: 100, maxSheets: 10, maxSelectionCells: 10 }, 1000,
       undefined, false, null, null, null, undefined, store, knowledge);
     const use = vi.spyOn(gateway.externalTools, "useProfile").mockResolvedValue();
     return { session, gateway, use, tool: (name: string, args: unknown) => gateway.invoke({ sessionId: session.id, tool: name, args }), call: (args: unknown) => gateway.invoke({ sessionId: session.id, tool: "open_test_browser", args }) };
@@ -206,7 +206,7 @@ describe("saved knowledge about a system", () => {
     const session = sessions.create("knowledge", null);
     session.capabilities.playwright = true;
     Object.defineProperty(session, "isConnected", { get: () => true, configurable: true });
-    const gateway = new ToolGateway(sessions, { maxReadCells: 100, maxWriteCells: 100, maxSheets: 10, maxSelectionCells: 10 }, 1000, undefined, false, null, null, null, undefined, null, knowledge);
+    const gateway = new OfficeRuntime(sessions, { maxReadCells: 100, maxWriteCells: 100, maxSheets: 10, maxSelectionCells: 10 }, 1000, undefined, false, null, null, null, undefined, null, knowledge);
     const ask = vi.spyOn(session, "requestTool").mockResolvedValue({ ok: true, data: { approved: true } });
     return { dir, knowledge, session, gateway, ask, tool: (name: string, args: unknown) => gateway.invoke({ sessionId: session.id, tool: name, args }) };
   };

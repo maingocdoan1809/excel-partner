@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { WebSocket } from "ws";
 import { SessionManager } from "../bridge/src/session-manager.js";
-import { ToolGateway } from "../bridge/src/tool-gateway.js";
+import { OfficeRuntime } from "../runtime/src/office-runtime.js";
 import type { WorkbookSession } from "../bridge/src/session.js";
 import { ClientMessageSchema, MAX_DELEGATED_TEXT, ServerMessageSchema, UNNAMED_WORKBOOK, WORKBOOK_NAME_REQUEST, parseToolInput, type ToolResult } from "../protocol/src/index.js";
 
@@ -42,11 +42,11 @@ function setup(options: { approve?: boolean } = {}) {
   there.workbookName = "Actuals.xlsx";
   const hereSent = attachPane(here, { approve: options.approve });
   const thereSent = attachPane(there, { reply: (tool) => ({ ok: true, data: { tool, sheets: ["Q1"] } }) });
-  const gateway = new ToolGateway(sessions, limits, 1000);
+  const gateway = new OfficeRuntime(sessions, limits, 1000);
   return { sessions, here, there, hereSent, thereSent, gateway };
 }
 
-const read = (gateway: ToolGateway, session: WorkbookSession, file: string, tool = "get_sheets", args: unknown = {}) =>
+const read = (gateway: OfficeRuntime, session: WorkbookSession, file: string, tool = "get_sheets", args: unknown = {}) =>
   gateway.invoke({ sessionId: session.id, tool: "read_connected_file", args: { file, tool, arguments: args } });
 
 describe("connected files", () => {
@@ -143,7 +143,7 @@ describe("connected files", () => {
     attachPane(here);
     attachPane(there, { reply: () => ({ ok: false, error: { code: "invalid_arguments", message: "sheet 'Q9' not found" } }) });
     here.beginTurn("req-1");
-    const result = await read(new ToolGateway(sessions, limits, 1000), here, there.fileId, "get_sheets");
+    const result = await read(new OfficeRuntime(sessions, limits, 1000), here, there.fileId, "get_sheets");
     expect(result).toMatchObject({ ok: false, error: { code: "invalid_arguments", message: "[Actuals.xlsx] sheet 'Q9' not found" } });
   });
 

@@ -1,3 +1,4 @@
+import { sessionMcpEndpoint } from "../bridge/src/session-mcp.js";
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -27,7 +28,7 @@ it.skipIf(!installed)('builds current Copilot native schemas on/off/on without a
       await post({ action: 'select', id: 'fixture', enabled });
       const id = await manager.start({ workbookConnectionId: pane.workbookConnectionId, sessionId: pane.id,
         model: null, signal: new AbortController().signal,
-        mcp: (h.bridge as any).mcpEndpointFor(pane), requestUserInput: async () => ({ cancelled: true, answers: {} }),
+        mcp: sessionMcpEndpoint(h.bridge.config, pane), requestUserInput: async () => ({ cancelled: true, answers: {} }),
       }, process.env.COPILOT_BIN ?? 'copilot', process.env);
       const session = (manager as any).sessions.get(id).session;
       await session.rpc.tools.initializeAndValidate();

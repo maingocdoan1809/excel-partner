@@ -1,4 +1,5 @@
 import { normalizeOrigin } from "../../protocol/src/tools-testing.js";
+import { defaultToolsDir, loadPlaywright } from "./playwright-loader.js";
 import type { TestSessions } from "./test-sessions.js";
 
 export interface LoginOptions {
@@ -7,6 +8,8 @@ export interface LoginOptions {
   /** Extra sites the saved session may later be used on (for example a separate single sign-on host). */
   extraOrigins?: string[];
   store: TestSessions;
+  /** Where playwright-core is downloaded the first time it is needed (see playwright-loader.ts). */
+  toolsDir?: string;
   /** Resolves when the person says they are signed in. */
   waitForPerson: () => Promise<void>;
   out: (line: string) => void;
@@ -19,7 +22,7 @@ export interface LoginOptions {
 export async function loginSession(options: LoginOptions): Promise<{ origins: string[] }> {
   const first = normalizeOrigin(options.url);
   if (!first) throw new Error(`'${options.url}' is not a web address (use https://host, with the port if any).`);
-  const { chromium } = await import("playwright-core");
+  const { chromium } = await loadPlaywright(options.toolsDir ?? defaultToolsDir(), options.out);
   let browser;
   const failures: string[] = [];
   for (const channel of ["chrome", "msedge"] as const) {

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { SessionManager } from "../bridge/src/session-manager.js";
-import { ToolGateway } from "../bridge/src/tool-gateway.js";
+import { OfficeRuntime } from "../runtime/src/office-runtime.js";
 import { ExternalTools, type BrowserFrame } from "../bridge/src/external-tools.js";
 import { describeBrowserAction, displayUrl, extractImage, parsePageInfo } from "../bridge/src/browser-frames.js";
 import { ServerMessageSchema } from "../protocol/src/index.js";
@@ -190,7 +190,7 @@ describe("browser_frame messages", () => {
   it("are sent to the pane for the active request and dropped once it has ended", async () => {
     const sessions = new SessionManager({ ttlMs: 60_000 });
     const session = sessions.create("frames", null);
-    const gateway = new ToolGateway(sessions, { maxReadCells: 1, maxWriteCells: 1, maxSheets: 1, maxSelectionCells: 1 }, 1000);
+    const gateway = new OfficeRuntime(sessions, { maxReadCells: 1, maxWriteCells: 1, maxSheets: 1, maxSelectionCells: 1 }, 1000);
     session.capabilities.playwright = true;
     Object.defineProperty(session, "isConnected", { get: () => true });
     vi.spyOn(session, "requestTool").mockResolvedValue({ ok: true, data: { approved: true } });

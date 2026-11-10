@@ -206,7 +206,7 @@ export class GatewayServer {
   private async computeModels() {
     const names = new Map<string, string>();
     const config = this.options.config;
-    for (const model of config.advertiseCompatibilityModels ? ["claude-opus-4-7", "claude-sonnet-4-6", "claude-haiku-4-5-20251001"] : []) {
+    for (const model of config.compatibilityModels) {
       const target = config.aliases[model] ?? config.defaultRoute;
       names.set(model, `${model} → ${target.provider}/${target.model ?? "default"}`);
     }

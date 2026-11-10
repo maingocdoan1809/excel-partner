@@ -20,7 +20,6 @@ const MAX_CELL_CHARS = 500;
 const MAX_TABLE_ROWS = 100;
 const MAX_COMMENTS = 30;
 const MAX_OUTLINE = 100;
-export const DEFAULT_MAX_CHARS = 20_000;
 export const HARD_MAX_CHARS = 30_000;
 
 export interface ReadDocumentOptions {

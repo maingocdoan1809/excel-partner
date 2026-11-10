@@ -13,10 +13,8 @@ const Size = z.number().min(0).max(100_000);
 const Position = z.number().int().min(1).max(10_000);
 
 export const GetPresentationMetadataInputSchema = z.object({}).strict();
-export type GetPresentationMetadataInput = z.infer<typeof GetPresentationMetadataInputSchema>;
 
 export const ListLayoutsInputSchema = z.object({}).strict();
-export type ListLayoutsInput = z.infer<typeof ListLayoutsInputSchema>;
 
 export const AddSlideInputSchema = z.object({
   layout_id: z.string().min(1).max(100),

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { WebSocket } from "ws";
 import { Delegations } from "../bridge/src/delegations.js";
 import { SessionManager } from "../bridge/src/session-manager.js";
-import { ToolGateway } from "../bridge/src/tool-gateway.js";
+import { OfficeRuntime } from "../runtime/src/office-runtime.js";
 import type { WorkbookSession } from "../bridge/src/session.js";
 import { WORKBOOK_NAME_REQUEST } from "../protocol/src/index.js";
 
@@ -43,11 +43,11 @@ function setup(options: { approve?: boolean; reply?: string; targetProvider?: "c
       });
     },
   } as unknown as WebSocket);
-  const gateway = new ToolGateway(sessions, limits, 1000, undefined, false, null, null, null, undefined, null, null, null, delegations);
+  const gateway = new OfficeRuntime(sessions, limits, 1000, undefined, false, null, null, null, undefined, null, null, null, delegations);
   return { sessions, source, target, gateway, approvals, delivered };
 }
 
-const send = (gateway: ToolGateway, session: WorkbookSession, file: string, message = "Fill column D with totals") =>
+const send = (gateway: OfficeRuntime, session: WorkbookSession, file: string, message = "Fill column D with totals") =>
   gateway.invoke({ sessionId: session.id, tool: "send_to_connected_file", args: { file, message } });
 
 describe("send_to_connected_file", () => {
@@ -114,7 +114,7 @@ describe("send_to_connected_file", () => {
     source.attachSocket({ readyState: 1, close() {}, send(raw: string) { const m = JSON.parse(raw); queueMicrotask(() => source.resolveTool(m.callId, { ok: true, data: m.tool === WORKBOOK_NAME_REQUEST ? { name: source.workbookName } : { approved: true } })); } } as unknown as WebSocket);
     // A pane that gives its name but never starts the request.
     target.attachSocket({ readyState: 1, close() {}, send(raw: string) { const m = JSON.parse(raw); if (m.tool === WORKBOOK_NAME_REQUEST) queueMicrotask(() => target.resolveTool(m.callId, { ok: true, data: { name: target.workbookName } })); } } as unknown as WebSocket);
-    const gateway = new ToolGateway(sessions, limits, 1000, undefined, false, null, null, null, undefined, null, null, null, new Delegations(() => {}, { startMs: 30, runMs: 30 }));
+    const gateway = new OfficeRuntime(sessions, limits, 1000, undefined, false, null, null, null, undefined, null, null, null, new Delegations(() => {}, { startMs: 30, runMs: 30 }));
     source.beginTurn("req-1");
     expect(await send(gateway, source, target.fileId)).toMatchObject({ ok: false, error: { code: "timeout", message: expect.stringMatching(/^\[Actuals\.xlsx\] /) } });
   });

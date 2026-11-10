@@ -4,7 +4,7 @@ import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { exposedToolNames, parseToolInput } from "../protocol/src/index.js";
 import { SessionManager } from "../bridge/src/session-manager.js";
-import { ToolGateway } from "../bridge/src/tool-gateway.js";
+import { OfficeRuntime } from "../runtime/src/office-runtime.js";
 import { TestScripts, validateScript } from "../bridge/src/test-scripts.js";
 
 const origin = "https://staging.example.com";
@@ -28,7 +28,7 @@ function setup() {
   const session = sessions.create("scripts", null);
   session.capabilities.playwright = true;
   Object.defineProperty(session, "isConnected", { get: () => true, configurable: true });
-  const gateway = new ToolGateway(sessions, { maxReadCells: 100, maxWriteCells: 100, maxSheets: 10, maxSelectionCells: 10 }, 1000,
+  const gateway = new OfficeRuntime(sessions, { maxReadCells: 100, maxWriteCells: 100, maxSheets: 10, maxSelectionCells: 10 }, 1000,
     undefined, false, null, null, null, undefined, null, null, scripts);
   /** A fake task pane: a one-row-per-case sheet that keeps what record_test_results writes. */
   const cells = new Map<string, string>();

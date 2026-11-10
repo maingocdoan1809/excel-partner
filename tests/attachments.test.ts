@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { zipSync, strToU8 } from "fflate";
 import { AttachmentError, attachmentPath, createAttachment } from "../bridge/src/attachments.js";
 import { SessionManager } from "../bridge/src/session-manager.js";
-import { ToolGateway } from "../bridge/src/tool-gateway.js";
+import { OfficeRuntime } from "../runtime/src/office-runtime.js";
 
 const png = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 0]);
 const xlsx = Buffer.from(zipSync({
@@ -27,7 +27,7 @@ describe("user-selected attachments", () => {
     const zip = createAttachment("bundle.zip", Buffer.from(zipSync({ "readme.txt": strToU8("Second file") })));
     session.attachments.set(md.id, md);
     session.attachments.set(zip.id, zip);
-    const gateway = new ToolGateway(sessions, { maxReadCells: 1, maxWriteCells: 1, maxSheets: 1, maxSelectionCells: 1 }, 1000);
+    const gateway = new OfficeRuntime(sessions, { maxReadCells: 1, maxWriteCells: 1, maxSheets: 1, maxSelectionCells: 1 }, 1000);
     const read = (path: string, entry?: string) => gateway.invoke({ sessionId: session.id, tool: "read_attached_file", args: { path, ...(entry ? { entry } : {}) } });
     expect(await read(attachmentPath(md.id))).toMatchObject({ ok: true, data: { encoding: "utf-8", content: "# Notes\nFirst file" } });
     expect(await read(attachmentPath(zip.id))).toMatchObject({ ok: true, data: { format: "zip", entries: [{ name: "readme.txt" }] } });
@@ -43,7 +43,7 @@ describe("user-selected attachments", () => {
     const book = createAttachment("book.xlsx", xlsx);
     one.attachments.set(image.id, image);
     one.attachments.set(book.id, book);
-    const gateway = new ToolGateway(sessions, { maxReadCells: 1, maxWriteCells: 1, maxSheets: 1, maxSelectionCells: 1 }, 1000);
+    const gateway = new OfficeRuntime(sessions, { maxReadCells: 1, maxWriteCells: 1, maxSheets: 1, maxSelectionCells: 1 }, 1000);
     const view = await gateway.invoke({ sessionId: one.id, tool: "read_attached_image", args: { path: attachmentPath(image.id) } });
     expect(view).toMatchObject({ ok: true, data: { image: { mimeType: "image/png", data: png.toString("base64") } } });
     const read = await gateway.invoke({ sessionId: one.id, tool: "read_workbook_file", args: { path: attachmentPath(book.id) } });

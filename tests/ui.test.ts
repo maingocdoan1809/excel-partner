@@ -4,7 +4,7 @@ import { WRITE_TOOLS } from "../addin/taskpane/executor/index.js";
 import { describeChange } from "../addin/taskpane/ui/changes.js";
 import { renderMarkdown } from "../addin/taskpane/ui/markdown.js";
 import { filterCommands, leadingCommand, slashBadgeRange, slashQuery } from "../addin/taskpane/ui/slash.js";
-import { activeFileMention, atomicBadgeDeletion, atomicFileMentionDeletion, fileMentionRanges } from "../addin/taskpane/ui/file-mentions.js";
+import { activeFileMention, atomicBadgeDeletion, fileMentionRanges } from "../addin/taskpane/ui/file-mentions.js";
 
 describe("file mentions", () => {
   it("opens a fresh query for a second @ on the same line", () => {
@@ -48,11 +48,11 @@ describe("file mentions", () => {
   it("deletes a file mention as one unit", () => {
     const text = "Compare @first.md @second.zip please";
     const names = ["first.md", "second.zip"];
-    expect(atomicFileMentionDeletion(text, 18, 18, "deleteContentBackward", names)).toEqual({ start: 8, end: 18 });
-    expect(atomicFileMentionDeletion(text, 18, 18, "deleteContentForward", names)).toEqual({ start: 18, end: 29 });
-    expect(atomicFileMentionDeletion(text, 12, 14, "deleteContentBackward", names)).toEqual({ start: 8, end: 18 });
-    expect(atomicFileMentionDeletion(text, 8, 8, "deleteContentBackward", names)).toBeNull();
-    expect(atomicFileMentionDeletion(text, 31, 31, "deleteContentBackward", names)).toBeNull();
+    expect(atomicBadgeDeletion(text, 18, 18, "deleteContentBackward", fileMentionRanges(text, names))).toEqual({ start: 8, end: 18 });
+    expect(atomicBadgeDeletion(text, 18, 18, "deleteContentForward", fileMentionRanges(text, names))).toEqual({ start: 18, end: 29 });
+    expect(atomicBadgeDeletion(text, 12, 14, "deleteContentBackward", fileMentionRanges(text, names))).toEqual({ start: 8, end: 18 });
+    expect(atomicBadgeDeletion(text, 8, 8, "deleteContentBackward", fileMentionRanges(text, names))).toBeNull();
+    expect(atomicBadgeDeletion(text, 31, 31, "deleteContentBackward", fileMentionRanges(text, names))).toBeNull();
   });
 
   it("deletes a chosen slash skill as one unit, even with a file mention selected", () => {

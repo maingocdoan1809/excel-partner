@@ -4,7 +4,7 @@ import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { parseToolInput } from "../protocol/src/index.js";
 import { runPython } from "../bridge/src/python-runner.js";
-import { ToolGateway } from "../bridge/src/tool-gateway.js";
+import { OfficeRuntime } from "../runtime/src/office-runtime.js";
 import { SessionManager } from "../bridge/src/session-manager.js";
 import { createAttachment } from "../bridge/src/attachments.js";
 
@@ -16,7 +16,7 @@ function setup(approved = true) {
   const session = sessions.create("python-test", null);
   vi.spyOn(session, "isConnected", "get").mockReturnValue(true);
   const permission = vi.spyOn(session, "requestTool").mockResolvedValue({ ok: true, data: { approved } });
-  const gateway = new ToolGateway(sessions, { maxReadCells: 1, maxWriteCells: 1, maxSheets: 1, maxSelectionCells: 1 }, 1000);
+  const gateway = new OfficeRuntime(sessions, { maxReadCells: 1, maxWriteCells: 1, maxSheets: 1, maxSelectionCells: 1 }, 1000);
   const call = (args: unknown) => gateway.invoke({ sessionId: session.id, tool: "run_python", args });
   return { session, permission, call };
 }

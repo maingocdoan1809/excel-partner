@@ -129,7 +129,7 @@ export function loadConfig(overrides: Partial<BridgeConfig> = {}): BridgeConfig 
       maxSheets: envInt("BRIDGE_MAX_SHEETS", 500),
       maxSelectionCells: envInt("BRIDGE_MAX_SELECTION_CELLS", 2_000),
     },
-    skillDirs: defaultSkillDirs(PROJECT_ROOT, [...(local.skillDirs ?? []), ...splitPaths(process.env.BRIDGE_SKILL_DIRS)]),
+    skillDirs: defaultSkillDirs([...(local.skillDirs ?? []), ...splitPaths(process.env.BRIDGE_SKILL_DIRS)]),
     referenceDirs: [...(local.referenceDirs ?? []), ...splitPaths(process.env.BRIDGE_REFERENCE_DIRS)],
     allowOfficeJs: envBool("BRIDGE_ALLOW_OFFICE_JS", local.allowOfficeJs ?? true),
     logLevel: (process.env.BRIDGE_LOG_LEVEL as BridgeConfig["logLevel"]) ?? "info",

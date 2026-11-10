@@ -17,3 +17,11 @@ This decision supersedes the earlier, incorrect pane-binding implementation/desi
 ## External MCP tools: register native schemas
 
 User-confirmed requirement: enabling an MCP server must expose its actual tools and JSON Schemas directly in the provider tool catalog. Disabling it removes those tools. Use stable server namespaces to avoid collisions. Do not expose generic list/call wrapper tools or inject MCP discovery instructions into model prompts. Refresh provider registration when the enabled catalog changes, while preserving the conversation.
+
+## Product principles
+
+- Neutral "Office Partner / Excel Partner" branding everywhere; never ship customer documents, company references, personal paths or account identifiers.
+- Skills are optional and user-installed from `%USERPROFILE%\.excel-partner\skills`; the package bundles no skills or templates.
+- Provider credentials stay under each provider CLI's control; the add-in never asks for or stores an API key.
+- External folders are read only when the user grants access (references / `referenceDirs`).
+- Validate with `npm run typecheck`, `npm run build` and `npm test`; automated checks use mock providers, live CLI checks are opt-in.

@@ -3,7 +3,6 @@ import { TokenUsageSchema } from "./usage.js";
 
 /** Why a turn ended. */
 export const TurnFinishReasonSchema = z.enum(["completed", "cancelled", "error"]);
-export type TurnFinishReason = z.infer<typeof TurnFinishReasonSchema>;
 
 /**
  * Provider output normalised by every adapter so the task pane never has to
@@ -83,5 +82,3 @@ export const ProviderEventSchema = z.discriminatedUnion("type", [
   }),
 ]);
 export type ProviderEvent = z.infer<typeof ProviderEventSchema>;
-
-export type ProviderEventType = ProviderEvent["type"];

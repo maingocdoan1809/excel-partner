@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { WORD_TOOL_NAMES, WORD_WRITE_TOOLS, WordToolInputSchemas, type WordToolName } from "../protocol/src/index.js";
-import { WORD_TOOL_DEFINITIONS } from "../excel_mcp/src/tool-definitions-word.js";
+import { WORD_TOOL_DEFINITIONS } from "../runtime/src/tool-definitions-word.js";
 
 /** Field names of a zod object, looking through .refine()/.superRefine() wrappers. */
 function shapeKeys(schema: any): string[] {

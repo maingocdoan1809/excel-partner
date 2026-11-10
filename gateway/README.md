@@ -68,10 +68,19 @@ destination. `codex/gpt-6-sol [Claude API]` runs Codex with `gpt-6-sol`. Earlier
 Bare `claude-*` names are rejected with HTTP 400 unless a configured alias matches
 them, so a request never silently runs on a different provider. The one exception
 is Office's exact one-token `x` login probe, which is routed to the default
-provider. Set `advertiseCompatibilityModels` to true to publish and accept
-`claude-opus-4-7`, `claude-sonnet-4-6` and `claude-haiku-4-5-20251001` (routed to
-the default provider or their alias); this is useful when a client only lets you
-type a Claude model name.
+provider. A client that accepts only model IDs from its own fixed list (the
+official Claude add-ins do; the list changes with their releases) can be given
+exactly those IDs with `compatibilityModels`: each listed ID is published and
+accepted as it is, and routed to its alias when one exists, otherwise to the
+default route.
+
+```powershell
+agent-gateway config set compatibilityModels '["claude-opus-4-7","claude-sonnet-4-6"]'
+```
+
+The earlier `advertiseCompatibilityModels: true` is still read and means the
+three IDs it used to publish; it is rewritten as `compatibilityModels` the next
+time the configuration is saved.
 
 To use friendly names rather than technical IDs in the Office picker:
 
@@ -121,16 +130,16 @@ agent-gateway config set maxSessions 8
 ```
 
 Explicit IDs (`copilot/native-id`) route to that provider and model. Configured
-aliases take precedence. Unmapped `claude-*` IDs route through `defaultRoute`:
-Claude for Excel issues helper requests using standard Claude IDs independently
-of the selected chat model. `/v1/models` labels these mappings, and response
-headers `x-agent-gateway-provider` / `x-agent-gateway-model` identify the actual
+aliases take precedence. A `claude-*` ID that is neither an alias nor in
+`compatibilityModels` is rejected (HTTP 400), apart from the one-token login
+probe. `/v1/models` labels every mapping, and response headers
+`x-agent-gateway-provider` / `x-agent-gateway-model` identify the actual
 destination. A failed provider is never silently replaced with another provider.
 
 `agent-gateway config show` displays all settings. Additional configurable values:
 `port`, `maxBodyBytes`, `allowedOrigins`, `defaultRoute.model`, and
 `enabledProviders`, `warmupOnStart`, `probeCacheTtlMs`, and
-`advertiseCompatibilityModels`. Changes apply immediately. Remove an alias by
+`compatibilityModels`. Changes apply immediately. Remove an alias by
 editing `config.json`; there are no credentials in this file.
 
 ## API and tool ownership

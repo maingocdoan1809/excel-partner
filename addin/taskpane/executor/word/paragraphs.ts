@@ -54,11 +54,6 @@ export async function loadParagraphs(context: Word.RequestContext, options: { st
   return { collection, info };
 }
 
-/** The paragraph's own range, for deleting or anchoring (`Paragraph` has no delete in the contract the plan relies on). */
-export function paragraphRange(paragraph: Word.Paragraph, location: "Whole" | "Start" | "End" | "After" = "Whole"): Word.Range {
-  return paragraph.getRange(location);
-}
-
 /** Delete a paragraph through its range. */
 export function deleteParagraph(paragraph: Word.Paragraph): void {
   if (typeof paragraph.getRange === "function") paragraph.getRange("Whole").delete();

@@ -45,4 +45,4 @@ echo "certificate: $CERT"
 echo "key:         $KEY"
 echo
 echo "On Windows, import $CERT into 'Trusted Root Certification Authorities'"
-echo "so Excel trusts the task pane origin (see docs/install.md)."
+echo "so Excel trusts the task pane origin (certutil -addstore -user Root localhost.crt on Windows)."

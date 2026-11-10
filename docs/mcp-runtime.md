@@ -13,8 +13,8 @@ Shared MCP connection management: McpServers -> stdio / Streamable HTTP
 ## Ownership
 
 - `protocol/src`: tool input schemas, host availability, messages and result contracts.
-- `runtime/src/catalog.ts` and `tool-definitions*.ts`: the shared advertised catalog. `excel_mcp/src` retains compatibility exports, not another catalog.
-- `runtime/src/office-runtime.ts`: validation, host/capability gates, dispatch and external-tool approval. The former `bridge/src/tool-gateway.ts` is a compatibility export. Existing domain helpers/session models remain under `bridge/src`; they are reused, not copied into the gateway.
+- `runtime/src/catalog.ts` and `tool-definitions*.ts`: the shared advertised catalog. `excel_mcp/src` is only the stdio MCP entry point and its HTTP forwarder.
+- `runtime/src/office-runtime.ts`: validation, host/capability gates, dispatch and external-tool approval. Existing domain helpers/session models remain under `bridge/src`; they are reused, not copied into the gateway.
 - `runtime/src/mcp-servers.ts`: persisted server configuration and per-pane MCP connection lifecycle.
 - `runtime/src/results.ts`: shared conversion for external MCP results; gateway retains its separate API wire conversion for official-client tool results.
 - The Office Partner task pane owns its host executor, Ask/Auto prompts, undo journal and backup capture. Official Claude clients own their independent Office executors.

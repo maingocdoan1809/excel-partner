@@ -2,11 +2,10 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { SkillError, SkillStore, expandSkillPrompt, parseFrontmatter, projectTemplateReminder, skillTemplateUri } from "../bridge/src/skills.js";
-import { ToolGateway } from "../bridge/src/tool-gateway.js";
+import { SkillError, SkillStore, defaultSkillDirs, expandSkillPrompt, parseFrontmatter, projectTemplateReminder, skillTemplateUri } from "../bridge/src/skills.js";
+import { OfficeRuntime } from "../runtime/src/office-runtime.js";
 import { SessionManager } from "../bridge/src/session-manager.js";
 import { skillFile } from "../bridge/src/skill-runner.js";
-import { PROJECT_ROOT } from "../bridge/src/config.js";
 
 let root: string;
 const write = (rel: string, text: string) => {
@@ -159,10 +158,10 @@ describe("expandSkillPrompt", () => {
 });
 
 describe("optional user-installed skills", () => {
-  it("ships no default project skills or template inventory", () => {
-    const bundled = new SkillStore([path.join(PROJECT_ROOT, "skills")]);
-    expect(bundled.list()).toEqual([]);
-    expect(projectTemplateReminder(bundled)).toBe("");
+  it("looks for skills only in the user's folder, never inside the installed package", () => {
+    expect(defaultSkillDirs()).toEqual([path.join(os.homedir(), ".excel-partner", "skills")]);
+    expect(defaultSkillDirs(["/extra"])).toEqual([path.join(os.homedir(), ".excel-partner", "skills"), "/extra"]);
+    expect(projectTemplateReminder(new SkillStore([path.join(root, "nowhere")]))).toBe("");
   });
 
   it("exposes templates only for user-installed skills", () => {
@@ -181,7 +180,7 @@ describe("gateway skill tools", () => {
     const session = sessions.create("0123456789abcdef", null);
     const skillStore = new SkillStore([root], path.join(root, "user-templates"));
     skillStore.addTemplate("alpha", "sample.md", Buffer.from("Example style"));
-    const gateway = new ToolGateway(sessions, { maxReadCells: 1, maxWriteCells: 1, maxSheets: 1, maxSelectionCells: 1 }, 1000, undefined, false, skillStore);
+    const gateway = new OfficeRuntime(sessions, { maxReadCells: 1, maxWriteCells: 1, maxSheets: 1, maxSelectionCells: 1 }, 1000, undefined, false, skillStore);
 
     const list = await gateway.invoke({ sessionId: session.id, tool: "list_skills", args: {} });
     expect(list).toMatchObject({ ok: true, data: { skills: [{ name: "alpha" }, { name: "beta" }, { name: "nofront" }] } });

@@ -1,67 +1,45 @@
-import { discoverMcpCatalog } from "../../runtime/src/mcp-catalog.js";
-import { officeToolCatalog } from "../../runtime/src/catalog.js";
-import { McpServers } from "../../runtime/src/mcp-servers.js";
-import { cleanSessionTitle } from "../../protocol/src/session-title.js";
-import { TestSessions } from "./test-sessions.js";
-import { Delegations } from "./delegations.js";
-import { SiteKnowledge } from "./site-knowledge.js";
-import { TestScripts } from "./test-scripts.js";
-import { BackupError, DocumentBackups, MAX_BACKUP_BYTES, backupExtensionFor } from "./document-backups.js";
-import { UpdateError, UpdateService } from "./updater.js";
-import { TestingAdmin, TestingAdminError, type FolderKind } from "./testing-admin.js";
-import { parseNativeCommand, type NativeCommand, type ProviderCommand } from "../../protocol/src/commands.js";
-import { normalizeCommands } from "../../providers/src/commands.js";
-import { supportsNativeWebSearch, type ToolCapabilities } from "../../protocol/src/index.js";
-import { SavedReferences } from "./saved-references.js";
-import { standalonePage } from "./standalone-page.js";
 import http from "node:http";
 import https from "node:https";
-import path from "node:path";
 import os from "node:os";
-import { createReadStream, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
-import type { Duplex } from "node:stream";
-import { WebSocketServer, type WebSocket, type RawData } from "ws";
-import {
-  GO_TO_REQUEST,
-  HostIdSchema,
-  PROTOCOL_VERSION,
-  ProviderIdSchema,
-  UNNAMED_WORKBOOK,
-  WorkbookInfoMessageSchema,
-  sameWorkbookName,
-  providerSessionKey,
-  type ClientMessage,
-  type ProviderId,
-  type AnySelectionSnapshot,
-  type ServerMessage,
-} from "../../protocol/src/index.js";
-import { createHash } from "node:crypto";
-import { hostSystemPrompt } from "../../providers/src/host-prompts.js";
+import path from "node:path";
+import { createReadStream, readFileSync, statSync } from "node:fs";
+import { PROTOCOL_VERSION, ProviderIdSchema } from "../../protocol/src/index.js";
+import { MockAdapter, ProviderRegistry, ProviderSessionManager, createDefaultRegistry } from "../../providers/src/index.js";
+import { officeToolCatalog } from "../../runtime/src/catalog.js";
+import { McpServers } from "../../runtime/src/mcp-servers.js";
+import { OfficeRuntime } from "../../runtime/src/office-runtime.js";
 import { PROJECT_ROOT, type BridgeConfig } from "./config.js";
-import { UsageStore, type UsageRecord } from "./usage.js";
+import { Delegations } from "./delegations.js";
+import { DocumentBackups } from "./document-backups.js";
+import { bearerToken, connectedSession, contentType, readBody, sendJson } from "./http-util.js";
 import { Logger } from "./logger.js";
-import { ReferenceError_, ReferenceFiles, workbookFolderFromUrl } from "./reference-files.js";
-import { AttachmentError, MAX_ATTACHMENT_BYTES, attachmentPath, createAttachment } from "./attachments.js";
-import { SkillError } from "./skills.js";
-import { UserSkills, SkillEditConflict, MAX_SKILL_UPLOAD_BYTES } from "./skill-upload.js";
-import { SkillStore, expandSkillPrompt, projectTemplateReminder } from "./skills.js";
+import { PaneSockets } from "./pane-connection.js";
+import { ProviderLoginManager } from "./provider-login.js";
+import { ReferenceFiles } from "./reference-files.js";
+import { FileRoutes } from "./routes/files.js";
+import { McpRoutes } from "./routes/mcp.js";
+import { ProviderRoutes } from "./routes/providers.js";
+import { SkillRoutes } from "./routes/skills.js";
+import { TestingRoutes } from "./routes/testing.js";
+import { WorkspaceRoutes } from "./routes/workspaces.js";
+import { SavedReferences } from "./saved-references.js";
 import { SessionManager } from "./session-manager.js";
-import { ProviderSessionManager } from "./provider-session-manager.js";
-import { SystemPromptStore, PromptSettingsError, PromptSettingsConflict } from "./system-prompt.js";
+import { discoverSessionMcp } from "./session-mcp.js";
 import { WorkbookSession } from "./session.js";
-import { ToolGateway } from "./tool-gateway.js";
-import { enrichSelectionForHost, normalizePromptSelection } from "./selection.js";
+import { SiteKnowledge } from "./site-knowledge.js";
+import { UserSkills } from "./skill-upload.js";
+import { SkillStore } from "./skills.js";
+import { standalonePage } from "./standalone-page.js";
+import { SystemPromptStore } from "./system-prompt.js";
+import { loginSession } from "./test-login.js";
+import { TestScripts } from "./test-scripts.js";
+import { TestSessions } from "./test-sessions.js";
+import { TestingAdmin } from "./testing-admin.js";
+import { TurnRunner } from "./turns.js";
+import { UpdateError, UpdateService } from "./updater.js";
+import { UsageStore } from "./usage.js";
 import { enrichWindowsSelection, type SelectionEnricher } from "./windows-selection.js";
-import { activateWorkbook, activeWorkbookPath, pickWorkspaceFolder } from "./windows-workspace.js";
-import { MockAdapter, ProviderRegistry, createDefaultRegistry } from "../../providers/src/index.js";
-import { ProviderLoginError, ProviderLoginManager } from "./provider-login.js";
-import type { McpEndpoint } from "../../providers/src/types.js";
-
-interface SocketState {
-  session: WorkbookSession | null;
-  helloDone: boolean;
-  alive: boolean;
-}
+import { activateWorkbook } from "./windows-workspace.js";
 
 export interface BridgeOptions {
   selectionEnricher?: SelectionEnricher;
@@ -83,44 +61,35 @@ export interface BridgeOptions {
   activateWorkbook?: (workbookName: string) => Promise<unknown>;
 }
 
-const MAX_BODY_BYTES = 8 * 1024 * 1024;
-
-/** Wires the HTTP(S) + WebSocket surface to the session manager and providers. */
+/**
+ * The bridge process: wires the stores, the Office tool runtime and the providers together, serves the task pane over
+ * HTTPS, dispatches its HTTP requests to the route groups under `routes/`, and hands each pane's WebSocket to
+ * `PaneSockets`, which runs turns through `TurnRunner`.
+ */
 export class Bridge {
-  private readonly enrichSelection: SelectionEnricher;
-  private readonly usage: UsageStore;
-  private readonly activeUsage = new Map<string, UsageRecord>();
-  private readonly skills: SkillStore;
   readonly config: BridgeConfig;
   readonly logger: Logger;
   readonly sessions: SessionManager;
-  readonly gateway: ToolGateway;
-  private readonly delegations: Delegations;
+  readonly gateway: OfficeRuntime;
   readonly providers: ProviderRegistry;
-  private readonly providerSessions: ProviderSessionManager<WorkbookSession>;
-  private readonly references: ReferenceFiles;
-  private readonly savedReferences: SavedReferences;
-  private readonly workspaceConfigPath: string | null;
 
   private server: http.Server | https.Server | null = null;
-  private wss: WebSocketServer | null = null;
   private heartbeat: NodeJS.Timeout | null = null;
   private reaper: NodeJS.Timeout | null = null;
   private readonly startedAt = Date.now();
-  private readonly sockets = new Map<WebSocket, SocketState>();
+  private readonly skills: SkillStore;
   private readonly logins = new ProviderLoginManager();
-  private readonly userSkills: UserSkills;
-  private readonly systemPrompt: SystemPromptStore;
-  private readonly testingAdmin: TestingAdmin;
-  private readonly backups: DocumentBackups;
   private readonly mcpServers: McpServers;
   private readonly updater: UpdateService | null;
-  private readonly activateWorkbook: (workbookName: string) => Promise<unknown>;
+  private readonly panes: PaneSockets;
+  private readonly routes: {
+    files: FileRoutes; mcp: McpRoutes; providers: ProviderRoutes; skills: SkillRoutes; testing: TestingRoutes; workspaces: WorkspaceRoutes;
+  };
 
   constructor(config: BridgeConfig, options: BridgeOptions = {}) {
     this.config = config;
-    this.enrichSelection = options.selectionEnricher ?? enrichWindowsSelection;
-    this.usage = new UsageStore(options.usageFile === undefined
+    const enrichSelection = options.selectionEnricher ?? enrichWindowsSelection;
+    const usage = new UsageStore(options.usageFile === undefined
       ? process.env.BRIDGE_USAGE_FILE ?? path.join(PROJECT_ROOT, "run", "usage.jsonl") : options.usageFile);
     this.logger = options.logger ?? new Logger("bridge", config.logLevel);
     this.sessions = new SessionManager({
@@ -128,25 +97,24 @@ export class Bridge {
       logger: this.logger.child("sessions"),
     });
     this.skills = options.skills ?? new SkillStore(config.skillDirs);
-    this.userSkills = new UserSkills(options.skillUploadDir ?? path.join(os.homedir(), ".excel-partner", "skills"));
-    this.systemPrompt = new SystemPromptStore(options.systemPromptFile === undefined
+    const userSkills = new UserSkills(options.skillUploadDir ?? path.join(os.homedir(), ".excel-partner", "skills"));
+    const systemPrompt = new SystemPromptStore(options.systemPromptFile === undefined
       ? process.env.BRIDGE_CONFIG ? path.join(path.dirname(process.env.BRIDGE_CONFIG), "system-prompt.txt") : path.join(PROJECT_ROOT, "run", "system-prompt.txt")
       : options.systemPromptFile);
-    this.references = options.references ?? new ReferenceFiles(config.referenceDirs);
-    this.savedReferences = new SavedReferences(options.savedReferencesFile === undefined
+    const references = options.references ?? new ReferenceFiles(config.referenceDirs);
+    const savedReferences = new SavedReferences(options.savedReferencesFile === undefined
       ? path.join(os.homedir(), ".excel-partner", "references.json") : options.savedReferencesFile);
-    this.references.setSavedPaths(() => this.savedReferences.paths());
-    this.workspaceConfigPath = options.workspaceConfigPath === undefined
+    references.setSavedPaths(() => savedReferences.paths());
+    const workspaceConfigPath = options.workspaceConfigPath === undefined
       ? options.references ? null : (process.env.BRIDGE_CONFIG ?? path.join(PROJECT_ROOT, "excel-partner.config.json"))
       : options.workspaceConfigPath;
     const dataDir = path.dirname(config.configFile);
     const testSessions = new TestSessions(path.join(dataDir, "sessions"));
     const siteKnowledge = new SiteKnowledge(path.join(dataDir, "knowledge"));
     const testScripts = new TestScripts(path.join(dataDir, "scripts"));
-    this.testingAdmin = new TestingAdmin(testSessions, siteKnowledge, testScripts);
+    const testingAdmin = new TestingAdmin(testSessions, siteKnowledge, testScripts, login => loginSession({ ...login, toolsDir: path.join(dataDir, "tools") }));
     this.mcpServers = new McpServers(path.join(dataDir, "mcp-servers.json"));
-    this.backups = new DocumentBackups(path.join(dataDir, "backups"));
-    this.activateWorkbook = options.activateWorkbook ?? activateWorkbook;
+    const backups = new DocumentBackups(path.join(dataDir, "backups"));
     this.updater = options.updater === undefined
       ? new UpdateService({
           packageRoot: PROJECT_ROOT,
@@ -154,33 +122,32 @@ export class Bridge {
           gatewayDir: process.env.AGENT_GATEWAY_HOME ?? path.join(process.env.LOCALAPPDATA || path.join(os.homedir(), ".config"), "Agent Gateway"),
         })
       : options.updater;
-    this.delegations = new Delegations((session, requestId) => void this.onCancel(session, requestId));
-    this.gateway = new ToolGateway(
+    // `turns` is assigned a few lines below; a delegation can only be cancelled once a turn exists.
+    const delegations = new Delegations((session, requestId) => void turns.cancel(session, requestId));
+    this.gateway = new OfficeRuntime(
       this.sessions,
       config.limits,
       config.toolTimeoutMs,
       this.logger.child("gateway"),
       config.allowOfficeJs,
       this.skills,
-      this.references,
-      this.userSkills,
-      this.enrichSelection,
+      references,
+      userSkills,
+      enrichSelection,
       testSessions,
       siteKnowledge,
       testScripts,
-      this.delegations,
+      delegations,
     );
-
     this.gateway.mcpServers = this.mcpServers;
-    const runtime = {
+
+    this.providers = options.registry ?? createDefaultRegistry({
       bridgeUrl: config.publicBaseUrl,
       mcp: config.mcp,
       logger: this.logger.child("providers"),
-    };
-    this.providers = options.registry ?? createDefaultRegistry(runtime);
-    this.providerSessions = new ProviderSessionManager<WorkbookSession>(this.providers,
+    });
+    const providerSessions = new ProviderSessionManager<WorkbookSession>(this.providers,
       session => this.gateway.externalTools.closeSession(session.id), this.logger);
-
     const mockProvider = process.env.BRIDGE_MOCK_PROVIDER;
     if (mockProvider) {
       const parsed = ProviderIdSchema.safeParse(mockProvider);
@@ -191,6 +158,25 @@ export class Bridge {
         this.logger.warn("BRIDGE_MOCK_PROVIDER is not a valid provider id", { mockProvider });
       }
     }
+
+    const discoverMcp = (session: WorkbookSession) => discoverSessionMcp(this.mcpServers, config.allowOfficeJs, session);
+    const turns = new TurnRunner({
+      config, logger: this.logger, providers: this.providers, providerSessions, delegations, externalTools: this.gateway.externalTools,
+      usage, skills: this.skills, systemPrompt, savedReferences, references, enrichSelection, discoverMcp,
+    });
+    this.panes = new PaneSockets({
+      sessions: this.sessions, logger: this.logger, turns, delegations, logins: this.logins, mcpServers: this.mcpServers,
+      externalTools: this.gateway.externalTools, skills: this.skills, references,
+      isTrustedRequest: req => this.isTrustedRequest(req), addinBuildId: () => this.addinBuildId(),
+    });
+    this.routes = {
+      files: new FileRoutes({ sessions: this.sessions, backups, logger: this.logger, activateWorkbook: options.activateWorkbook ?? activateWorkbook }),
+      mcp: new McpRoutes({ sessions: this.sessions, mcpServers: this.mcpServers, discover: discoverMcp }),
+      providers: new ProviderRoutes({ sessions: this.sessions, providers: this.providers, logins: this.logins, usage, logger: this.logger }),
+      skills: new SkillRoutes({ sessions: this.sessions, skills: this.skills, userSkills, systemPrompt }),
+      testing: new TestingRoutes({ sessions: this.sessions, admin: testingAdmin }),
+      workspaces: new WorkspaceRoutes({ sessions: this.sessions, references, savedReferences, logger: this.logger, workspaceConfigPath }),
+    };
   }
 
   async listen(): Promise<{ host: string; port: number; url: string }> {
@@ -215,17 +201,14 @@ export class Bridge {
     } else {
       this.server = http.createServer(requestHandler);
     }
-
-    this.wss = new WebSocketServer({ noServer: true });
-    this.wss.on("connection", (ws) => this.handleConnection(ws));
-    this.server.on("upgrade", (req, socket, head) => this.handleUpgrade(req, socket, head));
+    this.panes.attach(this.server);
 
     await new Promise<void>((resolve, reject) => {
       this.server!.once("error", reject);
       this.server!.listen(this.config.port, this.config.host, () => resolve());
     });
 
-    this.heartbeat = setInterval(() => this.pingAll(), this.config.heartbeatMs);
+    this.heartbeat = setInterval(() => this.panes.pingAll(), this.config.heartbeatMs);
     this.heartbeat.unref?.();
     this.reaper = setInterval(() => this.sessions.reapIdle(), 60_000);
     this.reaper.unref?.();
@@ -270,12 +253,13 @@ export class Bridge {
       return;
     }
     const url = new URL(req.url ?? "/", "http://localhost");
-    if (url.pathname === "/session/mcp") return this.handleMcp(req, res);
+    const method = req.method;
+    const { files, mcp, providers, skills, testing, workspaces } = this.routes;
 
-    if (req.method === "GET" && (url.pathname === "/" || url.pathname === "/index.html")) return this.serveStandalonePage(res);
-
-    if (req.method === "GET" && url.pathname === "/health") {
-      return this.sendJson(res, 200, {
+    if (url.pathname === "/session/mcp") return mcp.handle(req, res);
+    if (method === "GET" && (url.pathname === "/" || url.pathname === "/index.html")) return this.serveStandalonePage(res);
+    if (method === "GET" && url.pathname === "/health") {
+      return sendJson(res, 200, {
         status: "ok",
         name: "excel-ai-addin-bridge",
         protocolVersion: PROTOCOL_VERSION,
@@ -284,103 +268,50 @@ export class Bridge {
         sessions: this.sessions.list().map((session) => session.toJSON()),
       });
     }
-
     // Development only: lets scripts/tool-call.ts act as an independent MCP client against a
     // live task pane. Exposes session tokens, so it is off unless BRIDGE_DEV=1 (loopback bridge).
-    if (req.method === "GET" && url.pathname === "/debug/sessions" && process.env.BRIDGE_DEV === "1") {
-      return this.sendJson(
-        res,
-        200,
-        this.sessions.list().map((session) => ({ ...session.toJSON(), token: session.sessionToken })),
-      );
+    if (method === "GET" && url.pathname === "/debug/sessions" && process.env.BRIDGE_DEV === "1") {
+      return sendJson(res, 200, this.sessions.list().map((session) => ({ ...session.toJSON(), token: session.sessionToken })));
     }
-
     // Names and descriptions only: feeds the task pane's `/` menu.
-    if (req.method === "GET" && url.pathname === "/skills") {
-      return this.sendJson(res, 200, {
-        skills: this.skills.list().map(({ name, description }) => ({ name, description })),
-      });
+    if (method === "GET" && url.pathname === "/skills") {
+      return sendJson(res, 200, { skills: this.skills.list().map(({ name, description }) => ({ name, description })) });
     }
+    if (method === "GET" && url.pathname === "/internal/tools") {
+      const session = connectedSession(this.sessions, req);
+      if (!session) return sendJson(res, 401, { error: "unauthorized" });
+      const external = await discoverSessionMcp(this.mcpServers, this.config.allowOfficeJs, session);
+      return sendJson(res, 200, { tools: [...officeToolCatalog(session.host, this.config.allowOfficeJs, session.capabilities), ...[...external.values()].map(tool => tool.definition)] });
+    }
+    if (method === "POST" && url.pathname === "/internal/tool") return this.handleInternalTool(req, res);
 
-    if (req.method === "GET" && url.pathname === "/internal/tools") {
-      const session = this.workspaceSession(req);
-      if (!session) return this.sendJson(res, 401, { error: "unauthorized" });
-      const external = await this.discoverSessionMcp(session);
-      return this.sendJson(res, 200, { tools: [...officeToolCatalog(session.host, this.config.allowOfficeJs, session.capabilities), ...[...external.values()].map(tool => tool.definition)] });
-    }
-    if (req.method === "POST" && url.pathname === "/internal/tool") {
-      return this.handleInternalTool(req, res);
-    }
+    if (method === "GET" && url.pathname === "/session/usage") return providers.usage(req, res, url);
+    if (method === "POST" && url.pathname === "/session/attachment") return files.attachment(req, res);
+    if (method === "POST" && url.pathname === "/session/backup") return files.backup(req, res);
+    if (method === "POST" && url.pathname === "/session/go-to") return files.goTo(req, res);
+    if (url.pathname === "/session/update" && (method === "GET" || method === "POST")) return this.handleUpdate(req, res, url);
+    if (method === "GET" && url.pathname === "/session/models") return providers.models(req, res, url);
+    if (method === "GET" && url.pathname === "/session/commands") return providers.commands(req, res, url);
+    if (url.pathname === "/session/references") return workspaces.savedReferences(req, res);
+    if (url.pathname === "/session/skills") return skills.userSkills(req, res, url);
+    if (url.pathname === "/session/system-prompt") return skills.systemPrompt(req, res);
+    if (url.pathname === "/session/skill-templates" && method === "GET") return skills.listTemplates(req, res, url);
+    if (url.pathname === "/session/skill-templates" && method === "POST") return skills.addTemplate(req, res);
+    if (url.pathname === "/session/skill-templates" && method === "DELETE") return skills.deleteTemplate(req, res);
 
-    if (req.method === "GET" && url.pathname === "/session/usage") {
-      const session = this.sessions.getByToken(bearerToken(req.headers.authorization) ?? "");
-      if (!session?.isConnected) return this.sendJson(res, 401, { error: "unauthorized" });
-      const id = url.searchParams.get("sessionId");
-      const summaries = this.usage.summaries().filter((item) => !id || item.sessionId === id);
-      await Promise.all(summaries.map(async item => {
-        const provider = ProviderIdSchema.safeParse(item.provider);
-        const nativeId = item.providerSessionIds?.at(-1);
-        if (!provider.success || !nativeId || item.sessionId !== providerSessionKey(provider.data, nativeId)) return;
-        try {
-          item.title = await this.providers.get(provider.data)?.sessionTitle?.(nativeId) ?? cleanSessionTitle(provider.data, item.title);
-        } catch { /* Preserve the last recorded title when the CLI is unavailable. */ }
-      }));
-      return this.sendJson(res, 200, { sessions: summaries });
-    }
-    if (req.method === "POST" && url.pathname === "/session/attachment") {
-      return this.handleAttachment(req, res);
-    }
-    if (req.method === "POST" && url.pathname === "/session/backup") {
-      return this.handleBackup(req, res);
-    }
-    if (url.pathname === "/session/go-to" && req.method === "POST") return this.goToFile(req, res);
-    if (url.pathname === "/session/update" && (req.method === "GET" || req.method === "POST")) {
-      return this.handleUpdate(req, res, url);
-    }
-    if (req.method === "GET" && url.pathname === "/session/models") return this.listProviderModels(req, res, url);
-    if (req.method === "GET" && url.pathname === "/session/commands") {
-      const session = this.workspaceSession(req);
-      if (!session) return this.sendJson(res, 401, { error: "unauthorized" });
-      const provider = ProviderIdSchema.safeParse(url.searchParams.get("provider"));
-      if (!provider.success) return this.sendJson(res, 400, { error: "Invalid provider" });
-      try {
-        const adapter = this.providers.require(provider.data);
-        const commands = await adapter.listCommands?.(session.provider === provider.data ? session.providerSessionId ?? undefined : undefined) ?? [];
-        const local = normalizeCommands([
-          { name: "new", description: "Start a new chat" }, { name: "clear", description: "Start a new chat" },
-          { name: "resume", description: "Browse saved conversations" }, { name: "model", description: "Choose a model" },
-          { name: "permissions", description: "Choose Ask or Auto tool approval" }, { name: "theme", description: "Change the add-in theme" },
-          { name: "copy", description: "Copy the last assistant response" }, { name: "export", description: "Export this chat as Markdown" },
-          { name: "help", description: "Show available commands" }, { name: "login", description: "Open provider sign-in" },
-          { name: "status", description: "Show the current provider and session", execution: "client", action: "status" },
-          { name: "usage", description: "Show session usage", execution: "client", action: "usage" },
-        ]);
-        const names = new Set(commands.map(command => command.name));
-        return this.sendJson(res, 200, { provider: provider.data, commands: [...commands, ...local.filter(command => !names.has(command.name))] });
-      } catch (error) { return this.sendJson(res, 502, { error: error instanceof Error ? error.message : String(error) }); }
-    }
-    if (url.pathname === "/session/references") return this.handleSavedReferences(req, res, url);
-    if (url.pathname === "/session/skills") return this.handleUserSkills(req, res, url);
-    if (url.pathname === "/session/system-prompt") return this.handleSystemPrompt(req, res);
-    if (url.pathname === "/session/skill-templates" && req.method === "GET") return this.listSkillTemplates(req, res, url);
-    if (url.pathname === "/session/skill-templates" && req.method === "POST") return this.addSkillTemplate(req, res);
-    if (url.pathname === "/session/skill-templates" && req.method === "DELETE") return this.deleteSkillTemplate(req, res);
+    if (url.pathname === "/session/workspaces" && method === "GET") return workspaces.list(req, res, url);
+    if (url.pathname === "/session/workspaces" && method === "POST") return workspaces.add(req, res);
+    if (url.pathname === "/session/workspaces" && method === "DELETE") return workspaces.remove(req, res);
+    if (url.pathname === "/session/workspaces/pick" && method === "POST") return workspaces.pick(req, res);
+    if (url.pathname === "/session/workspaces/entries" && method === "GET") return workspaces.entries(req, res, url);
+    if (url.pathname === "/session/workspaces/attach" && method === "POST") return workspaces.attach(req, res);
 
-    if (url.pathname === "/session/workspaces" && req.method === "GET") return this.listWorkspaces(req, res, url);
-    if (url.pathname === "/session/workspaces" && req.method === "POST") return this.addWorkspace(req, res);
-    if (url.pathname === "/session/workspaces" && req.method === "DELETE") return this.removeWorkspace(req, res);
-    if (url.pathname === "/session/workspaces/pick" && req.method === "POST") return this.pickWorkspace(req, res);
-    if (url.pathname === "/session/workspaces/entries" && req.method === "GET") return this.listWorkspaceEntries(req, res, url);
-    if (url.pathname === "/session/workspaces/attach" && req.method === "POST") return this.attachWorkspaceFile(req, res);
+    if (url.pathname === "/session/testing") return testing.handle(req, res, url);
+    if (url.pathname === "/session/provider-login") return providers.login(req, res);
 
-    if (url.pathname === "/session/testing") return this.handleTesting(req, res, url);
-    if (url.pathname === "/session/provider-login") return this.handleProviderLogin(req, res);
+    if (method === "GET" && url.pathname.startsWith("/addin/")) return this.serveAddin(url.pathname, res);
 
-    if (req.method === "GET" && url.pathname.startsWith("/addin/")) {
-      return this.serveAddin(url.pathname, res);
-    }
-
-    return this.sendJson(res, 404, { error: "not_found" });
+    return sendJson(res, 404, { error: "not_found" });
   }
 
   /** The task pane for a browser tab: the add-in's page with a stand-in for Office.js (see standalone-page.ts). */
@@ -391,7 +322,7 @@ export class Bridge {
       res.end(standalonePage(html));
     } catch (error) {
       this.logger.error("could not serve the browser page", { error: String(error) });
-      this.sendJson(res, 500, { error: "page_unavailable" });
+      sendJson(res, 500, { error: "page_unavailable" });
     }
   }
 
@@ -400,13 +331,13 @@ export class Bridge {
    * single localhost certificate covers both the UI and the API.
    */
   private serveAddin(pathname: string, res: http.ServerResponse): void {
-    if (pathname === "/addin/build-id") return this.sendJson(res, 200, { id: this.addinBuildId() });
+    if (pathname === "/addin/build-id") return sendJson(res, 200, { id: this.addinBuildId() });
 
     const root = path.join(PROJECT_ROOT, "addin");
     const relative = pathname.slice("/addin/".length);
     const target = path.resolve(root, relative);
     if (!target.startsWith(root + path.sep) && target !== root) {
-      return this.sendJson(res, 403, { error: "forbidden" });
+      return sendJson(res, 403, { error: "forbidden" });
     }
 
     let filePath = target;
@@ -414,7 +345,7 @@ export class Bridge {
       if (statSync(filePath).isDirectory()) filePath = path.join(filePath, "index.html");
       statSync(filePath);
     } catch {
-      return this.sendJson(res, 404, { error: "not_found" });
+      return sendJson(res, 404, { error: "not_found" });
     }
 
     if (pathname === "/addin/taskpane/index.html") {
@@ -433,722 +364,6 @@ export class Bridge {
       .pipe(res);
   }
 
-  private async discoverSessionMcp(session: WorkbookSession) {
-    const enabled = JSON.stringify([...session.enabledMcpServers].sort());
-    const catalog = await discoverMcpCatalog(this.mcpServers, session.id, session.enabledMcpServers, new Set(officeToolCatalog(session.host, this.config.allowOfficeJs, session.capabilities).map(tool => tool.name)), session.turnController?.signal);
-    if (enabled !== JSON.stringify([...session.enabledMcpServers].sort())) throw new Error("MCP selection changed during discovery; retry the request");
-    session.externalMcpTools = catalog;
-    return catalog;
-  }
-
-  private async handleMcp(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
-    const session = this.workspaceSession(req);
-    if (!session) return this.sendJson(res, 401, { error: "unauthorized" });
-    try {
-      if (req.method === "GET") return this.sendJson(res, 200, { servers: this.mcpServers.list(), enabled: [...session.enabledMcpServers] });
-      if (req.method !== "POST" && req.method !== "DELETE") return this.sendJson(res, 405, { error: "method_not_allowed" });
-      const body = JSON.parse(await readBody(req, 32_000)) as Record<string, unknown>;
-      const id = typeof body.id === "string" ? body.id : "";
-      if (req.method === "DELETE") {
-        await this.mcpServers.remove(id);
-        for (const pane of this.sessions.list()) { pane.enabledMcpServers.delete(id); pane.externalMcpTools.clear(); }
-      } else if (body.action === "select") {
-        if (typeof body.enabled !== "boolean" || !this.mcpServers.list().some(item => item.id === id)) throw new Error("Invalid MCP selection");
-        if (body.enabled) {
-          const alreadyEnabled = session.enabledMcpServers.has(id);
-          const previous = session.externalMcpTools;
-          session.enabledMcpServers.add(id);
-          try { await this.discoverSessionMcp(session); }
-          catch (error) { if (!alreadyEnabled) session.enabledMcpServers.delete(id); session.externalMcpTools = previous; throw error; }
-        } else {
-          session.enabledMcpServers.delete(id);
-          for (const [name, tool] of session.externalMcpTools) if (tool.serverId === id) session.externalMcpTools.delete(name);
-          await this.mcpServers.closeSessionServer(session.id, id);
-        }
-      } else if (body.action === "test") {
-        const testSession = `test-${session.id}`;
-        try { const tools = await this.mcpServers.tools(testSession, id); return this.sendJson(res, 200, { tools: tools.map(({ name, description }) => ({ name, description })) }); }
-        finally { await this.mcpServers.closeSession(testSession); }
-      } else if (body.action === "save") {
-        await this.mcpServers.save(body.config);
-        for (const pane of this.sessions.list()) { pane.enabledMcpServers.delete((body.config as { id: string }).id); pane.externalMcpTools.clear(); }
-      } else throw new Error("Unknown MCP action");
-      return this.sendJson(res, 200, { ok: true });
-    } catch (error) { this.sendJson(res, 400, { error: error instanceof Error ? error.message : String(error) }); }
-  }
-
-  private async handleSavedReferences(req: http.IncomingMessage, res: http.ServerResponse, url: URL): Promise<void> {
-    const session = this.workspaceSession(req);
-    if (!session) return this.sendJson(res, 401, { error: "unauthorized" });
-    res.setHeader("cache-control", "no-store");
-    try {
-      if (req.method === "GET") return this.sendJson(res, 200, { references: this.savedReferences.list() });
-      if (req.method !== "POST" && req.method !== "DELETE") return this.sendJson(res, 405, { error: "method_not_allowed" });
-      const body = JSON.parse(await readBody(req)) as Record<string, unknown>;
-      if (!body || typeof body !== "object") throw new ReferenceError_("Invalid reference metadata.");
-      if (req.method === "DELETE") {
-        if (typeof body.id !== "string") throw new ReferenceError_("Specify a reference ID.");
-        this.savedReferences.remove(body.id);
-        return this.sendJson(res, 200, { removed: true });
-      }
-      if (typeof body.name !== "string" || typeof body.description !== "string" || (body.id !== undefined && typeof body.id !== "string")) throw new ReferenceError_("Specify a name and description.");
-      const existing = this.savedReferences.list().find(e => e.id === body.id);
-      let target = existing ? { path: existing.path, kind: existing.kind } : undefined;
-      if (body.path !== undefined) {
-        if (typeof body.path !== "string") throw new ReferenceError_("Enter a valid file or folder path.");
-        // Explorer's "Copy as path" wraps the path in double quotes.
-        const typed = body.path.trim().replace(/^"(.*)"$/, "$1").trim();
-        if (!typed) throw new ReferenceError_("Enter the full path of the file or folder.");
-        target = this.references.referenceTarget(typed);
-      }
-      if (!target) throw new ReferenceError_("Enter the full path of the file or folder.");
-      const reference = this.savedReferences.save({ id: body.id as string | undefined, name: body.name, description: body.description, path: target.path, kind: target.kind });
-      return this.sendJson(res, 200, { reference });
-    } catch (error) {
-      if (error instanceof ReferenceError_ || error instanceof SyntaxError) return this.sendJson(res, 400, { error: error.message });
-      throw error;
-    }
-  }
-
-  /** Sign-ins, notes and regression scripts for the testing workflow: what the `office-partner login/knowledge/scripts` commands do, for buttons. */
-  private async handleTesting(req: http.IncomingMessage, res: http.ServerResponse, url: URL): Promise<void> {
-    if (!this.workspaceSession(req)) return this.sendJson(res, 401, { error: "unauthorized" });
-    res.setHeader("cache-control", "no-store");
-    const admin = this.testingAdmin;
-    try {
-      if (req.method === "GET") {
-        const kind = url.searchParams.get("view");
-        if (kind === "note") return this.sendJson(res, 200, admin.viewNote(url.searchParams.get("site") ?? "", url.searchParams.get("name") ?? ""));
-        if (kind === "script") return this.sendJson(res, 200, { content: admin.viewScript(url.searchParams.get("site") ?? "", url.searchParams.get("caseId") ?? "") });
-        return this.sendJson(res, 200, admin.overview());
-      }
-      if (req.method !== "POST" && req.method !== "DELETE") return this.sendJson(res, 405, { error: "method_not_allowed" });
-      const body = JSON.parse(await readBody(req)) as Record<string, unknown>;
-      const text = (key: string) => typeof body[key] === "string" ? body[key] as string : "";
-      if (req.method === "DELETE") {
-        const kind = text("kind");
-        if (kind === "signin") return this.sendJson(res, 200, { removed: admin.deleteSignIn(text("name")) });
-        if (kind === "note") return this.sendJson(res, 200, { removed: admin.deleteNote(text("site"), text("name")) });
-        if (kind === "script") return this.sendJson(res, 200, { removed: admin.deleteScript(text("site"), text("caseId")) });
-        throw new TestingAdminError("Say what to delete: signin, note or script.");
-      }
-      const action = text("action");
-      if (action === "sign-in-start") {
-        const extra = Array.isArray(body.extraOrigins) ? body.extraOrigins.filter((item): item is string => typeof item === "string").slice(0, 5) : [];
-        return this.sendJson(res, 200, await admin.startSignIn({ name: text("name"), url: text("url"), extraOrigins: extra }));
-      }
-      if (action === "sign-in-finish") return this.sendJson(res, 200, await admin.finishSignIn());
-      if (action === "sign-in-cancel") return this.sendJson(res, 200, { cancelled: admin.cancelSignIn() });
-      if (action === "open-folder") {
-        const kind = text("kind");
-        if (kind !== "sessions" && kind !== "knowledge" && kind !== "scripts") throw new TestingAdminError("Choose sessions, knowledge or scripts.");
-        return this.sendJson(res, 200, { folder: admin.folder(kind as FolderKind) });
-      }
-      throw new TestingAdminError("Unknown action.");
-    } catch (error) {
-      if (error instanceof TestingAdminError || error instanceof SyntaxError) return this.sendJson(res, 400, { error: error.message });
-      throw error;
-    }
-  }
-
-  private async handleSystemPrompt(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
-    if (!this.workspaceSession(req)) return this.sendJson(res, 401, { error: "unauthorized" });
-    try {
-      if (req.method === "GET") return this.sendJson(res, 200, this.systemPrompt.read());
-      if (req.method !== "PUT") return this.sendJson(res, 405, { error: "method_not_allowed" });
-      const body = JSON.parse(await readBody(req)) as { content?: unknown; revision?: unknown };
-      if ((typeof body.content !== "string" && body.content !== null) || typeof body.revision !== "string") throw new PromptSettingsError("Specify prompt content and revision.");
-      return this.sendJson(res, 200, this.systemPrompt.update(body.content, body.revision));
-    } catch (error) {
-      if (error instanceof PromptSettingsConflict) return this.sendJson(res, 409, { error: error.message });
-      if (error instanceof PromptSettingsError || error instanceof SyntaxError) return this.sendJson(res, 400, { error: error.message });
-      throw error;
-    }
-  }
-
-  private async handleUserSkills(req: http.IncomingMessage, res: http.ServerResponse, url: URL): Promise<void> {
-    if (!this.workspaceSession(req)) return this.sendJson(res, 401, { error: "unauthorized" });
-    res.setHeader("cache-control", "no-store");
-    try {
-      if (req.method === "PATCH") {
-        const body = JSON.parse(await readBody(req)) as { name?: unknown; enabled?: unknown };
-        if (typeof body.name !== "string" || typeof body.enabled !== "boolean") throw new SkillError("Specify a skill name and enabled state.");
-        this.skills.setEnabled(body.name, body.enabled);
-        return this.sendJson(res, 200, { name: body.name, enabled: body.enabled });
-      }
-      if ((req.method === "GET" && url.searchParams.has("name")) || req.method === "PUT") {
-        const body = req.method === "PUT" ? JSON.parse(await readBody(req, MAX_SKILL_UPLOAD_BYTES * 6 + 4096)) as Record<string, unknown> : null;
-        const name = body?.name ?? url.searchParams.get("name");
-        if (typeof name !== "string") throw new SkillError("Specify a skill name.");
-        const skill = this.skills.get(name);
-        if (!skill || !this.userSkills.owns(skill.name, skill.dir)) return this.sendJson(res, 403, { error: "Only your installed skills can be edited here." });
-        const file = body?.file ?? url.searchParams.get("file");
-        if (req.method === "GET") return this.sendJson(res, 200, file === null
-          ? { files: this.userSkills.textFiles(name) }
-          : { document: this.userSkills.readTextFile(name, String(file)) });
-        if (typeof file !== "string" || typeof body?.content !== "string" || typeof body.revision !== "string") throw new SkillError("Specify the file, text content and revision.");
-        return this.sendJson(res, 200, { document: this.userSkills.updateTextFile(name, file, body.content, body.revision) });
-      }
-      if (req.method === "GET") return this.sendJson(res, 200, {
-        skills: this.skills.list(true).map(({ name, description, dir }) => ({ name, description, enabled: this.skills.isEnabled(name), removable: this.userSkills.owns(name, dir) })),
-      });
-      if (req.method === "POST") {
-        let filename: string;
-        try { filename = decodeURIComponent(String(req.headers["x-file-name"] ?? "")); }
-        catch { return this.sendJson(res, 400, { error: "Invalid file name." }); }
-        const bytes = await readBinaryBody(req, MAX_SKILL_UPLOAD_BYTES);
-        const skill = this.userSkills.install(filename, bytes, name => this.skills.get(name) !== null);
-        return this.sendJson(res, 201, { skill });
-      }
-      if (req.method === "DELETE") {
-        const body = JSON.parse(await readBody(req)) as { name?: unknown };
-        if (typeof body.name !== "string") return this.sendJson(res, 400, { error: "Specify a skill name." });
-        const skill = this.skills.get(body.name);
-        if (!skill || !this.userSkills.owns(skill.name, skill.dir)) return this.sendJson(res, 403, { error: "Only uploaded skills can be removed here." });
-        this.userSkills.remove(skill.name);
-        return this.sendJson(res, 200, { removed: skill.name });
-      }
-      return this.sendJson(res, 405, { error: "method_not_allowed" });
-    } catch (error) {
-      if (error instanceof SkillEditConflict) return this.sendJson(res, 409, { error: error.message });
-      if (error instanceof SkillError || error instanceof AttachmentError || error instanceof SyntaxError) return this.sendJson(res, 400, { error: error.message });
-      throw error;
-    }
-  }
-
-  private async handleProviderLogin(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
-    const session = this.workspaceSession(req);
-    if (!session) return this.sendJson(res, 401, { error: "unauthorized" });
-    res.setHeader("cache-control", "no-store");
-    if (req.method === "GET") {
-      const status = this.logins.status(session.id);
-      if (status.state === "success") this.providers.invalidateModels("copilot");
-      return this.sendJson(res, 200, status);
-    }
-    if (req.method === "DELETE") return this.sendJson(res, 200, this.logins.cancel(session.id));
-    if (req.method !== "POST") return this.sendJson(res, 405, { error: "method_not_allowed" });
-    if (session.isBusy) return this.sendJson(res, 409, { error: "Stop the current response before signing in." });
-    try {
-      const status = this.logins.start(session.id);
-      return this.sendJson(res, 200, status);
-    } catch (error) {
-      if (error instanceof ProviderLoginError) return this.sendJson(res, 409, { error: error.message });
-      throw error;
-    }
-  }
-
-  private async handleInternalTool(
-    req: http.IncomingMessage,
-    res: http.ServerResponse,
-  ): Promise<void> {
-    const token = bearerToken(req.headers.authorization);
-    if (!token) return this.sendJson(res, 401, { error: "unauthorized" });
-    const session = this.sessions.getByToken(token);
-    if (!session || !session.isConnected) {
-      return this.sendJson(res, 401, { error: "unauthorized" });
-    }
-
-    let body: { sessionId?: string; tool?: string; args?: unknown };
-    try {
-      body = JSON.parse(await readBody(req));
-    } catch {
-      return this.sendJson(res, 400, { error: "invalid_json" });
-    }
-
-    // Defence in depth: the token already identifies the session, but a stray
-    // session id must never route a tool to the wrong workbook.
-    if (body.sessionId && body.sessionId !== session.id) {
-      return this.sendJson(res, 403, { error: "session_mismatch" });
-    }
-    if (typeof body.tool !== "string") {
-      return this.sendJson(res, 400, { error: "missing_tool" });
-    }
-
-    // A call that waits on another file can outlive the MCP process that made it; stop it when that process hangs up.
-    const callerGone = new AbortController();
-    res.on("close", () => { if (!res.writableFinished) callerGone.abort(); });
-    const result = await this.gateway.invoke({
-      sessionId: session.id,
-      tool: body.tool,
-      args: body.args,
-      signal: callerGone.signal,
-    });
-    return this.sendJson(res, 200, result);
-  }
-
-  private async handleAttachment(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
-    const session = this.sessions.getByToken(bearerToken(req.headers.authorization) ?? "");
-    if (!session?.isConnected) return this.sendJson(res, 401, { error: "unauthorized" });
-    let name: string;
-    try { name = decodeURIComponent(String(req.headers["x-file-name"] ?? "")); }
-    catch { return this.sendJson(res, 400, { error: "invalid_file_name" }); }
-    try {
-      const bytes = await readBinaryBody(req, MAX_ATTACHMENT_BYTES);
-      const attachment = createAttachment(name, bytes);
-      if (session.attachments.size >= 10) session.attachments.delete(session.attachments.keys().next().value!);
-      session.attachments.set(attachment.id, attachment);
-      session.touch();
-      return this.sendJson(res, 200, { id: attachment.id, name: attachment.name, kind: attachment.kind, path: attachmentPath(attachment.id) });
-    } catch (error) {
-      if (error instanceof AttachmentError) return this.sendJson(res, 400, { error: error.message });
-      throw error;
-    }
-  }
-
-  /** GET: is a newer version out, and how is an update going. POST: start one (the bridge is replaced while it runs). */
-  private async handleUpdate(req: http.IncomingMessage, res: http.ServerResponse, url: URL): Promise<void> {
-    const session = this.sessions.getByToken(bearerToken(req.headers.authorization) ?? "");
-    if (!session?.isConnected) return this.sendJson(res, 401, { error: "unauthorized" });
-    if (!this.updater) return this.sendJson(res, 404, { error: "Updating from the task pane is turned off." });
-    if (req.method === "GET") {
-      return this.sendJson(res, 200, await this.updater.check(url.searchParams.get("refresh") === "1"));
-    }
-    try {
-      const busy = this.sessions.list().some((other) => other.isBusy);
-      const status = this.updater.start({ busy });
-      this.logger.info("update started", { from: this.updater.version });
-      return this.sendJson(res, 202, { status });
-    } catch (error) {
-      if (error instanceof UpdateError) return this.sendJson(res, error.code === "unsupported" ? 400 : error.code === "failed" ? 500 : 409, { error: error.message, code: error.code });
-      throw error;
-    }
-  }
-
-  /** A copy of the open file (workbook, document or presentation), taken by the task pane before something the undo journal cannot reverse. */
-  private async handleBackup(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
-    const session = this.sessions.getByToken(bearerToken(req.headers.authorization) ?? "");
-    if (!session?.isConnected) return this.sendJson(res, 401, { error: "unauthorized" });
-    let name: string;
-    try { name = decodeURIComponent(String(req.headers["x-file-name"] ?? "")); }
-    catch { return this.sendJson(res, 400, { error: "invalid_file_name" }); }
-    try {
-      const bytes = await readBinaryBody(req, MAX_BACKUP_BYTES);
-      session.touch();
-      return this.sendJson(res, 200, { ...this.backups.save(name, bytes, backupExtensionFor(session.host)), folder: this.backups.dir });
-    } catch (error) {
-      if (error instanceof BackupError || error instanceof AttachmentError) return this.sendJson(res, 400, { error: error.message });
-      throw error;
-    }
-  }
-
-  /**
-   * A link in one file's chat that points into another open file: ask that file's pane to show the range, then bring its
-   * window forward. The file is found by name (the chat only knows what the text said); the answer is always 200 with `ok`,
-   * and `error` says why not (not open, two files with that name, no such sheet) in words the person can read.
-   */
-  private async goToFile(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
-    const session = this.workspaceSession(req);
-    if (!session) return this.sendJson(res, 401, { error: "unauthorized" });
-    let body: Record<string, unknown>;
-    try { body = JSON.parse(await readBody(req, 16 * 1024)) as Record<string, unknown>; }
-    catch { return this.sendJson(res, 400, { error: "invalid_json" }); }
-    const file = typeof body.file === "string" ? body.file.trim() : "";
-    const address = typeof body.address === "string" ? body.address.trim() : "";
-    const sheet = typeof body.sheet === "string" ? body.sheet.trim() : "";
-    if (!file || file.length > 255 || !/^[A-Za-z0-9$:]{1,64}$/.test(address) || sheet.length > 255 || (body.sheet !== undefined && typeof body.sheet !== "string")) {
-      return this.sendJson(res, 400, { error: "invalid_target" });
-    }
-    session.touch();
-    await this.sessions.refreshNames(); // a rename (Save As) has no event: names are read when someone needs them
-    const matches = this.sessions.connected().filter((item) => item.host === "excel" && item.id !== session.id && sameWorkbookName(item.workbookName ?? "", file));
-    if (matches.length === 0) return this.sendJson(res, 200, { ok: false, error: `"${file}" is not open in Excel with this add-in.` });
-    if (matches.length > 1) return this.sendJson(res, 200, { ok: false, error: `More than one open file is called "${file}", so it is not clear which one to show.` });
-    const target = matches[0]!;
-    const result = await target.requestPeerRead(GO_TO_REQUEST, { ...(sheet ? { sheet } : {}), address }, 15_000);
-    if (!result.ok) return this.sendJson(res, 200, { ok: false, error: `[${target.workbookName ?? UNNAMED_WORKBOOK}] ${result.error.message}` });
-    try { await this.activateWorkbook(target.workbookName ?? ""); }
-    catch (error) { this.logger.warn("could not bring the workbook window forward", { error: String(error) }); }
-    return this.sendJson(res, 200, { ok: true });
-  }
-
-  private listSkillTemplates(req: http.IncomingMessage, res: http.ServerResponse, url: URL): void {
-    if (!this.workspaceSession(req)) return this.sendJson(res, 401, { error: "unauthorized" });
-    const skill = url.searchParams.get("skill");
-    try {
-      if (skill) return this.sendJson(res, 200, { templates: this.skills.listTemplates(skill) });
-      return this.sendJson(res, 200, { skills: this.skills.list().map(({ name, description }) => ({ name, description })) });
-    } catch (error) {
-      if (error instanceof SkillError) return this.sendJson(res, 400, { error: error.message });
-      throw error;
-    }
-  }
-
-  private async listProviderModels(req: http.IncomingMessage, res: http.ServerResponse, url: URL): Promise<void> {
-    if (!this.workspaceSession(req)) return this.sendJson(res, 401, { error: "unauthorized" });
-    const parsed = ProviderIdSchema.safeParse(url.searchParams.get("provider"));
-    if (!parsed.success) return this.sendJson(res, 400, { error: "invalid_provider" });
-    try {
-      return this.sendJson(res, 200, await this.providers.listModels(parsed.data));
-    } catch (error) {
-      this.logger.warn("could not list provider models", { provider: parsed.data, error: String(error) });
-      if (/not (?:authenticated|logged in)|(?:authentication|login|sign.?in) (?:required|failed)|unauthorized|401|please (?:log|sign) in/i.test(String(error))) {
-        return this.sendJson(res, 401, { error: "Sign in to your AI account to load the available models.", code: "login_required" });
-      }
-      return this.sendJson(res, 503, { error: "Could not load models from the provider CLI." });
-    }
-  }
-
-  private async addSkillTemplate(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
-    if (!this.workspaceSession(req)) return this.sendJson(res, 401, { error: "unauthorized" });
-    let skill: string, name: string;
-    try {
-      skill = decodeURIComponent(String(req.headers["x-skill-name"] ?? ""));
-      name = decodeURIComponent(String(req.headers["x-file-name"] ?? ""));
-    } catch { return this.sendJson(res, 400, { error: "invalid_name" }); }
-    try {
-      const bytes = await readBinaryBody(req, MAX_ATTACHMENT_BYTES);
-      return this.sendJson(res, 200, { template: this.skills.addTemplate(skill, name, bytes) });
-    } catch (error) {
-      if (error instanceof SkillError || error instanceof AttachmentError) return this.sendJson(res, 400, { error: error.message });
-      if ((error as NodeJS.ErrnoException).code === "EEXIST") return this.sendJson(res, 409, { error: "A template with this name already exists. Delete it first to replace it." });
-      throw error;
-    }
-  }
-
-  private async deleteSkillTemplate(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
-    if (!this.workspaceSession(req)) return this.sendJson(res, 401, { error: "unauthorized" });
-    let body: { skill?: unknown; name?: unknown };
-    try { body = JSON.parse(await readBody(req)); }
-    catch { return this.sendJson(res, 400, { error: "invalid_json" }); }
-    if (typeof body.skill !== "string" || typeof body.name !== "string") return this.sendJson(res, 400, { error: "invalid_name" });
-    try { this.skills.deleteTemplate(body.skill, body.name); return this.sendJson(res, 200, { deleted: true }); }
-    catch (error) { if (error instanceof SkillError) return this.sendJson(res, 400, { error: error.message }); throw error; }
-  }
-
-  private workspaceSession(req: http.IncomingMessage): WorkbookSession | null {
-    const session = this.sessions.getByToken(bearerToken(req.headers.authorization) ?? "");
-    return session?.isConnected ? session : null;
-  }
-
-  private async listWorkspaces(req: http.IncomingMessage, res: http.ServerResponse, url: URL): Promise<void> {
-    const session = this.workspaceSession(req);
-    if (!session) return this.sendJson(res, 401, { error: "unauthorized" });
-    let defaultError: string | null = null;
-    const documentUrl = url.searchParams.get("documentUrl") ?? "";
-    const workbookName = url.searchParams.get("workbookName") ?? "";
-    let folder: string | null = null;
-    try { folder = workbookFolderFromUrl(documentUrl); }
-    catch (error) { defaultError = error instanceof Error ? error.message : String(error); }
-    if (!folder && workbookName && workbookName.length <= 255) {
-      try {
-        const active = await activeWorkbookPath(workbookName);
-        if (active) { folder = workbookFolderFromUrl(active); defaultError = null; }
-      } catch (error) {
-        this.logger.warn("active workbook path lookup failed", { error: String(error) });
-      }
-    }
-    if (folder) {
-      if (session.defaultWorkspace && session.defaultWorkspace !== folder) session.referenceGrants.delete(session.defaultWorkspace);
-      session.defaultWorkspace = folder;
-      session.referenceGrants.add(folder);
-    }
-    const roots = [...new Set([...(session.defaultWorkspace ? [session.defaultWorkspace] : []), ...this.references.allowedFolders])];
-    return this.sendJson(res, 200, { roots: roots.map((folder) => ({
-      path: folder,
-      name: path.basename(folder),
-      isDefault: folder === session.defaultWorkspace,
-      removable: folder !== session.defaultWorkspace && this.references.allowedFolders.includes(folder),
-    })), defaultError });
-  }
-
-  private async addWorkspace(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
-    if (!this.workspaceSession(req)) return this.sendJson(res, 401, { error: "unauthorized" });
-    let body: { path?: unknown };
-    try { body = JSON.parse(await readBody(req)); }
-    catch { return this.sendJson(res, 400, { error: "invalid_json" }); }
-    if (typeof body.path !== "string" || !body.path.trim() || body.path.length > 1024) return this.sendJson(res, 400, { error: "invalid_path" });
-    try {
-      const folder = this.references.addRoot(body.path);
-      this.saveWorkspaceRoots();
-      return this.sendJson(res, 200, { path: folder, name: path.basename(folder) });
-    } catch (error) {
-      if (error instanceof ReferenceError_) return this.sendJson(res, 400, { error: error.message });
-      throw error;
-    }
-  }
-
-  private async removeWorkspace(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
-    const session = this.workspaceSession(req);
-    if (!session) return this.sendJson(res, 401, { error: "unauthorized" });
-    let body: { path?: unknown };
-    try { body = JSON.parse(await readBody(req)); }
-    catch { return this.sendJson(res, 400, { error: "invalid_json" }); }
-    if (typeof body.path !== "string" || body.path === session.defaultWorkspace || !this.references.removeRoot(body.path)) {
-      return this.sendJson(res, 400, { error: "This workspace cannot be removed." });
-    }
-    this.saveWorkspaceRoots();
-    return this.sendJson(res, 200, { removed: true });
-  }
-
-  private async pickWorkspace(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
-    if (!this.workspaceSession(req)) return this.sendJson(res, 401, { error: "unauthorized" });
-    let selected: string | null;
-    try { selected = await pickWorkspaceFolder(); }
-    catch (error) {
-      this.logger.warn("folder picker failed", { error: String(error) });
-      return this.sendJson(res, 500, { error: "Could not open the Windows folder picker." });
-    }
-    if (!selected) return this.sendJson(res, 200, { cancelled: true });
-    try {
-      const folder = this.references.addRoot(selected);
-      this.saveWorkspaceRoots();
-      return this.sendJson(res, 200, { path: folder, name: path.basename(folder), cancelled: false });
-    } catch (error) {
-      if (error instanceof ReferenceError_) return this.sendJson(res, 400, { error: error.message });
-      throw error;
-    }
-  }
-
-  private saveWorkspaceRoots(): void {
-    if (!this.workspaceConfigPath) return;
-    let current: Record<string, unknown> = {};
-    try { current = JSON.parse(readFileSync(this.workspaceConfigPath, "utf8")) as Record<string, unknown>; }
-    catch { /* first workspace */ }
-    const temporary = `${this.workspaceConfigPath}.tmp`;
-    writeFileSync(temporary, JSON.stringify({ ...current, referenceDirs: this.references.allowedFolders }, null, 2) + "\n", { mode: 0o600 });
-    renameSync(temporary, this.workspaceConfigPath);
-  }
-
-  private listWorkspaceEntries(req: http.IncomingMessage, res: http.ServerResponse, url: URL): void {
-    const session = this.workspaceSession(req);
-    if (!session) return this.sendJson(res, 401, { error: "unauthorized" });
-    const folder = url.searchParams.get("path");
-    if (!folder) return this.sendJson(res, 400, { error: "missing_path" });
-    try {
-      const listing = this.references.list(folder, session.referenceGrants);
-      return this.sendJson(res, 200, {
-        ...listing,
-        entries: listing.entries.map((entry) => ({
-          ...entry,
-          path: path.join(listing.path, entry.name),
-          supported: true,
-        })),
-      });
-    } catch (error) {
-      if (error instanceof ReferenceError_) return this.sendJson(res, 400, { error: error.message });
-      throw error;
-    }
-  }
-
-  private async attachWorkspaceFile(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
-    const session = this.workspaceSession(req);
-    if (!session) return this.sendJson(res, 401, { error: "unauthorized" });
-    let body: { path?: unknown };
-    try { body = JSON.parse(await readBody(req)); }
-    catch { return this.sendJson(res, 400, { error: "invalid_json" }); }
-    if (typeof body.path !== "string" || !body.path.trim()) return this.sendJson(res, 400, { error: "invalid_path" });
-    try {
-      const selected = this.references.selectedPath(body.path, session.referenceGrants);
-      session.touch();
-      return this.sendJson(res, 200, { name: path.basename(selected), kind: "file", path: selected });
-    } catch (error) {
-      if (error instanceof ReferenceError_ || error instanceof AttachmentError) return this.sendJson(res, 400, { error: error.message });
-      throw error;
-    }
-  }
-
-  private sendJson(res: http.ServerResponse, status: number, payload: unknown): void {
-    const body = JSON.stringify(payload);
-    res.writeHead(status, {
-      "content-type": "application/json; charset=utf-8",
-      "content-length": Buffer.byteLength(body),
-      "cache-control": "no-store",
-    });
-    res.end(body);
-  }
-
-  /* ----------------------------------------------------------------------- */
-  /* WebSocket                                                               */
-  /* ----------------------------------------------------------------------- */
-
-  private handleUpgrade(req: http.IncomingMessage, socket: Duplex, head: Buffer): void {
-    if (!this.isTrustedRequest(req)) {
-      this.logger.warn("rejected websocket from untrusted origin or host", { origin: req.headers.origin, host: req.headers.host,
-        hint: "to reach the bridge by another hostname, run: office-partner allow-host <name>" });
-      socket.end("HTTP/1.1 403 Forbidden\r\nConnection: close\r\nContent-Length: 0\r\n\r\n");
-      return;
-    }
-    const url = new URL(req.url ?? "/", "http://localhost");
-    if (url.pathname !== "/ws") {
-      socket.destroy();
-      return;
-    }
-    this.wss!.handleUpgrade(req, socket, head, (ws) => this.wss!.emit("connection", ws, req));
-  }
-
-  private handleConnection(ws: WebSocket): void {
-    const state: SocketState = { session: null, helloDone: false, alive: true };
-    this.sockets.set(ws, state);
-    this.logger.debug("socket connected");
-
-    ws.on("message", (data) => {
-      this.handleClientMessage(ws, state, data).catch((error) => {
-        this.logger.error("client message handler failed", { error: String(error) });
-      });
-    });
-
-    ws.on("pong", () => {
-      state.alive = true;
-    });
-
-    ws.on("close", () => {
-      this.sockets.delete(ws);
-      if (state.session) {
-        this.logins.forget(state.session.id);
-        void this.gateway.externalTools.closeSession(state.session.id);
-        void this.mcpServers.closeSession(state.session.id);
-        state.session.detachSocket(ws);
-        this.delegations.sessionClosed(state.session);
-        state.session.abortTurn();
-        this.closeProviderProcess(state.session, "socket_closed").catch(() => undefined);
-        this.broadcastConnectedFiles();
-      }
-      this.logger.debug("socket closed");
-    });
-
-    ws.on("error", (error) => {
-      this.logger.warn("socket error", { error: String(error) });
-    });
-  }
-
-  private async handleClientMessage(
-    ws: WebSocket,
-    state: SocketState,
-    data: RawData,
-  ): Promise<void> {
-    let message: ClientMessage;
-    try {
-      message = JSON.parse(data.toString()) as ClientMessage;
-    } catch {
-      return this.sendTo(ws, {
-        type: "error",
-        requestId: null,
-        code: "bad_json",
-        message: "message is not valid JSON",
-      });
-    }
-    if (!message || typeof message.type !== "string") {
-      return this.sendTo(ws, {
-        type: "error",
-        requestId: null,
-        code: "bad_message",
-        message: "message has no type",
-      });
-    }
-
-    if (message.type === "hello") return this.onHello(ws, state, message);
-    if (!state.helloDone || !state.session) {
-      return this.sendTo(ws, {
-        type: "hello_error",
-        code: "rejected",
-        message: "handshake required before any other message",
-      });
-    }
-
-    const session = state.session;
-    switch (message.type) {
-      case "workbook_info": {
-        const info = WorkbookInfoMessageSchema.safeParse(message);
-        if (!info.success) return;
-        session.workbookName = info.data.name;
-        this.broadcastConnectedFiles();
-        return;
-      }
-      case "refresh_connected_files":
-        void this.refreshConnectedFiles();
-        return;
-      case "set_provider":
-        return this.onSetProvider(session, message.provider);
-      case "prompt": {
-        const picked = normalizePromptSelection(message.selection, session.host);
-        if (!picked.ok) return void session.send({ type: "error", requestId: message.requestId, code: "bad_message", message: picked.message });
-        return this.onPrompt(session, message.requestId, message.prompt, picked.selection, message.context, message.attachmentIds, message.model, message.referencePaths, message.effort, message.chatSessionId, message.resumeSessionId, message.capabilities, message.command, message.delegationId);
-      }
-      case "delegation_declined":
-        this.delegations.decline(session, message.delegationId, typeof message.reason === "string" ? message.reason.slice(0, 200) : "");
-        return;
-      case "followup": {
-        const respond = (state: "pending" | "next_turn" | "rejected", detail?: string) => session.send({ type: "followup_status", requestId: message.requestId, id: message.id, state, message: detail });
-        if (session.activeRequestId !== message.requestId || session.turnController?.signal.aborted) { respond("next_turn"); return; }
-        try {
-          let text = expandSkillPrompt(message.prompt, this.skills).prompt;
-          if (message.attachmentIds?.length) {
-            const files = message.attachmentIds.map(id => session.attachments.get(id));
-            if (files.some(file => !file)) throw new Error("Attached file is unavailable; select it again.");
-            text += "\n\n<user_attached_files>\n" + files.map(file => JSON.stringify({ name: file!.name, path: attachmentPath(file!.id), kind: file!.kind })).join("\n") + "\n</user_attached_files>";
-          }
-          if (message.referencePaths?.length) {
-            const files = message.referencePaths.map(file => this.references.selectedPath(file, session.referenceGrants));
-            text += "\n\n<user_attached_files>\n" + files.map(file => JSON.stringify({ name: path.basename(file), path: file, kind: "reference" })).join("\n") + "\n</user_attached_files>";
-          }
-          session.queueFollowup(message.requestId, message.id, text);
-          respond("pending");
-        } catch (error) { respond("rejected", error instanceof Error ? error.message : String(error)); }
-        return;
-      }
-      case "cancel":
-        return this.onCancel(session, message.requestId);
-      case "tool_result":
-        session.resolveTool(message.callId, message.result);
-        return;
-      case "pong":
-        state.alive = true;
-        return;
-      default:
-        return;
-    }
-  }
-
-  private onHello(ws: WebSocket, state: SocketState, message: ClientMessage): void {
-    if (message.type !== "hello") return;
-    if (message.protocolVersion !== PROTOCOL_VERSION) {
-      return this.sendTo(ws, {
-        type: "hello_error",
-        code: "protocol_mismatch",
-        message: `expected protocol ${PROTOCOL_VERSION}, got ${message.protocolVersion}`,
-      });
-    }
-
-    const host = HostIdSchema.safeParse(message.clientInfo?.host ?? "excel");
-    if (!host.success) {
-      return this.sendTo(ws, { type: "hello_error", code: "invalid_hello", message: "clientInfo.host must be excel, word or powerpoint" });
-    }
-    const session = this.sessions.create(
-      message.workbookConnectionId,
-      { ...message.clientInfo, host: host.data },
-    );
-    session.attachSocket(ws);
-    state.session = session;
-    state.helloDone = true;
-
-    this.sendTo(ws, {
-      type: "hello_ok",
-      protocolVersion: PROTOCOL_VERSION,
-      sessionToken: session.sessionToken,
-      workbookConnectionId: session.workbookConnectionId,
-      serverTime: new Date().toISOString(),
-      addinBuildId: this.addinBuildId(),
-    });
-    this.broadcastConnectedFiles();
-  }
-
-  private refreshingFiles: Promise<void> | null = null;
-
-  /** Read every pane's workbook name now, then tell every pane. Requests that arrive meanwhile share the same round. */
-  private refreshConnectedFiles(): Promise<void> {
-    this.refreshingFiles ??= this.sessions.refreshNames()
-      .then(() => this.broadcastConnectedFiles())
-      .catch((error) => this.logger.warn("could not refresh connected files", { error: String(error) }))
-      .finally(() => { this.refreshingFiles = null; });
-    return this.refreshingFiles;
-  }
-
-  /** Tell every connected task pane which workbooks are open, each with itself first. Called whenever the list or a name changes. */
-  private broadcastConnectedFiles(): void {
-    const connected = this.sessions.connected();
-    for (const session of connected) session.send({ type: "connected_files", files: this.sessions.connectedFiles(session) });
-  }
-
   /** Changes whenever the task pane bundle is rebuilt (its modification time). */
   private addinBuildId(): string {
     try {
@@ -1160,316 +375,58 @@ export class Bridge {
     }
   }
 
-  private async onSetProvider(session: WorkbookSession, provider: ProviderId): Promise<void> {
-    const adapter = this.providers.get(provider);
-    if (!adapter) {
-      return void session.send({
-        type: "error",
-        requestId: null,
-        code: "unknown_provider",
-        message: `provider '${provider}' is not available`,
-      });
+  /** A tool call from the provider's MCP process, routed to the pane that owns the session token. */
+  private async handleInternalTool(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+    const token = bearerToken(req.headers.authorization);
+    if (!token) return sendJson(res, 401, { error: "unauthorized" });
+    const session = this.sessions.getByToken(token);
+    if (!session || !session.isConnected) {
+      return sendJson(res, 401, { error: "unauthorized" });
     }
 
-    if (session.provider && session.provider !== provider) {
-      await this.closeProviderProcess(session, "provider_change");
-    }
-    session.provider = provider;
-
-    const detection = await adapter.detect(true);
-    session.send({ type: "provider_status", provider, detection });
-  }
-
-  private async onPrompt(
-    session: WorkbookSession,
-    requestId: string,
-    prompt: string,
-    selection: AnySelectionSnapshot | null,
-    context?: string,
-    attachmentIds?: string[],
-    model?: string | null,
-    referencePaths?: string[],
-    effort: "low" | "medium" | "high" = "medium",
-    chatSessionId?: string,
-    resumeSessionId?: string,
-    capabilities: ToolCapabilities = { webSearch: false, playwright: false },
-    isCommand = false,
-    delegationId?: string,
-  ): Promise<void> {
-    return this.runPrompt(session, requestId, prompt, selection, context, attachmentIds, model, referencePaths, effort, chatSessionId, resumeSessionId, capabilities, isCommand, delegationId);
-  }
-
-  private async runPrompt(
-    session: WorkbookSession,
-    requestId: string,
-    prompt: string,
-    selection: AnySelectionSnapshot | null,
-    context?: string,
-    attachmentIds?: string[],
-    model?: string | null,
-    referencePaths?: string[],
-    effort: "low" | "medium" | "high" = "medium",
-    chatSessionId?: string,
-    resumeSessionId?: string,
-    capabilities: ToolCapabilities = { webSearch: false, playwright: false },
-    isCommand = false,
-    delegationId?: string,
-  ): Promise<void> {
-    const userPrompt = prompt;
-    if (!session.provider) {
-      if (delegationId) this.delegations.decline(session, delegationId, "That file has no AI provider selected yet.");
-      return void session.send({
-        type: "error",
-        requestId,
-        code: "no_provider",
-        message: "select a provider before sending a prompt",
-      });
-    }
-    if (session.isBusy) {
-      if (delegationId) this.delegations.decline(session, delegationId, "That file is busy with another request.");
-      return void session.send({
-        type: "error",
-        requestId,
-        code: "busy",
-        message: "another turn is already running for this workbook",
-      });
-    }
-
-    if (attachmentIds !== undefined && (!Array.isArray(attachmentIds) || attachmentIds.length > 10 || attachmentIds.some((id) => typeof id !== "string" || !/^[0-9a-f-]{36}$/.test(id)))) {
-      session.send({ type: "error", requestId, code: "invalid_attachment", message: "Invalid attached file reference." });
-      session.send({ type: "turn_finished", requestId, reason: "error" });
-      return;
-    }
-    if (referencePaths?.length) {
-      try {
-        const selected = referencePaths.map((file) => this.references.mentionedPath(file, session.referenceGrants));
-        prompt += "\n\n<user_attached_files>\n" + selected.map(({ path: file, folder }) => JSON.stringify(folder
-          ? { name: path.basename(file), path: file, kind: "reference_folder", hint: "A folder the user pointed at. Call list_reference_files with this path to see what is inside, then read the files you need." }
-          : { name: path.basename(file), path: file, kind: "reference" }),
-        ).join("\n") + "\n</user_attached_files>";
-      } catch (error) {
-        session.send({ type: "error", requestId, code: "invalid_attachment", message: error instanceof Error ? error.message : String(error) });
-        session.send({ type: "turn_finished", requestId, reason: "error" });
-        return;
-      }
-    }
-    if (attachmentIds?.length) {
-      const attached = attachmentIds.map((id) => session.attachments.get(id));
-      if (attached.some((file) => !file)) {
-        session.send({ type: "error", requestId, code: "attachment_missing", message: "Attached file is unavailable; select it again." });
-        session.send({ type: "turn_finished", requestId, reason: "error" });
-        return;
-      }
-      prompt += "\n\n<user_attached_files>\n" + attached.map((file) =>
-        JSON.stringify({ name: file!.name, path: attachmentPath(file!.id), kind: file!.kind }),
-      ).join("\n") + "\n</user_attached_files>";
-    }
-
-    capabilities = { ...capabilities, webSearch: capabilities.webSearch && supportsNativeWebSearch(session.provider) };
-    const selectedModel = model ?? null;
-    const stored = this.systemPrompt.read();
-    // Excel keeps the user's prompt as it is; Word and PowerPoint add their own rules (and a new revision, so a running session restarts with them).
-    const promptSettings = session.host === "excel" ? stored
-      : { ...stored, content: hostSystemPrompt(session.host, stored.content), revision: createHash("sha256").update(`${stored.revision}:${session.host}:${hostSystemPrompt(session.host, stored.content)}`).digest("hex") };
-    const adapter = this.providers.require(session.provider);
-    if (delegationId && !this.delegations.accept(session, delegationId, requestId)) {
-      // Nobody waits for this any more (it timed out, the asker stopped, or it was never asked): do not change the file for no one.
-      session.send({ type: "error", requestId, code: "cancelled", message: "The other file's request is no longer waiting for an answer, so it was not run." });
-      session.send({ type: "turn_finished", requestId, reason: "cancelled" });
-      return;
-    }
-    const controller = session.beginTurn(requestId);
-    this.activeUsage.set(`${session.id}:${requestId}`, {
-      sessionId: resumeSessionId ? providerSessionKey(session.provider, resumeSessionId) : chatSessionId ?? session.id,
-      providerSessionId: resumeSessionId, requestId, provider: session.provider,
-      model: selectedModel, startedAt: Date.now(), durationMs: 0, reason: "completed", usage: null,
-    });
-    // `/skill-name request` loads the skill's instructions into this turn.
-    const expanded = isCommand ? { prompt, skill: undefined } : expandSkillPrompt(prompt, this.skills);
-    if (expanded.skill) this.logger.info("skill invoked", { skill: expanded.skill });
-    prompt = isCommand ? userPrompt : [resumeSessionId ? undefined : context, projectTemplateReminder(this.skills), this.savedReferences.prompt(), expanded.prompt].filter(Boolean).join("\n\n");
-
+    let body: { sessionId?: string; tool?: string; args?: unknown };
     try {
-      if (!isCommand && selection) selection = await enrichSelectionForHost(session.host, selection, this.enrichSelection, controller.signal);
-      controller.signal.throwIfAborted();
-      const detection = await adapter.detect();
-      if (!detection.installed) throw new Error(detection.hint ?? "Provider CLI is not installed.");
-      let command: NativeCommand | undefined;
-      if (isCommand) {
-        const parsed = parseNativeCommand(userPrompt);
-        const catalog = await adapter.listCommands?.(session.providerSessionId ?? undefined) ?? [];
-        const entry = catalog.find(item => item.name === parsed?.name);
-        if (!parsed || entry?.execution !== "native") throw new Error(entry?.reason ?? "This command is not available through the provider. Refresh the / menu.");
-        if (attachmentIds?.length || referencePaths?.length) throw new Error("Send attached files in a regular message, separately from a command.");
-        command = parsed;
-      }
-      controller.signal.throwIfAborted();
-      const externalCatalog = await this.discoverSessionMcp(session);
-      const catalogRevision = createHash("sha256").update(JSON.stringify([...externalCatalog.values()].map(tool => tool.definition))).digest("hex");
-      await this.providerSessions.ensure(session, {
-        model: selectedModel, effort, chatSessionId, resumeSessionId, capabilities,
-        systemPromptRevision: `${promptSettings.revision}:${catalogRevision}`,
-      }, () => ({
-        requestUserInput: (request, signal) => session.requestUserInput(request, signal),
-        authorizeTool: async (args) => {
-          const result = await session.requestTool("__authorize_provider_tool", args, 120_000);
-          return result.ok && (result.data as { approved?: boolean })?.approved === true;
-        },
-        workbookConnectionId: session.workbookConnectionId,
-        sessionId: session.id,
-        model: selectedModel,
-        effort,
-        resumeSessionId,
-        mcp: this.mcpEndpointFor(session),
-        signal: controller.signal,
-        systemPrompt: promptSettings.content,
-      }), () => session.send({ type: "session_starting", requestId }));
-
-      for await (const event of this.providerSessions.sendTurn(session, {
-        systemPrompt: promptSettings.content,
-        requestId,
-        model: selectedModel,
-        effort,
-        prompt,
-        command,
-        userPrompt,
-        selection,
-        signal: controller.signal,
-      })) {
-        if (event.type === "turn_finished") {
-          this.finishTurn(session, requestId, event.reason);
-        } else if (!session.hasFinished(requestId)) {
-          this.delegations.observe(session, requestId, event);
-          if (event.type === "session_info" && event.requestId === requestId && event.provider === session.provider) {
-            const record = this.activeUsage.get(`${session.id}:${requestId}`);
-            if (record) {
-              record.sessionId = providerSessionKey(event.provider, event.providerSessionId);
-              record.providerSessionId = event.providerSessionId;
-              if (event.title) record.title = event.title;
-            }
-          }
-          if (event.type === "usage_update") {
-            const record = this.activeUsage.get(`${session.id}:${requestId}`);
-            if (record) record.usage = event.usage;
-          }
-          session.send(event as ServerMessage);
-        }
-      }
-      this.finishTurn(session, requestId, controller.signal.aborted ? "cancelled" : "completed");
-    } catch (error) {
-      const aborted = controller.signal.aborted;
-      if (!session.hasFinished(requestId)) {
-        const failure = {
-          type: "error" as const,
-          requestId,
-          code: aborted ? "cancelled" : resumeSessionId && !session.providerSessionId ? "resume_failed" : "provider_error",
-          message: aborted ? "turn cancelled" : `${resumeSessionId && !session.providerSessionId ? "Could not resume the saved CLI session. No replacement session was created. " : ""}${String(error instanceof Error ? error.message : error)}`,
-        };
-        this.delegations.observe(session, requestId, failure);
-        session.send(failure);
-      }
-      this.finishTurn(session, requestId, aborted ? "cancelled" : "error");
-    } finally {
-      session.endTurn(requestId);
-      session.touch();
+      body = JSON.parse(await readBody(req));
+    } catch {
+      return sendJson(res, 400, { error: "invalid_json" });
     }
-  }
 
-  /** Emit `turn_finished` exactly once per request. */
-  private finishTurn(
-    session: WorkbookSession,
-    requestId: string,
-    reason: "completed" | "cancelled" | "error",
-  ): void {
-    if (!session.markFinished(requestId)) return;
-    this.delegations.finish(session, requestId, reason);
-    const key = `${session.id}:${requestId}`;
-    const record = this.activeUsage.get(key);
-    if (record) {
-      this.activeUsage.delete(key);
-      record.durationMs = Math.max(0, Date.now() - record.startedAt);
-      record.reason = reason;
-      try { this.usage.append(record); }
-      catch (error) {
-        this.logger.error("could not save usage", { error: String(error) });
-        session.send({ type: "error", requestId, code: "usage_save_failed", message: "Usage statistics could not be saved to disk." });
-      }
+    // Defence in depth: the token already identifies the session, but a stray
+    // session id must never route a tool to the wrong workbook.
+    if (body.sessionId && body.sessionId !== session.id) {
+      return sendJson(res, 403, { error: "session_mismatch" });
     }
-    // Release the workbook before telling the pane, otherwise a client that
-    // sends its next prompt on `turn_finished` races the adapter's cleanup
-    // and gets a spurious `busy`.
-    session.takeFollowups(requestId, "next_turn");
-    session.endTurn(requestId);
-    session.send({ type: "turn_finished", requestId, reason });
-  }
-
-  private async onCancel(session: WorkbookSession, requestId: string): Promise<void> {
-    if (session.activeRequestId !== requestId) return;
-    session.abortTurn();
-    void this.gateway.externalTools.closeSession(session.id, "browser");
-    try {
-      await this.providerSessions.cancel(session);
-    } catch (error) {
-      this.logger.warn("cancelTurn failed", { error: String(error) });
+    if (typeof body.tool !== "string") {
+      return sendJson(res, 400, { error: "missing_tool" });
     }
-    // The adapter normally ends its stream right after cancel. If it hangs,
-    // report the cancellation anyway and drop the provider process so the
-    // next prompt starts clean instead of hitting `busy` forever.
-    const watchdog = setTimeout(() => {
-      if (session.activeRequestId !== requestId) return;
-      this.logger.warn("provider ignored cancel; closing its process", { requestId });
-      this.finishTurn(session, requestId, "cancelled");
-      session.endTurn(requestId);
-      void this.closeProviderProcess(session, "cancel_timeout");
-    }, this.config.cancelGraceMs);
-    watchdog.unref();
-  }
 
-  private async closeProviderProcess(session: WorkbookSession, reason: string): Promise<void> {
-    if (session.activeRequestId) session.takeFollowups(session.activeRequestId, "next_turn");
-    session.abortTurn();
-    session.activeRequestId = null;
-    await this.providerSessions.close(session, reason);
-  }
-
-  private mcpEndpointFor(session: WorkbookSession): McpEndpoint {
-    return {
-      bridgeUrl: this.config.publicBaseUrl,
+    // A call that waits on another file can outlive the MCP process that made it; stop it when that process hangs up.
+    const callerGone = new AbortController();
+    res.on("close", () => { if (!res.writableFinished) callerGone.abort(); });
+    const result = await this.gateway.invoke({
       sessionId: session.id,
-      token: session.sessionToken,
-      ...(session.provider === "copilot" && session.externalMcpTools.size ? { toolNames: [...officeToolCatalog(session.host, this.config.allowOfficeJs, session.capabilities).map(tool => tool.name), ...session.externalMcpTools.keys()] } : {}),
-      command: this.config.mcp.command,
-      args: this.config.mcp.args,
-      env: {
-        EXCEL_BRIDGE_URL: this.config.publicBaseUrl,
-        EXCEL_SESSION_ID: session.id,
-        EXCEL_SESSION_TOKEN: session.sessionToken,
-        OFFICE_HOST: session.host,
-        ...(session.enabledMcpServers.size ? { EXCEL_DYNAMIC_TOOLS: "1" } : {}),
-        ...(session.capabilities.webSearch ? { EXCEL_WEB_SEARCH: "1" } : {}),
-        ...(session.capabilities.playwright ? { EXCEL_PLAYWRIGHT: "1" } : {}),
-        ...(this.config.allowOfficeJs ? { EXCEL_ALLOW_OFFICE_JS: "1" } : {}),
-        ...(this.config.tls ? { NODE_EXTRA_CA_CERTS: this.config.tls.certPath } : {}),
-      },
-    };
+      tool: body.tool,
+      args: body.args,
+      signal: callerGone.signal,
+    });
+    return sendJson(res, 200, result);
   }
 
-  private sendTo(ws: WebSocket, message: ServerMessage): void {
-    if (ws.readyState === 1) ws.send(JSON.stringify(message));
-  }
-
-  private pingAll(): void {
-    for (const [ws, state] of this.sockets) {
-      if (!state.alive) {
-        ws.terminate();
-        continue;
-      }
-      state.alive = false;
-      try {
-        ws.ping();
-      } catch {
-        /* ignore */
-      }
+  /** GET: is a newer version out, and how is an update going. POST: start one (the bridge is replaced while it runs). */
+  private async handleUpdate(req: http.IncomingMessage, res: http.ServerResponse, url: URL): Promise<void> {
+    if (!connectedSession(this.sessions, req)) return sendJson(res, 401, { error: "unauthorized" });
+    if (!this.updater) return sendJson(res, 404, { error: "Updating from the task pane is turned off." });
+    if (req.method === "GET") {
+      return sendJson(res, 200, await this.updater.check(url.searchParams.get("refresh") === "1"));
+    }
+    try {
+      const busy = this.sessions.list().some((other) => other.isBusy);
+      const status = this.updater.start({ busy });
+      this.logger.info("update started", { from: this.updater.version });
+      return sendJson(res, 202, { status });
+    } catch (error) {
+      if (error instanceof UpdateError) return sendJson(res, error.code === "unsupported" ? 400 : error.code === "failed" ? 500 : 409, { error: error.message, code: error.code });
+      throw error;
     }
   }
 
@@ -1481,72 +438,14 @@ export class Bridge {
     this.logins.dispose();
     if (this.heartbeat) clearInterval(this.heartbeat);
     if (this.reaper) clearInterval(this.reaper);
-    for (const [ws] of this.sockets) ws.close(1001, "server_shutdown");
+    this.panes.closeSockets();
     await this.mcpServers.close();
     await this.gateway.externalTools.close();
     await this.providers.disposeAll();
-    await new Promise<void>((resolve) => {
-      if (!this.wss) return resolve();
-      this.wss.close(() => resolve());
-    });
+    await this.panes.close();
     await new Promise<void>((resolve) => {
       if (!this.server) return resolve();
       this.server.close(() => resolve());
     });
   }
-}
-
-const CONTENT_TYPES: Record<string, string> = {
-  ".html": "text/html; charset=utf-8",
-  ".js": "text/javascript; charset=utf-8",
-  ".mjs": "text/javascript; charset=utf-8",
-  ".css": "text/css; charset=utf-8",
-  ".json": "application/json; charset=utf-8",
-  ".map": "application/json; charset=utf-8",
-  ".svg": "image/svg+xml",
-  ".png": "image/png",
-  ".ico": "image/x-icon",
-};
-
-function contentType(filePath: string): string {
-  return CONTENT_TYPES[path.extname(filePath).toLowerCase()] ?? "application/octet-stream";
-}
-
-function bearerToken(header: string | undefined): string | null {
-  if (!header) return null;
-  const match = /^Bearer\s+(.+)$/i.exec(header.trim());
-  return match ? match[1]!.trim() : null;
-}
-
-function readBody(req: http.IncomingMessage, limit = MAX_BODY_BYTES): Promise<string> {
-  return new Promise((resolve, reject) => {
-    let size = 0;
-    const chunks: Buffer[] = [];
-    req.on("data", (chunk: Buffer) => {
-      size += chunk.length;
-      if (size > limit) {
-        reject(new Error("body too large"));
-        req.destroy();
-        return;
-      }
-      chunks.push(chunk);
-    });
-    req.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
-    req.on("error", reject);
-  });
-}
-
-async function readBinaryBody(req: http.IncomingMessage, limit: number): Promise<Buffer> {
-  const chunks: Buffer[] = [];
-  let size = 0;
-  for await (const chunk of req) {
-    const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
-    size += bytes.length;
-    if (size > limit) {
-      req.resume();
-      throw new AttachmentError(`file exceeds the ${Math.floor(limit / 1024 / 1024)} MB limit`);
-    }
-    chunks.push(bytes);
-  }
-  return Buffer.concat(chunks);
 }

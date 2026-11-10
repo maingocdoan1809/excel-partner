@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ALL_TOOL_DEFINITIONS as TOOL_DEFINITIONS } from "../excel_mcp/src/tool-definitions.js";
+import { ALL_TOOL_DEFINITIONS as TOOL_DEFINITIONS } from "../runtime/src/tool-definitions.js";
 import {
   ALL_TOOL_NAMES,
   ToolInputSchemas,

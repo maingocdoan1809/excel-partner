@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { WebSocket } from "ws";
 import { SessionManager } from "../bridge/src/session-manager.js";
-import { ToolGateway } from "../bridge/src/tool-gateway.js";
+import { OfficeRuntime } from "../runtime/src/office-runtime.js";
 import type { ToolResult } from "../protocol/src/index.js";
 
 const limits = { maxReadCells: 100, maxWriteCells: 100, maxSheets: 10, maxSelectionCells: 10 };
@@ -17,7 +17,7 @@ function ask(tool: string, args: unknown, reply: ToolResult): Promise<ToolResult
       if (message.type === "tool_request") queueMicrotask(() => session.resolveTool(message.callId!, reply));
     },
   } as unknown as WebSocket);
-  return new ToolGateway(sessions, limits, 1000).invoke({ sessionId: session.id, tool, args });
+  return new OfficeRuntime(sessions, limits, 1000).invoke({ sessionId: session.id, tool, args });
 }
 
 const dataOf = (result: ToolResult) => (result as { data: Record<string, unknown> }).data;

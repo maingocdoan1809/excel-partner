@@ -185,4 +185,66 @@ describe("which chat the pane opens", () => {
     await boot("Word");
     expect(document.getElementById("messages")?.textContent ?? "").not.toContain(OLD_CHAT);
   });
+
+  it("continues a saved chat and deletes the current chat through History", async () => {
+    seedLastChat();
+    installWordFake(new FakeWordDoc());
+    await boot("Word");
+    document.getElementById("history-button")!.click();
+    document.querySelector<HTMLButtonElement>(".history-item")!.click();
+    expect(document.getElementById("session-transcript")!.textContent).toContain(OLD_CHAT);
+    document.getElementById("session-continue")!.click();
+    expect(document.getElementById("messages")!.textContent).toContain(OLD_CHAT);
+    expect(localStorage.getItem("excelPartner.provider")).toBe("claude");
+    document.getElementById("history-button")!.click();
+    expect(document.querySelector<HTMLButtonElement>(".history-item")!.dataset.current).toBe("true");
+    document.querySelector<HTMLButtonElement>(".history-delete")!.click();
+    expect(document.querySelector("#messages .welcome")).not.toBeNull();
+    expect(JSON.parse(localStorage.getItem("excelPartner.sessions.v1") ?? "[]")).toHaveLength(0);
+  });
+
+  it("requires the second click to clear history and resets the current chat", async () => {
+    seedLastChat();
+    sessionStorage.setItem("excelPartner.restoreChat", "1");
+    installWordFake(new FakeWordDoc());
+    await boot("Word");
+    const clear = document.getElementById("history-clear")!;
+    clear.click();
+    expect(document.getElementById("messages")!.textContent).toContain(OLD_CHAT);
+    expect(JSON.parse(localStorage.getItem("excelPartner.sessions.v1") ?? "[]")).toHaveLength(1);
+    clear.click();
+    expect(document.querySelector("#messages .welcome")).not.toBeNull();
+    expect(JSON.parse(localStorage.getItem("excelPartner.sessions.v1") ?? "[]")).toHaveLength(0);
+    expect(clear.dataset.confirm).toBe("0");
+  });
+});
+
+describe("model picker across provider changes", () => {
+  beforeEach(() => { localStorage.clear(); sessionStorage.clear(); });
+  afterEach(() => { uninstallWordFake(); delete g.Office; delete g.WebSocket; });
+
+  it("keeps a late catalog response with its provider and restores that provider's saved model", async () => {
+    localStorage.setItem("excelPartner.models.v1", JSON.stringify({ copilot: "copilot-model", codex: "codex-model" }));
+    installWordFake(new FakeWordDoc());
+    const socket = await boot("Word");
+    let resolveCopilot!: (response: Response) => void;
+    g.fetch = vi.fn(async (input: string) => {
+      if (input.includes("/session/models?provider=copilot")) return new Promise<Response>(resolve => { resolveCopilot = resolve; });
+      if (input.includes("/session/models?provider=codex")) return Response.json({ models: [{ id: "codex-model", name: "Codex model" }] });
+      return Response.json({ sessions: [], commands: [], skills: [], servers: [], enabled: [], roots: [] });
+    });
+    socket.onmessage?.({ data: JSON.stringify({ type: "hello_ok", protocolVersion: 1, sessionToken: "test-session-token", workbookConnectionId: "x", serverTime: new Date().toISOString(), addinBuildId: "b" }) });
+    const provider = document.getElementById("provider-select") as HTMLSelectElement;
+    provider.value = "codex";
+    provider.dispatchEvent(new Event("change"));
+    const model = document.getElementById("model-select") as HTMLSelectElement;
+    await vi.waitFor(() => expect(model.value).toBe("codex-model"));
+    resolveCopilot(Response.json({ models: [{ id: "copilot-model", name: "Copilot model" }] }));
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(model.value).toBe("codex-model");
+    provider.value = "copilot";
+    provider.dispatchEvent(new Event("change"));
+    expect(model.value).toBe("copilot-model");
+    expect(document.getElementById("model-button")!.textContent).toContain("Copilot model");
+  });
 });

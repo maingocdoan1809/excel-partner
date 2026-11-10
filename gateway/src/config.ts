@@ -7,6 +7,7 @@ import { ApiError } from "./protocol.js";
 
 const RouteSchema = z.object({ provider: ProviderIdSchema, model: z.string().min(1).nullable().default(null), effort: z.enum(["low", "medium", "high"]).default("medium") });
 export type Route = z.infer<typeof RouteSchema>;
+const LEGACY_COMPATIBILITY_MODELS = ["claude-opus-4-7", "claude-sonnet-4-6", "claude-haiku-4-5-20251001"];
 export const ConfigSchema = z.object({
   mcpConfigFile: z.string().min(1).nullable().default(null),
   enabledMcpServers: z.array(z.string().regex(/^[a-z0-9][a-z0-9_-]{0,47}$/)).max(30).default([]),
@@ -25,7 +26,13 @@ export const ConfigSchema = z.object({
   maxPromptChars: z.number().int().min(1024).max(4 * 1024 * 1024).default(200_000),
   warmupOnStart: z.boolean().default(false),
   probeCacheTtlMs: z.number().int().min(1000).max(60 * 60_000).default(600_000),
-  advertiseCompatibilityModels: z.boolean().default(false),
+  /**
+   * Model IDs published and accepted as they are, routed to their alias or to `defaultRoute`. The official Claude
+   * add-ins accept only IDs from a list fixed in each of their releases, so the list lives in configuration.
+   */
+  compatibilityModels: z.array(z.string().trim().min(1).max(120)).max(20).default([]),
+  /** The earlier on/off switch for the three IDs known at the time; folded into `compatibilityModels` on load. */
+  advertiseCompatibilityModels: z.boolean().optional(),
 }).superRefine((config, ctx) => {
   const seen = new Set<string>();
   for (const [id, name] of Object.entries(config.modelNames)) {
@@ -33,7 +40,10 @@ export const ConfigSchema = z.object({
     if (seen.has(visible)) ctx.addIssue({ code: "custom", path: ["modelNames", id], message: "Model display names must be unique" });
     seen.add(visible);
   }
-});
+}).transform(({ advertiseCompatibilityModels, ...config }) => ({
+  ...config,
+  compatibilityModels: [...new Set([...config.compatibilityModels, ...(advertiseCompatibilityModels ? LEGACY_COMPATIBILITY_MODELS : [])])],
+}));
 export type GatewayConfig = z.infer<typeof ConfigSchema>;
 export const dataDir = () => process.env.AGENT_GATEWAY_HOME ?? path.join(process.env.LOCALAPPDATA ?? path.join(os.homedir(), ".config"), "Agent Gateway");
 export function loadConfig(dir = dataDir()): GatewayConfig {
@@ -58,8 +68,7 @@ export function routeModel(model: string, config: GatewayConfig, allowOfficeProb
       const native = model.slice(slash + 1);
       if (!native) throw new ApiError(400, "invalid_request_error", "A native model ID is required after provider/");
       route = { provider, model: native === "default" ? null : native, effort: config.defaultRoute.effort };
-    } else if ((allowOfficeProbeFallback && model.startsWith("claude-"))
-      || (config.advertiseCompatibilityModels && ["claude-opus-4-7", "claude-sonnet-4-6", "claude-haiku-4-5-20251001"].includes(model))) route = config.aliases[model] ?? config.defaultRoute;
+    } else if ((allowOfficeProbeFallback && model.startsWith("claude-")) || config.compatibilityModels.includes(model)) route = config.defaultRoute;
     else throw new ApiError(400, "invalid_request_error", "Use provider/model or a configured model alias");
   }
   if (!config.enabledProviders.includes(route.provider)) throw new ApiError(403, "permission_error", `Provider '${route.provider}' is not enabled`);

@@ -4,7 +4,7 @@ import { PassThrough } from "node:stream";
 import { createInterface } from "node:readline";
 import { ClaudeAdapter } from "../providers/src/claude.js";
 import { ProviderRegistry } from "../providers/src/registry.js";
-import { ProviderSessionManager } from "../bridge/src/provider-session-manager.js";
+import { ProviderSessionManager } from "../providers/src/session-manager.js";
 import { WorkbookSession } from "../bridge/src/session.js";
 import type { ProviderEvent } from "../protocol/src/index.js";
 import { ClaudeProcess } from "../providers/src/claude-process.js";

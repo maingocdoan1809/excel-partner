@@ -50,7 +50,6 @@ export const RangeFormatSchema = z.object({
   /** Fit column widths to their content. */
   autofitColumns: z.boolean().optional(),
 });
-export type RangeFormat = z.infer<typeof RangeFormatSchema>;
 
 export const GetSelectionInputSchema = z.object({});
 export const GetSheetsInputSchema = z.object({});
@@ -200,7 +199,6 @@ export const FOUR_SITE_SHAPES = [
 export const EIGHT_SITE_SHAPES = ["Ellipse", "FlowChartConnector", "FlowChartOr", "FlowChartSummingJunction"] as const;
 
 export const ShapeTypeSchema = z.enum([...FOUR_SITE_SHAPES, ...EIGHT_SITE_SHAPES, "TextBox"]);
-export type ShapeType = z.infer<typeof ShapeTypeSchema>;
 
 const ShapeStyleSchema = z.object({
   fillColor: z.string().regex(/^#[0-9A-Fa-f]{6}$/).optional(),

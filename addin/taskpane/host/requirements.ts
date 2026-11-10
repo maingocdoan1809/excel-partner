@@ -17,7 +17,6 @@ export const WORD_TRACK: Requirement = ["WordApi", "1.6"];
 export const WORD_BOOKMARK: Requirement = ["WordApi", "1.4"];
 export const WORD_TOC: Requirement = ["WordApiDesktop", "1.4"];
 export const WORD_LISTS: Requirement = ["WordApi", "1.3"];
-export const WORD_TABLE_VALUES: Requirement = ["WordApi", "1.3"];
 export const PPT_SELECTION: Requirement = ["PowerPointApi", "1.5"];
 export const PPT_EXPORT: Requirement = ["PowerPointApi", "1.8"];
 export const PPT_MODERN: Requirement = ["PowerPointApi", "1.10"];

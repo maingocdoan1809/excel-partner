@@ -3,15 +3,15 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { SessionManager } from "../bridge/src/session-manager.js";
-import { ToolGateway } from "../bridge/src/tool-gateway.js";
+import { OfficeRuntime } from "../runtime/src/office-runtime.js";
 import { SkillStore } from "../bridge/src/skills.js";
 import { UserSkills } from "../bridge/src/skill-upload.js";
-import { ALL_TOOL_DEFINITIONS } from "../excel_mcp/src/tool-definitions.js";
+import { ALL_TOOL_DEFINITIONS } from "../runtime/src/tool-definitions.js";
 import { SERVER_TOOLS } from "../protocol/src/index.js";
 
 let folder: string;
 let sessions: SessionManager;
-let gateway: ToolGateway;
+let gateway: OfficeRuntime;
 let sessionId: string;
 let uploads: UserSkills;
 const args = { name: "monthly-report", description: "Monthly report: \"format\"\nUse when requested.", instructions: "# Monthly report\nFormat the selected table." };
@@ -21,7 +21,7 @@ beforeEach(() => {
   uploads = new UserSkills(path.join(folder, "skills"));
   sessions = new SessionManager({ ttlMs: 60_000 });
   sessionId = sessions.create("test-connection", null).id;
-  gateway = new ToolGateway(sessions, { maxReadCells: 100, maxWriteCells: 100, maxSheets: 10, maxSelectionCells: 10 }, 1000,
+  gateway = new OfficeRuntime(sessions, { maxReadCells: 100, maxWriteCells: 100, maxSheets: 10, maxSelectionCells: 10 }, 1000,
     undefined, false, new SkillStore([uploads.root]), null, uploads);
 });
 afterEach(() => {

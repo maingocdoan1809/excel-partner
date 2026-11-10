@@ -83,7 +83,7 @@ export async function updatePackage({ root, dataDir, nodePath, stop, wasRunning,
   }
   const installedRoot = path.resolve(location.stdout.trim(), packageName);
   if (installedRoot.toLowerCase() !== path.resolve(root).toLowerCase()) {
-    throw new Error("Update supports the global npm installation. For a source checkout, run scripts/update.ps1 or scripts/update.sh; for npx, rerun npx with office-partner@latest.");
+    throw new Error("Update supports the global npm installation. For a source checkout, run git pull and npm run build; for npx, rerun npx with office-partner@latest.");
   }
   console.log(`Updating Office Partner (${spec})…`);
   report("stopping");

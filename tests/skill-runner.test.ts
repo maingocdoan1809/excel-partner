@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SkillStore } from "../bridge/src/skills.js";
 import { resolveSkillScript, runSkillScript, windowsBash } from "../bridge/src/skill-runner.js";
 import { SessionManager } from "../bridge/src/session-manager.js";
-import { ToolGateway } from "../bridge/src/tool-gateway.js";
+import { OfficeRuntime } from "../runtime/src/office-runtime.js";
 import { parseToolInput, SERVER_TOOLS } from "../protocol/src/index.js";
 
 let root: string;
@@ -107,7 +107,7 @@ describe("gateway script permission and results", () => {
     const session = sessions.create("script-test", null);
     vi.spyOn(session, "isConnected", "get").mockReturnValue(true);
     const permission = vi.spyOn(session, "requestTool").mockResolvedValue({ ok: true, data: { approved } });
-    const gateway = new ToolGateway(sessions, { maxReadCells: 1, maxWriteCells: 1, maxSheets: 1, maxSelectionCells: 1 }, 1000, undefined, false, store);
+    const gateway = new OfficeRuntime(sessions, { maxReadCells: 1, maxWriteCells: 1, maxSheets: 1, maxSelectionCells: 1 }, 1000, undefined, false, store);
     return { session, gateway, permission };
   }
 

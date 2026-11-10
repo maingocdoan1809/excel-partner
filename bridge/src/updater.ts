@@ -171,7 +171,7 @@ export class UpdateService {
     const root = this.globalRoot();
     if (!root) return "npm was not found. Install Node.js, or run office-partner update from a terminal.";
     if (path.resolve(root, this.packageName).toLowerCase() !== path.resolve(this.opts.packageRoot).toLowerCase()) {
-      return "This copy was not installed with npm install -g, so it cannot replace itself. From a source checkout run scripts\\update.ps1.";
+      return "This copy was not installed with npm install -g, so it cannot replace itself. From a source checkout run git pull and npm run build.";
     }
     return null;
   }

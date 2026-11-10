@@ -157,14 +157,12 @@ export const HelloOkMessageSchema = z.object({
   addinBuildId: z.string().optional(),
 });
 
-export type HelloOkMessage = z.infer<typeof HelloOkMessageSchema>;
 
 export const HelloErrorMessageSchema = z.object({
   type: z.literal("hello_error"),
   code: z.enum(["protocol_mismatch", "invalid_hello", "session_limit", "rejected"]),
   message: z.string(),
 });
-export type HelloErrorMessage = z.infer<typeof HelloErrorMessageSchema>;
 
 export const ProviderStatusMessageSchema = z.object({
   type: z.literal("provider_status"),
@@ -220,7 +218,6 @@ export const ConnectedFilesMessageSchema = z.object({
   type: z.literal("connected_files"),
   files: z.array(ConnectedFileSchema).max(32),
 });
-export type ConnectedFilesMessage = z.infer<typeof ConnectedFilesMessageSchema>;
 
 /**
  * Another workbook's assistant asks this one's to do something. The task pane runs it as a normal turn in its own chat
@@ -261,8 +258,4 @@ export function encodeMessage(message: ClientMessageInput | ServerMessage): stri
 
 export function decodeServerMessage(raw: string): ServerMessage {
   return ServerMessageSchema.parse(JSON.parse(raw));
-}
-
-export function decodeClientMessage(raw: string): ClientMessage {
-  return ClientMessageSchema.parse(JSON.parse(raw));
 }

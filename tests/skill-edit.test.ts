@@ -6,7 +6,7 @@ import { strToU8, zipSync } from "fflate";
 import { UserSkills } from "../bridge/src/skill-upload.js";
 import { SkillStore } from "../bridge/src/skills.js";
 import { SessionManager } from "../bridge/src/session-manager.js";
-import { ToolGateway } from "../bridge/src/tool-gateway.js";
+import { OfficeRuntime } from "../runtime/src/office-runtime.js";
 
 let root: string;
 let uploads: UserSkills;
@@ -61,7 +61,7 @@ describe("installed skill editing", () => {
     const sessions = new SessionManager({ ttlMs: 60_000 });
     const session = sessions.create("workbook", null);
     session.beginTurn("request");
-    const gateway = new ToolGateway(sessions, { maxReadCells: 100, maxWriteCells: 100, maxSheets: 10, maxSelectionCells: 10 }, 1000,
+    const gateway = new OfficeRuntime(sessions, { maxReadCells: 100, maxWriteCells: 100, maxSheets: 10, maxSelectionCells: 10 }, 1000,
       undefined, false, new SkillStore([uploads.root]), null, uploads);
     const read = await gateway.invoke({ sessionId: session.id, tool: "read_skill", args: { name: "report", forEditing: true } });
     expect(read).toMatchObject({ ok: true, data: { file: "SKILL.md", content: manifest, revision: expect.any(String) } });

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { WebSocket } from "ws";
 import { SessionManager } from "../bridge/src/session-manager.js";
-import { ToolGateway } from "../bridge/src/tool-gateway.js";
+import { OfficeRuntime } from "../runtime/src/office-runtime.js";
 import type { WorkbookSession } from "../bridge/src/session.js";
 import { CONNECTED_READ_TOOLS_BY_HOST, ConnectedFileSchema, WORKBOOK_NAME_REQUEST, parseToolInput, type HostId, type ToolResult } from "../protocol/src/index.js";
 
@@ -44,7 +44,7 @@ function office() {
     session.workbookName = names[host];
     made[host] = { session, sent: attachPane(session, { reply: () => ({ ok: true, data: data[host] }) }) };
   }
-  const gateway = new ToolGateway(sessions, limits, 1000);
+  const gateway = new OfficeRuntime(sessions, limits, 1000);
   const read = (from: HostId, file: string, tool: string, args: unknown = {}) =>
     gateway.invoke({ sessionId: made[from].session.id, tool: "read_connected_file", args: { file, tool, arguments: args } });
   return { sessions, gateway, made, read };
@@ -123,7 +123,7 @@ describe("files of different Office apps", () => {
     doc.workbookName = "Plan.docx"; deck.workbookName = "Review.pptx";
     attachPane(doc, { approve: false });
     const deckSent = attachPane(deck);
-    const gateway = new ToolGateway(sessions, limits, 1000);
+    const gateway = new OfficeRuntime(sessions, limits, 1000);
     doc.beginTurn("req-1");
     const result = await gateway.invoke({ sessionId: doc.id, tool: "read_connected_file", args: { file: deck.fileId, tool: "read_slide_text", arguments: { ref: "256:2" } } });
     expect(result).toMatchObject({ ok: false, error: { code: "cancelled", message: expect.stringContaining("Review.pptx") } });

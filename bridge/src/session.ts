@@ -34,14 +34,6 @@ interface PendingToolCall {
   timer: NodeJS.Timeout;
 }
 
-export interface WorkbookSessionState {
-  provider: ProviderId | null;
-  providerSessionId: string | null;
-  /** requestId of the turn currently running, if any. */
-  activeRequestId: string | null;
-  lastActivityAt: number;
-}
-
 const HOST_APP_NAMES: Record<HostId, string> = { excel: "Excel", word: "Word", powerpoint: "PowerPoint" };
 
 /** Shown to the model when the pane drops mid-call, which usually means the Office app itself crashed on that call. */

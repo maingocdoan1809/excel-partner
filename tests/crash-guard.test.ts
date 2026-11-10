@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { EventEmitter } from "node:events";
 import { CrashGuard } from "../bridge/src/crash-guard.js";
 import { SessionManager } from "../bridge/src/session-manager.js";
-import { ToolGateway } from "../bridge/src/tool-gateway.js";
+import { OfficeRuntime } from "../runtime/src/office-runtime.js";
 
 describe("CrashGuard", () => {
   it("ignores key order and expires after the block time", () => {
@@ -17,7 +17,7 @@ describe("CrashGuard", () => {
   });
 });
 
-describe("ToolGateway after Excel drops mid-call", () => {
+describe("OfficeRuntime after Excel drops mid-call", () => {
   const limits = { maxReadCells: 100, maxWriteCells: 100, maxSheets: 10, maxSelectionCells: 10 };
 
   function pane() {
@@ -26,7 +26,7 @@ describe("ToolGateway after Excel drops mid-call", () => {
     const sent: unknown[] = [];
     const socket = Object.assign(new EventEmitter(), { readyState: 1, send: (data: string) => sent.push(JSON.parse(data)) });
     first.attachSocket(socket as never);
-    return { sessions, first, socket, sent, gateway: new ToolGateway(sessions, limits, 1000) };
+    return { sessions, first, socket, sent, gateway: new OfficeRuntime(sessions, limits, 1000) };
   }
 
   it("refuses the identical call in the session Excel opens after restarting, but not a different one", async () => {

@@ -8,13 +8,11 @@ export const SheetInfoSchema = z.object({
   usedRange: z.string().nullable(),
   isActive: z.boolean(),
 });
-export type SheetInfo = z.infer<typeof SheetInfoSchema>;
 
 export const GetSheetsResultSchema = z.object({
   sheets: z.array(SheetInfoSchema),
   activeSheet: z.string(),
 });
-export type GetSheetsResult = z.infer<typeof GetSheetsResultSchema>;
 
 export const ShapeInfoSchema = z.object({
   id: z.string().optional(),
@@ -114,7 +112,6 @@ export const AnySelectionSnapshotSchema = z.preprocess(
 export type AnySelectionSnapshot = z.infer<typeof AnySelectionSnapshotSchema>;
 
 export const GetSelectionResultSchema = SelectionSnapshotSchema;
-export type GetSelectionResult = z.infer<typeof GetSelectionResultSchema>;
 
 export const ReadRangeResultSchema = z.object({
   sheet: z.string(),
@@ -127,7 +124,6 @@ export const ReadRangeResultSchema = z.object({
   csv: z.string().optional(),
   truncated: z.boolean(),
 });
-export type ReadRangeResult = z.infer<typeof ReadRangeResultSchema>;
 
 export const WriteRangeResultSchema = z.object({
   sheet: z.string(),
@@ -136,42 +132,17 @@ export const WriteRangeResultSchema = z.object({
   columnsWritten: z.number().int().nonnegative(),
   notesWritten: z.number().int().nonnegative().optional(),
 });
-export type WriteRangeResult = z.infer<typeof WriteRangeResultSchema>;
 
 export const SetFormulaResultSchema = z.object({
   sheet: z.string(),
   address: z.string(),
   formula: z.string(),
 });
-export type SetFormulaResult = z.infer<typeof SetFormulaResultSchema>;
 
 export const FormatRangeResultSchema = z.object({
   sheet: z.string(),
   address: z.string(),
   applied: z.array(z.string()),
-});
-export type FormatRangeResult = z.infer<typeof FormatRangeResultSchema>;
-
-export const ClearRangeResultSchema = z.object({
-  sheet: z.string(),
-  address: z.string(),
-  clearType: z.enum(["contents", "formats", "all"]),
-});
-
-export const SearchDataResultSchema = z.object({
-  matches: z.array(z.object({ sheet: z.string(), address: z.string(), value: CellValueSchema })),
-  totalFound: z.number().int().nonnegative(),
-  returned: z.number().int().nonnegative(),
-  hasMore: z.boolean(),
-  nextOffset: z.number().int().nullable(),
-  /** True when a size limit stopped the scan before every cell was checked. */
-  scanTruncated: z.boolean(),
-});
-
-export const ModifyStructureResultSchema = z.object({
-  sheet: z.string(),
-  operation: z.string(),
-  target: z.string(),
 });
 
 export const InsertRowsResultSchema = z.object({
@@ -180,7 +151,6 @@ export const InsertRowsResultSchema = z.object({
   count: z.number().int().positive(),
   shiftedRange: z.string(),
 });
-export type InsertRowsResult = z.infer<typeof InsertRowsResultSchema>;
 
 export const ToolErrorSchema = z.object({
   code: z.enum([
@@ -216,7 +186,6 @@ export const ExecutedToolResultSchema = z.object({
   callId: z.string().min(1),
   result: ToolResultSchema,
 });
-export type ExecutedToolResult = z.infer<typeof ExecutedToolResultSchema>;
 
 /**
  * A selection as handed to a provider: any host's snapshot, or an Excel snapshot that has no `host` tag

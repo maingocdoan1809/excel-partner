@@ -1,12 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
 import { SessionManager } from "../bridge/src/session-manager.js";
-import { ToolGateway } from "../bridge/src/tool-gateway.js";
+import { OfficeRuntime } from "../runtime/src/office-runtime.js";
 import { exposedToolNames, parseToolInput, supportsNativeWebSearch } from "../protocol/src/index.js";
 
 function fixture() {
   const sessions = new SessionManager({ ttlMs: 60_000 });
   const session = sessions.create("external-tools", null);
-  const gateway = new ToolGateway(sessions, { maxReadCells: 100, maxWriteCells: 100, maxSheets: 10, maxSelectionCells: 10 }, 1000);
+  const gateway = new OfficeRuntime(sessions, { maxReadCells: 100, maxWriteCells: 100, maxSheets: 10, maxSelectionCells: 10 }, 1000);
   const call = (tool: string, args: unknown) => gateway.invoke({ sessionId: session.id, tool, args });
   return { session, gateway, call };
 }

@@ -33,7 +33,6 @@ export const ReadSiteKnowledgeInputSchema = z.object({
   origin: SiteOrigin.describe("The system's address (scheme + host, port if any)."),
   name: NoteName.optional().describe("Note to read; omit to list the notes of this system (name, kind, one-line summary, date)."),
 }).strict();
-export type ReadSiteKnowledgeInput = z.infer<typeof ReadSiteKnowledgeInputSchema>;
 
 export const SaveSiteKnowledgeInputSchema = z.object({
   origin: SiteOrigin,
@@ -42,10 +41,8 @@ export const SaveSiteKnowledgeInputSchema = z.object({
   summary: z.string().min(1).max(200).describe("One line that says what the note is for; it is what future sessions see in the list."),
   content: z.string().min(1).max(6_000).describe("Markdown. Facts you verified in this system, in plain words. Never passwords, tokens, cookies or personal data."),
 }).strict();
-export type SaveSiteKnowledgeInput = z.infer<typeof SaveSiteKnowledgeInputSchema>;
 
 export const DeleteSiteKnowledgeInputSchema = z.object({ origin: SiteOrigin, name: NoteName }).strict();
-export type DeleteSiteKnowledgeInput = z.infer<typeof DeleteSiteKnowledgeInputSchema>;
 
 const ResultValue = z.union([z.string().max(2000), z.number(), z.null()]);
 
@@ -69,7 +66,6 @@ export const SCRIPT_OUTCOMES = ["pass", "fail_app_defect"] as const;
 export type ScriptOutcome = (typeof SCRIPT_OUTCOMES)[number];
 /** Every way a tested case can end; only the first two leave a regression script behind. */
 export const CASE_OUTCOMES = ["pass", "fail_app_defect", "fail_other", "blocked", "needs_review"] as const;
-export type CaseOutcome = (typeof CASE_OUTCOMES)[number];
 export const CASE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 
 export const SaveTestScriptInputSchema = z.object({
