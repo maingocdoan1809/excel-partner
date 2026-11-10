@@ -55,6 +55,14 @@ The task pane or the provider session is older than the bridge. After an update:
 or right-click the pane > Reload) and switch provider or press **Clear** so a new provider session
 picks up the current tool list. Shapes need ExcelApi 1.9; cell notes need ExcelApi 1.18.
 
+## Copilot says it has no Excel tools, or "1 MCP server was blocked by policy: 'excel'"
+
+Excel Partner 0.1.21 and older handed Copilot the Excel tools as an MCP server of the CLI. Copilot CLI 1.0.108 (1.0.103
+does not) blocks every MCP server it cannot check against your organization's MCP policy. It only fetches that policy
+from a git repository with a GitHub remote, read with `git`, and Excel Partner's working directory is neither. Nothing
+is wrong with your organization's settings. Later releases register the tools with the CLI themselves, which the policy
+does not cover, so update Excel Partner (**Settings**, or `excel-partner update`), restart the bridge and open a new chat.
+
 ## `get_selection` says a shape or chart is selected
 
 On hosts supporting ExcelApi 1.19, `get_selection` returns `activeShape` with its ID, name, text, geometry and connector endpoints. This identifies one active shape. A Windows bridge additionally reads the selected group through COM: `selectedShapesStatus: "complete"` means `selectedShapes` contains the selected names, native IDs, native types and connector flags. The same reader enriches the message context sent to the AI. Native IDs may differ from Office.js IDs; use shape names with tools and `list_shapes` for details. This read is independent of `execute_office_js`.

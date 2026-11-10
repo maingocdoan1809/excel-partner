@@ -4,27 +4,42 @@ import os from "node:os";
 import path from "node:path";
 import type { ProviderEvent, UserInputResponse } from "../protocol/src/index.js";
 import type { StartSessionContext } from "../providers/src/types.js";
+import type { McpToolBridge } from "../providers/src/mcp-tool-bridge.js";
 
 const sdk = vi.hoisted(() => ({ config: null as any, client: null as any, session: null as any, handler: null as any,
-  run: null as any, resumeId: undefined as string | undefined }));
+  run: null as any, resumeId: undefined as string | undefined, failCreate: false }));
 vi.mock("@github/copilot-sdk", () => ({
   RuntimeConnection: { forStdio: (options: any) => ({ kind: "stdio", ...options }) },
   ToolSet: class {
     items: string[] = [];
     addBuiltIn(value: string | string[]) { this.items.push(...(Array.isArray(value) ? value : [value]).map(x => `builtin:${x}`)); return this; }
     addMcp(value: string) { this.items.push(`mcp:${value}`); return this; }
+    addCustom(value: string) { this.items.push(`custom:${value}`); return this; }
     toArray() { return this.items; }
   },
+  convertMcpCallToolResult: (result: any) => ({ textResultForLlm: result.content.map((part: any) => part.text).join(""), resultType: result.isError ? "failure" : "success" }),
   CopilotClient: class {
     constructor(options: any) { sdk.client = options; }
     async start() {}
-    async createSession(config: any) { sdk.config = config; return sdk.session; }
+    async createSession(config: any) { sdk.config = config; if (sdk.failCreate) throw new Error("create failed"); return sdk.session; }
     async resumeSession(id: string, config: any) { sdk.resumeId = id; sdk.config = config; return sdk.session; }
     async stop() { sdk.client.stopped = true; }
   },
 }));
 import { CopilotNativeSessions, resolveCopilotPath } from "../providers/src/copilot-native.js";
 
+const schema = { type: "object", properties: { address: { type: "string" } }, required: ["address"] };
+const bridge = { calls: [] as Array<{ name: string; args: unknown; signal?: AbortSignal }>, closed: 0, reply: null as any, fail: null as Error | null };
+const fakeBridge: McpToolBridge = {
+  // `not_exposed` is a tool this session is not allowed to offer; `read_range` and `get_sheets` are.
+  tools: ["read_range", "get_sheets", "not_exposed"].map(name => ({ name, description: `${name} description`, inputSchema: schema })),
+  call: async (name, args, signal) => {
+    bridge.calls.push({ name, args, signal });
+    if (bridge.fail) throw bridge.fail;
+    return bridge.reply ?? { content: [{ type: "text", text: `${name} ok` }] };
+  },
+  close: async () => { bridge.closed++; },
+};
 let manager: CopilotNativeSessions;
 let dir: string;
 let ctx: StartSessionContext;
@@ -32,7 +47,9 @@ beforeEach(() => {
   dir = fs.mkdtempSync(path.join(os.tmpdir(), "copilot-native-test-"));
   vi.stubEnv("EXCEL_AI_HOME", dir);
   vi.stubEnv("COPILOT_HOME", dir);
-  manager = new CopilotNativeSessions();
+  manager = new CopilotNativeSessions(async () => fakeBridge);
+  Object.assign(bridge, { calls: [], closed: 0, reply: null, fail: null });
+  sdk.failCreate = false;
   ctx = { workbookConnectionId: "workbook", sessionId: "bridge", signal: new AbortController().signal,
     mcp: { command: "node", args: ["excel.js"], env: {}, bridgeUrl: "", sessionId: "", token: "" },
     requestUserInput: vi.fn(async () => ({ cancelled: false, answers: { answer: ["New sheet"] } })),
@@ -58,10 +75,52 @@ describe("Copilot native question transport", () => {
     expect(sdk.client.connection.args).toContain("--disable-builtin-mcps");
     const tools = sdk.config.availableTools.toArray();
     expect(tools).toContain("builtin:ask_user");
-    expect(tools).toContain("mcp:excel-read_range");
+    expect(tools).toContain("custom:read_range");
     expect(tools).not.toContain("builtin:shell");
-    expect(sdk.config.onPermissionRequest({ kind: "mcp", serverName: "excel" })).toEqual({ kind: "approve-once" });
     expect(sdk.config.onPermissionRequest({ kind: "shell" })).toEqual({ kind: "reject" });
+    expect(sdk.config.onPermissionRequest({ kind: "url" })).toEqual({ kind: "reject" });
+  });
+  it("registers the Excel tools as the host's own tools, not as an MCP server the CLI can block or hide", async () => {
+    await manager.start(ctx, process.execPath, process.env);
+    expect(sdk.config.mcpServers).toBeUndefined();
+    expect(sdk.config.toolSearch).toEqual({ enabled: false });
+    // Only what this session may offer, with the schema and description the MCP server gave each tool.
+    expect(sdk.config.tools.map((tool: any) => tool.name)).toEqual(["read_range", "get_sheets"]);
+    expect(sdk.config.tools[0]).toMatchObject({ description: "read_range description", parameters: schema, skipPermission: true, defer: "never" });
+    expect(sdk.config.availableTools.toArray()).toEqual(["builtin:ask_user", "custom:read_range", "custom:get_sheets"]);
+    const resumeId = "11111111-1111-4111-8111-111111111111";
+    sdk.session.sessionId = resumeId;
+    await manager.start({ ...ctx, resumeSessionId: resumeId }, process.execPath, process.env);
+    expect(sdk.resumeId).toBe(resumeId);
+    expect(sdk.config.tools.map((tool: any) => tool.name)).toEqual(["read_range", "get_sheets"]);
+    expect(sdk.config.mcpServers).toBeUndefined();
+  });
+  it("runs a host tool through the MCP server and reports failures to the model instead of throwing", async () => {
+    const id = await manager.start(ctx, process.execPath, process.env);
+    const [readRange] = sdk.config.tools;
+    expect(await readRange.handler({ address: "A1" })).toMatchObject({ textResultForLlm: "read_range ok", resultType: "success" });
+    expect(bridge.calls.at(-1)).toMatchObject({ name: "read_range", args: { address: "A1" } });
+    bridge.reply = { content: [{ type: "text", text: "no such sheet" }], isError: true };
+    expect(await readRange.handler({ address: "A1" })).toMatchObject({ textResultForLlm: "no such sheet", resultType: "failure" });
+    bridge.fail = new Error("MCP error -32001: Request timed out");
+    expect(await readRange.handler({ address: "A1" })).toEqual({ textResultForLlm: "MCP error -32001: Request timed out", resultType: "failure", error: "MCP error -32001: Request timed out" });
+    expect(manager.has(id)).toBe(true);
+  });
+  it("lets Stop reach a tool call that is waiting on Excel", async () => {
+    const id = await manager.start(ctx, process.execPath, process.env);
+    const stop = new AbortController();
+    sdk.run = async () => { await sdk.config.tools[0].handler({ address: "A1" }); };
+    await turn(id, stop.signal);
+    expect(bridge.calls.at(-1)?.signal).toBe(stop.signal);
+  });
+  it("closes the MCP connection with the session, and when the session cannot be created", async () => {
+    const id = await manager.start(ctx, process.execPath, process.env);
+    expect(bridge.closed).toBe(0);
+    await manager.close(id);
+    expect(bridge.closed).toBe(1);
+    sdk.failCreate = true;
+    await expect(manager.start(ctx, process.execPath, process.env)).rejects.toThrow("create failed");
+    expect(bridge.closed).toBe(2);
   });
   it("returns native answers and streams messages without duplicating final text", async () => {
     const id = await manager.start(ctx, process.execPath, process.env);

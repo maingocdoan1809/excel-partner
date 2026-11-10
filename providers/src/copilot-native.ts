@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import fs from "node:fs";
 import { createRequire } from "node:module";
-import type { CopilotClient, CopilotSession, SessionConfig } from "@github/copilot-sdk";
+import type { CopilotClient, CopilotSession, SessionConfig, Tool } from "@github/copilot-sdk";
 import { exposedToolNames, UserInputRequestSchema, type ProviderEvent } from "../../protocol/src/index.js";
 import { AsyncQueue } from "./async-queue.js";
 import { askProviderQuestions } from "./user-input.js";
@@ -12,6 +12,7 @@ import { CumulativeUsage } from "./usage.js";
 import { copilotTitle, validNativeId } from "./session-metadata.js";
 import { buildTurnPrompt } from "./prompt.js";
 import { ensureWorkspaceDir } from "./workspace.js";
+import { connectMcpTools, type McpToolBridge, type McpToolBridgeFactory } from "./mcp-tool-bridge.js";
 import type { SendTurnInput, StartSessionContext } from "./types.js";
 import { normalizeCommands } from "./commands.js";
 
@@ -22,12 +23,15 @@ interface NativeSession {
   reader: CopilotUsageReader;
   usage: CumulativeUsage;
   baselinePending: boolean;
+  /** The connection that runs the Excel tools this session registered with the CLI. */
+  bridge: McpToolBridge;
   active?: { signal: AbortSignal; controller: AbortController; queue: AsyncQueue<ProviderEvent> };
 }
 
 /** Copilot's SDK transport exposes ask_user; its ACP transport does not. */
 export class CopilotNativeSessions {
   private readonly sessions = new Map<string, NativeSession>();
+  constructor(private readonly connectTools: McpToolBridgeFactory = connectMcpTools) {}
   has(id: string) { return this.sessions.has(id); }
 
   async listModels(command: string, env: NodeJS.ProcessEnv) {
@@ -57,13 +61,9 @@ export class CopilotNativeSessions {
 
   async start(ctx: StartSessionContext, command: string, env: NodeJS.ProcessEnv): Promise<string> {
     if (ctx.resumeSessionId && !validNativeId(ctx.resumeSessionId)) throw new Error("Invalid Copilot resume session ID");
-    const { CopilotClient, RuntimeConnection, ToolSet } = await import("@github/copilot-sdk");
+    const { CopilotClient, RuntimeConnection, ToolSet, convertMcpCallToolResult } = await import("@github/copilot-sdk");
     const web = ctx.mcp.env.EXCEL_WEB_SEARCH === "1";
-    const names = ctx.mcp.toolNames ?? exposedToolNames(ctx.mcp.env.EXCEL_ALLOW_OFFICE_JS === "1", { playwright: ctx.mcp.env.EXCEL_PLAYWRIGHT === "1" });
-    const tools = new ToolSet();
-    if (!ctx.mcp.toolNames) tools.addBuiltIn("ask_user");
-    for (const name of names) tools.addMcp(`excel-${name}`);
-    if (web) tools.addBuiltIn(["web_search", "web_fetch"]);
+    const names = new Set<string>(ctx.mcp.toolNames ?? exposedToolNames(ctx.mcp.env.EXCEL_ALLOW_OFFICE_JS === "1", { playwright: ctx.mcp.env.EXCEL_PLAYWRIGHT === "1" }));
     const cliPath = resolveCopilotPath(command, env);
     const client = new CopilotClient({
       connection: RuntimeConnection.forStdio({ path: cliPath, args: ["--no-custom-instructions",
@@ -71,6 +71,34 @@ export class CopilotNativeSessions {
       workingDirectory: ensureWorkspaceDir(), env, logLevel: "error",
     });
     let state: NativeSession | undefined;
+    // The Excel tools are registered with the CLI as the host's own tools, not as an MCP server of the CLI. A Copilot CLI
+    // that cannot fetch the organization's MCP policy blocks every MCP server it is given ("blocked by policy: 'excel'"),
+    // and one that has more than 30 tools hides MCP tools behind a search the model may not make. Host tools are subject
+    // to neither, so the model always sees the whole catalog. The MCP server still runs the tools, started by this process.
+    const bridge = await this.connectTools(ctx.mcp);
+    const tools = new ToolSet();
+    if (!ctx.mcp.toolNames) tools.addBuiltIn("ask_user");
+    const hostTools: Tool[] = [];
+    for (const tool of bridge.tools) {
+      if (!names.has(tool.name)) continue;
+      tools.addCustom(tool.name);
+      hostTools.push({
+        name: tool.name, description: tool.description, parameters: tool.inputSchema, skipPermission: true, defer: "never",
+        handler: async args => {
+          try { return convertMcpCallToolResult(await bridge.call(tool.name, args, state?.active?.signal) as Parameters<typeof convertMcpCallToolResult>[0]); }
+          catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            return { textResultForLlm: message, resultType: "failure" as const, error: message };
+          }
+        },
+      });
+    }
+    if (web) tools.addBuiltIn(["web_search", "web_fetch"]);
+    // Newer Copilot CLIs hide MCP tools behind `tool_search_tool` once more than 30 tools are registered, so the model
+    // only sees an Excel tool after it searches for it, and says "no Excel tool" when the search misses. The catalog is
+    // small enough to send whole: never defer it, and never restore a persisted MCP schema when a session resumes.
+    const mcpServer = { type: "local" as const, command: ctx.mcp.command, args: ctx.mcp.args,
+      env: ctx.mcp.env, tools: names, disableToolCache: true, deferTools: "never" as const };
     const config: SessionConfig = {
       model: ctx.model ?? undefined, streaming: true, availableTools: tools,
       // Auto selects its own reasoning settings. The CLI accepts effort at
@@ -78,9 +106,9 @@ export class CopilotNativeSessions {
       ...(!ctx.model || ctx.model === "auto" ? {} : { reasoningEffort: ctx.effort }),
       workingDirectory: ensureWorkspaceDir(),
       ...(ctx.systemPrompt?.trim() ? { systemMessage: { mode: ctx.systemPromptMode ?? "append", content: ctx.systemPrompt } } : {}),
-      mcpServers: { excel: { type: "local", command: ctx.mcp.command, args: ctx.mcp.args, env: ctx.mcp.env, tools: names } },
-      onPermissionRequest: request => (request.kind === "mcp" && request.serverName === "excel") || (web && request.kind === "url")
-        ? { kind: "approve-once" } : { kind: "reject" },
+      tools: hostTools,
+      toolSearch: { enabled: false },
+      onPermissionRequest: request => web && request.kind === "url" ? { kind: "approve-once" } : { kind: "reject" },
       onUserInputRequest: async request => {
         const active = state?.active;
         if (!active || active.signal.aborted || active.controller.signal.aborted) throw new Error("Question cancelled");
@@ -101,7 +129,7 @@ export class CopilotNativeSessions {
       if (ctx.resumeSessionId && session.sessionId !== ctx.resumeSessionId) throw new Error("Copilot resumed a different session");
       const reader = new CopilotUsageReader(path.join(env.COPILOT_HOME ?? path.join(os.homedir(), ".copilot"),
         "session-state", session.sessionId, "events.jsonl"), session.sessionId);
-      state = { client, session, reader, usage: new CumulativeUsage(), baselinePending: false, ask: ctx.requestUserInput };
+      state = { client, session, reader, usage: new CumulativeUsage(), baselinePending: false, ask: ctx.requestUserInput, bridge };
       if (ctx.resumeSessionId) {
         const baseline = await reader.snapshot().catch(() => null);
         if (baseline) state.usage.next(baseline);
@@ -110,7 +138,7 @@ export class CopilotNativeSessions {
       const id = `copilot-native-${randomUUID()}`;
       this.sessions.set(id, state);
       return id;
-    } catch (error) { await client.stop(); throw error; }
+    } catch (error) { await client.stop(); await bridge.close().catch(() => {}); throw error; }
   }
 
   async *send(input: SendTurnInput, env: NodeJS.ProcessEnv): AsyncIterable<ProviderEvent> {
@@ -246,7 +274,8 @@ export class CopilotNativeSessions {
     this.sessions.delete(id);
     if (!state) return;
     state.active?.controller.abort(); state.active?.queue.end();
-    try { await state.session.disconnect(); } finally { await state.client.stop(); }
+    try { await state.session.disconnect(); }
+    finally { try { await state.client.stop(); } finally { await state.bridge.close().catch(() => {}); } }
   }
   async dispose() { await Promise.all([...this.sessions.keys()].map(id => this.close(id))); }
 }

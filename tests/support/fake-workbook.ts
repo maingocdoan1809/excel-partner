@@ -99,6 +99,19 @@ export class FakeWorkbook {
         }
         return ok({ sheet: sheetName, address: args.address, formula: args.formula });
       }
+      case "set_cells": {
+        // The batch tool models prefer to the single-purpose ones: values, formulas and styles by cell address.
+        if (!sheet) return err("sheet_not_found", `sheet '${sheetName}' not found`);
+        const entries = Object.entries(args.cells ?? {}) as Array<[string, any]>;
+        for (const [address, spec] of entries) {
+          if (spec.formula !== undefined) {
+            this.formulas.set(`${sheetName}!${address}`, spec.formula);
+            sheet.set(address, `=${String(spec.formula).replace(/^=/, "")}`);
+          } else if (spec.value !== undefined) sheet.set(address, spec.value);
+          if (spec.style) this.formats.push({ sheet: sheetName, address, format: spec.style });
+        }
+        return ok({ sheet: sheetName, cellsWritten: entries.length });
+      }
       case "format_range":
         this.formats.push({ sheet: sheetName, address: args.address, format: args.format });
         return ok({ sheet: sheetName, address: args.address, applied: Object.keys(args.format ?? {}) });
