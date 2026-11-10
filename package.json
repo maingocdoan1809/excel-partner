@@ -1,6 +1,6 @@
 {
   "name": "office-partner",
-  "version": "0.1.21",
+  "version": "0.1.22",
   "description": "Excel Partner (Office Partner): local Word, Excel and PowerPoint desktop AI add-in with Claude Code, GitHub Copilot CLI, Codex CLI and OpenCode CLI providers.",
   "type": "module",
   "license": "MIT",
