@@ -39,7 +39,7 @@ describe("planUndo", () => {
     expect(planUndo("format_range", { sheet, address: "A1:B2", format: { bold: true } })).toMatchObject({ style: true });
     expect(planUndo("sort_range", { sheet, address: "A1:C9", keys: [{ column: "A" }] })).toMatchObject({ style: true });
     expect(planUndo("copy_to", { sheet, source: "A1", destination: "A2:A9", copyType: "values" })).toMatchObject({ style: false });
-    expect(planUndo("copy_to", { sheet, source: "A1", destination: "A2:A9" })).toMatchObject({ style: true, merged: true, targets: [{ sheet, address: "A2:A9" }], caveats: [expect.stringContaining("copied from the source")] });
+    expect(planUndo("copy_to", { sheet, source: "A1", destination: "A2:A9" })).toMatchObject({ style: true, merged: true, targets: [{ sheet, address: "A2:A9", copyFrom: "A1" }], caveats: [expect.stringContaining("copied from the source")] });
     expect(planUndo("copy_to", { sheet, source: "A1", destination: "A2:A9", copyType: "values" })).not.toHaveProperty("caveats");
   });
 
@@ -65,7 +65,7 @@ describe("planUndo", () => {
     const plan = planUndo("set_cells", { sheet, cells: { B2: { value: 1 }, D5: { formula: "=B2", style: { bold: true } } }, copyTo: "B2:D9", resizeWidth: { type: "autofit" } });
     expect(plan).toMatchObject({
       kind: "cells", style: true, merged: true,
-      targets: [{ sheet, address: "B2:D5" }, { sheet, address: "B2:D9" }],
+      targets: [{ sheet, address: "B2:D5" }, { sheet, address: "B2:D9", copyFrom: "B2:D5" }],
       layout: { columns: [2, 4], rows: [2, 5], dimensions: ["width"] },
     });
     expect(planUndo("set_cells", { sheet, cells: { A1: { value: 1 } } })).toMatchObject({ style: false });

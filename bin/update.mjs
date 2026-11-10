@@ -27,8 +27,8 @@ const CSHARP_BLOCK = "Add-Type -TypeDefinition @'\nusing System;\nusing System.R
  * directory or holds a file in it, and npm then fails with EBUSY. Programs the bridge starts inherit the package
  * folder as their working directory without naming it on their command line, and some outlive their parent, so three
  * things count: a command line naming the folder, a working directory inside it, and descendants of either.
- * An update or `npm install` of this package that is already running counts too: two of them in the same global folder
- * are what npm reports as a lock. The calling process, the `keep` pids and the calling process's own parents (the shell
+ * Another update or npm install counts only when its target can be verified as this installation. The calling process,
+ * the `keep` pids and the calling process's own parents (the shell
  * that ran `update` can mention the package and `install` in its command line) are spared.
  */
 export function stopPackageProcesses({ root, keep = [], packageName = "excel-partner", run = spawnSync, platform = process.platform }) {
@@ -37,7 +37,7 @@ export function stopPackageProcesses({ root, keep = [], packageName = "excel-par
   const literal = (text) => `'${String(text).replace(/'/g, "''")}'`;
   const script = [
     CSHARP_BLOCK,
-    `$root = ${literal(path.resolve(root))}`,
+    `$root = ${literal(path.win32.resolve(root).replace(/[\\/]+$/, ""))}`,
     `$pkg = ${literal(packageName)}`,
     `$spared = @(${spared.join(",")})`,
     "$self = $PID",
@@ -45,17 +45,30 @@ export function stopPackageProcesses({ root, keep = [], packageName = "excel-par
     "$ancestors = New-Object 'System.Collections.Generic.HashSet[int]'",
     `$cur = ${Number.isSafeInteger(process.pid) ? process.pid : 0}`,
     "while ($cur -gt 0 -and $ancestors.Add($cur)) { $row = $all | Where-Object { $_.ProcessId -eq $cur } | Select-Object -First 1; $cur = if ($row) { [int]$row.ParentProcessId } else { 0 } }",
+    "$excel = @($all | Where-Object { $_.Name -ieq 'EXCEL.EXE' } | ForEach-Object { [int]$_.ProcessId })",
     "$ids = New-Object 'System.Collections.Generic.HashSet[int]'",
-    "function Spare($id) { $id -eq $self -or $spared -contains $id }",
+    "function Spare($id) { $id -eq $self -or $spared -contains $id -or $ancestors.Contains($id) -or $excel -contains $id }",
     "foreach ($p in $all) {",
     "  $id = [int]$p.ProcessId; if (Spare $id) { continue }",
-    "  $named = $p.CommandLine -and $p.CommandLine.IndexOf($root, [StringComparison]::OrdinalIgnoreCase) -ge 0",
+    String.raw`  $named = $p.CommandLine -and $p.CommandLine -match ([regex]::Escape($root) + '(?=[\\/"''\s]|$)')`,
     "  $cwd = [EpCwd]::Get($id)",
-    "  $inside = $cwd -and $cwd.StartsWith($root, [StringComparison]::OrdinalIgnoreCase)",
+    String.raw`  $inside = $cwd -and ($cwd.TrimEnd([char[]]'\/') -ieq $root -or $cwd.StartsWith($root + '\', [StringComparison]::OrdinalIgnoreCase))`,
     "  $cl = [string]$p.CommandLine",
-    String.raw`  $updater = $cl -match '[\\/](excel|office)-partner-update-[^\\/]+[\\/]update-runner\.mjs'`,
-    String.raw`  $installer = ($cl -match 'npm-cli\.js"?\s+(install|i|add)\s') -and ($cl -match '(^|\s)(-g|--global)(\s|$)') -and $cl.IndexOf($pkg, [StringComparison]::OrdinalIgnoreCase) -ge 0`,
-    "  $rival = (-not $ancestors.Contains($id)) -and ($updater -or $installer)",
+    String.raw`  $tokens = @([regex]::Matches($cl, '(?:"[^"]*"|[^\s"]+)+') | ForEach-Object { $_.Value.Replace('"', '') })`,
+    "  $updater = $false; $installer = $false; $prefix = $null; $npmIndex = -1",
+    "  for ($i = 0; $i -lt $tokens.Count; $i++) {",
+    String.raw`    if ($tokens[$i] -match '[\\/]npm-cli\.js$') { $npmIndex = $i }`,
+    "    if (($tokens[$i] -eq '--prefix' -or $tokens[$i] -ceq '-C') -and $i + 1 -lt $tokens.Count) { $prefix = $tokens[$i + 1] }",
+    "    if ($tokens[$i].StartsWith('--prefix=')) { $prefix = $tokens[$i].Substring(9) }",
+    String.raw`    if ($tokens[$i] -match '[\\/](excel|office)-partner-update-[^\\/]+[\\/]update-runner\.mjs$') {`,
+    "      try { $target = Get-Content -LiteralPath (Join-Path (Split-Path -Parent $tokens[$i]) 'target.json') -Raw -ErrorAction Stop | ConvertFrom-Json; $updater = [IO.Path]::GetFullPath($target.root).TrimEnd([char[]]'\\/') -ieq $root } catch {}",
+    "    }",
+    "  }",
+    "  $exactPackage = @($tokens | Where-Object { $_ -match ('^' + [regex]::Escape($pkg) + '(@[^\\s]+)?$') }).Count -gt 0",
+    "  if ($npmIndex -ge 0 -and $npmIndex + 1 -lt $tokens.Count -and $tokens[$npmIndex + 1] -in @('install', 'i', 'add') -and ($tokens -contains '-g' -or $tokens -contains '--global') -and $exactPackage -and $prefix) {",
+    "    try { if ([IO.Path]::IsPathRooted($prefix)) { $installer = [IO.Path]::GetFullPath((Join-Path $prefix ('node_modules\\' + $pkg))).TrimEnd([char[]]'\\/') -ieq $root } } catch {}",
+    "  }",
+    "  $rival = $updater -or $installer",
     "  if ($named -or $inside -or $rival) { [void]$ids.Add($id) }",
     "}",
     "do { $before = $ids.Count; foreach ($p in $all) { $id = [int]$p.ProcessId; if (-not (Spare $id) -and $ids.Contains([int]$p.ParentProcessId)) { [void]$ids.Add($id) } } } while ($ids.Count -ne $before)",

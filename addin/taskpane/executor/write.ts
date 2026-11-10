@@ -181,7 +181,8 @@ export async function writeRange(input: WriteRangeInput): Promise<unknown> {
       }
       for (const [address] of notes) assertCellInside(address, geometry);
     }
-    await assertCanWrite(context, target, geometry, input.allowOverwrite);
+    await assertCanWrite(context, target, geometry, input.allowOverwrite,
+      (row, col) => grid[row - geometry.rowIndex]?.[col - geometry.columnIndex] == null);
 
     target.values = grid;
     if (notes.length > 0) await writeNotes(context, sheet, notes);

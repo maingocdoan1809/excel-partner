@@ -66,10 +66,11 @@ does not cover, so update Excel Partner (**Settings**, or `excel-partner update`
 ## `excel-partner update` reports EBUSY, EPERM or another npm lock error
 
 On Windows npm cannot replace a folder while any process has a file in it open. `excel-partner update` (and the **Update** button)
-closes the bridge, the gateway, whatever they started, and any other update or `npm install` of Excel Partner that is
-still running; clears what a failed install left in npm's global folder; and installs with `--force --prefer-online`. If npm
-still reports a lock it closes everything again and retries, up to three times. It leaves Excel alone, because
-they can hold unsaved work. If it still fails, close them and any terminal or editor opened in the package folder, then run
+closes the bridge, the gateway, whatever they started, and another update or npm install only when its target can be
+verified as the same installation. Installs with an unknown target are left alone: finish or stop them yourself before retrying.
+The updater clears what a failed install left in npm's global folder and installs with `--force --prefer-online`. If npm
+still reports a lock it closes those processes again and retries, up to three times. It leaves Excel and the calling terminal
+alone because they can hold unsaved work. If it still fails, close Excel and any terminal or editor opened in the package folder, then run
 the command again; the last line npm printed names its log file.
 
 ## `get_selection` says a shape or chart is selected

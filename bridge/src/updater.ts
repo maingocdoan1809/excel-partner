@@ -194,6 +194,8 @@ export class UpdateService {
 
     const runnerDir = fs.mkdtempSync(path.join(os.tmpdir(), "excel-partner-update-"));
     for (const file of ["update-runner.mjs", "update.mjs"]) fs.copyFileSync(path.join(this.opts.packageRoot, "bin", file), path.join(runnerDir, file));
+    // Lets another updater identify this runner's installation without guessing from its temporary folder name.
+    fs.writeFileSync(path.join(runnerDir, "target.json"), JSON.stringify({ root: this.opts.packageRoot }));
     fs.mkdirSync(this.opts.dataDir, { recursive: true });
     const gatewaySetUp = !!this.opts.gatewayDir && fs.existsSync(path.join(this.opts.gatewayDir, "token.txt"));
     const env: NodeJS.ProcessEnv = {

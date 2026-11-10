@@ -24,6 +24,24 @@ async function call(tool: string, args: unknown) {
   return executeTool(tool, parseToolInput(tool as never, args));
 }
 
+describe("write_range placeholders", () => {
+  it("leaves occupied cells alone for null and padded entries", async () => {
+    book.fill("Sheet1", [["keep-1", "keep-2"], [null, "keep-3"]], "D1");
+    const result = await call("write_range", { address: "D1", values: [[null, null], ["new"]] });
+    expect(result.ok).toBe(true);
+    expect(book.get("Sheet1", "D1")).toBe("keep-1");
+    expect(book.get("Sheet1", "E1")).toBe("keep-2");
+    expect(book.get("Sheet1", "D2")).toBe("new");
+    expect(book.get("Sheet1", "E2")).toBe("keep-3");
+  });
+  it("still refuses writes to occupied cells beside null placeholders", async () => {
+    const result = await call("write_range", { address: "A1", values: [[null, "changed"]] });
+    expectError(result, "would_overwrite");
+    expect(book.get("Sheet1", "A1")).toBe("Item");
+    expect(book.get("Sheet1", "B1")).toBe("Qty");
+  });
+});
+
 function expectError(result: Awaited<ReturnType<typeof call>>, code: string) {
   expect(result.ok).toBe(false);
   if (!result.ok) expect(result.error.code).toBe(code);

@@ -47,6 +47,16 @@ describe("read_range paging", () => {
 });
 
 describe("set_cells", () => {
+  it("checks the expanded copy destination before changing any source cells", async () => {
+    book.fill("Sheet1", [["KEEP"]], "E2");
+    const args = { cells: { D1: { value: "one" }, D2: { value: "two" } }, copyTo: "E1" };
+    expectError(await call("set_cells", args), "would_overwrite");
+    expect(book.get("Sheet1", "E2")).toBe("KEEP");
+    expect(book.get("Sheet1", "D1")).toBeNull();
+    const result = await call("set_cells", { ...args, allowOverwrite: true });
+    expect(data(result).copiedTo).toBe("E1:E2");
+    expect(book.get("Sheet1", "E2")).toBe("two");
+  });
   it("writes values, formulas, styles, borders and notes in one call and reports formula results", async () => {
     const result = await call("set_cells", {
       cells: {
@@ -143,6 +153,16 @@ describe("get_cell_ranges", () => {
 });
 
 describe("copy_to / resize_range / read_range_image / merge_range / sort_range", () => {
+  it("checks and reports the whole destination when a source expands it in both dimensions", async () => {
+    book.fill("Sheet1", [["KEEP"]], "E2");
+    const args = { source: "A1:B2", destination: "D1", copyType: "values" };
+    expectError(await call("copy_to", args), "would_overwrite");
+    expect(book.get("Sheet1", "E2")).toBe("KEEP");
+    expect(book.get("Sheet1", "D1")).toBeNull();
+    const copied = data(await call("copy_to", { ...args, allowOverwrite: true }));
+    expect(copied.address).toBe("D1:E2");
+    expect(book.get("Sheet1", "E2")).toBe(2);
+  });
   it("copies with relative references and refuses to overwrite", async () => {
     await call("set_formula", { address: "D2", formula: "B2*C2" });
     const copied = await call("copy_to", { source: "D2", destination: "D3:D4" });

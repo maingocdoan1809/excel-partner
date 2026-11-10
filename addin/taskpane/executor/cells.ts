@@ -23,6 +23,7 @@ import {
   type StyleOut,
 } from "./styles.js";
 import { findOccupied, loadGeometry, overwriteFailure, type Geometry } from "./write.js";
+import { copyDestination } from "./copy-range.js";
 
 /* -------------------------------------------------------------------------- */
 /* get_cell_ranges                                                             */
@@ -190,6 +191,7 @@ export async function setCells(input: SetCellsInput): Promise<unknown> {
       { r0: Infinity, c0: Infinity, r1: -1, c1: -1 },
     );
     const source = sheet.getRangeByIndexes(bounds.r0, bounds.c0, bounds.r1 - bounds.r0 + 1, bounds.c1 - bounds.c0 + 1);
+    const copyTarget = input.copyTo ? await copyDestination(context, source, sheet.getRange(input.copyTo)) : null;
 
     if (!input.allowOverwrite) {
       const writing = entries.filter((e) => e.spec.value !== undefined || e.spec.formula !== undefined);
@@ -198,8 +200,8 @@ export async function setCells(input: SetCellsInput): Promise<unknown> {
         geometry: { rowIndex: e.pos.row, columnIndex: e.pos.col, rowCount: 1, columnCount: 1 } as Geometry,
       }));
       let destination: { range: Excel.Range; geometry: Geometry } | null = null;
-      if (input.copyTo) {
-        const range = sheet.getRange(input.copyTo);
+      if (copyTarget) {
+        const range = copyTarget;
         destination = { range, geometry: await loadGeometry(context, range) };
         targets.push(destination);
       }
@@ -238,8 +240,8 @@ export async function setCells(input: SetCellsInput): Promise<unknown> {
     if (noteEntries.length > 0) await writeNotesFor(context, sheet, noteEntries);
 
     let filled: Excel.Range = source;
-    if (input.copyTo) {
-      filled = sheet.getRange(input.copyTo);
+    if (copyTarget) {
+      filled = copyTarget;
       filled.copyFrom(source, Excel.RangeCopyType.all);
     }
 
@@ -253,9 +255,9 @@ export async function setCells(input: SetCellsInput): Promise<unknown> {
     const probes = formulaCells.slice(0, 200).map((address) => ({ address, range: sheet.getRange(address) }));
     probes.forEach((p) => p.range.load("values"));
     let copied: Excel.Range | null = null;
-    if (input.copyTo) {
+    if (copyTarget) {
       copied = filled;
-      copied.load("values,formulas,rowIndex,columnIndex");
+      copied.load("address,values,formulas,rowIndex,columnIndex");
     }
     await context.sync();
     for (const { address, range } of probes) {
@@ -282,7 +284,7 @@ export async function setCells(input: SetCellsInput): Promise<unknown> {
     return {
       sheet: sheet.name,
       cellsWritten: entries.length,
-      ...(input.copyTo ? { copiedTo: input.copyTo } : {}),
+      ...(copied ? { copiedTo: stripSheet(copied.address) } : {}),
       formulaResults,
       ...(messages.length > 0 ? { messages } : {}),
     };
@@ -312,7 +314,7 @@ export async function copyTo(input: CopyToInput): Promise<unknown> {
     const sheet = resolveSheet(context, input.sheet);
     sheet.load("name");
     const source = sheet.getRange(input.source);
-    const destination = sheet.getRange(input.destination);
+    const destination = await copyDestination(context, source, sheet.getRange(input.destination));
     const src = await loadGeometry(context, source);
     const dest = await loadGeometry(context, destination);
 

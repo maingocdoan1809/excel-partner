@@ -68,6 +68,20 @@ async function turn(id: string, signal = new AbortController().signal) {
 }
 
 describe("Copilot native question transport", () => {
+  it("forwards API images as SDK blob attachments, without carrying them into the next turn", async () => {
+    const id = await manager.start(ctx, process.execPath, process.env);
+    const sent: any[] = [];
+    sdk.run = async (args: unknown) => { sent.push(args); };
+    for await (const _ of manager.send({ providerSessionId: id, requestId: "image", prompt: "Describe this",
+      images: [{ mediaType: "image/png", data: "PNG_BASE64" }, { mediaType: "image/jpeg", data: "JPEG_BASE64" }],
+      selection: null, signal: new AbortController().signal }, process.env)) { /* drain */ }
+    await turn(id);
+    expect(sent[0]).toMatchObject({ attachments: [
+      { type: "blob", mimeType: "image/png", data: "PNG_BASE64" },
+      { type: "blob", mimeType: "image/jpeg", data: "JPEG_BASE64" },
+    ] });
+    expect(sent[1].attachments).toBeUndefined();
+  });
   it("uses the installed executable, limits tools, and keeps workbook permission in the gateway", async () => {
     const id = await manager.start(ctx, process.execPath, process.env);
     expect(manager.has(id)).toBe(true);

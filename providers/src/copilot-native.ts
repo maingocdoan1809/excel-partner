@@ -94,11 +94,6 @@ export class CopilotNativeSessions {
       });
     }
     if (web) tools.addBuiltIn(["web_search", "web_fetch"]);
-    // Newer Copilot CLIs hide MCP tools behind `tool_search_tool` once more than 30 tools are registered, so the model
-    // only sees an Excel tool after it searches for it, and says "no Excel tool" when the search misses. The catalog is
-    // small enough to send whole: never defer it, and never restore a persisted MCP schema when a session resumes.
-    const mcpServer = { type: "local" as const, command: ctx.mcp.command, args: ctx.mcp.args,
-      env: ctx.mcp.env, tools: names, disableToolCache: true, deferTools: "never" as const };
     const config: SessionConfig = {
       model: ctx.model ?? undefined, streaming: true, availableTools: tools,
       // Auto selects its own reasoning settings. The CLI accepts effort at
@@ -216,8 +211,9 @@ export class CopilotNativeSessions {
     input.signal.addEventListener("abort", cancel, { once: true });
     const context = buildTurnPrompt(input.prompt, input.selection);
     const prompt = input.userPrompt?.trim() ? `${input.userPrompt}\n\n<addin_context>\n${context}\n</addin_context>` : context;
+    const attachments = input.images?.map(image => ({ type: "blob" as const, data: image.data, mimeType: image.mediaType }));
     const run = async () => {
-      if (!input.command) { await state.session.sendAndWait({ prompt }, 30 * 60_000); return; }
+      if (!input.command) { await state.session.sendAndWait({ prompt, ...(attachments?.length ? { attachments } : {}) }, 30 * 60_000); return; }
       const { name } = input.command;
       let args = input.command.args;
       for (let depth = 0; depth < 5; depth++) {
@@ -231,7 +227,7 @@ export class CopilotNativeSessions {
           case "add-timeline-entry": queue.push({ type: "message_completed", requestId, text: result.entry.text }); return;
           case "agent-prompt":
             if (result.notice) queue.push({ type: "message_completed", requestId, text: result.notice });
-            await state.session.sendAndWait({ prompt: result.prompt, agentMode: result.mode }, 30 * 60_000); return;
+            await state.session.sendAndWait({ prompt: result.prompt, agentMode: result.mode, ...(attachments?.length ? { attachments } : {}) }, 30 * 60_000); return;
           case "select-subcommand": {
             const answer = await askProviderQuestions(UserInputRequestSchema.parse({ questions: [{ id: "subcommand", question: result.title,
               options: result.options.slice(0, 30).map(option => ({ label: option.name, description: option.description })), allowFreeform: true }] }),

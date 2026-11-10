@@ -1,4 +1,5 @@
 import { resolveSheet } from "./common.js";
+import { copyDestination } from "./copy-range.js";
 import type { LayoutSpec, UndoPlan, UndoTarget } from "./undo-plan.js";
 
 /**
@@ -216,6 +217,7 @@ async function resolveGeometries(context: Excel.RequestContext, targets: UndoTar
     sheet.load("id,name");
     let range = sheet.getRange(target.address);
     if (target.grow) range = range.getCell(0, 0).getResizedRange(target.grow.rows - 1, target.grow.columns - 1);
+    if (target.copyFrom) range = await copyDestination(context, sheet.getRange(target.copyFrom), range);
     range.load("rowIndex,columnIndex,rowCount,columnCount");
     pending.push({ sheet, range, used: false });
   }

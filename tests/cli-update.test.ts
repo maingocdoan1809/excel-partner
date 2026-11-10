@@ -141,26 +141,28 @@ describe("stopPackageProcesses", () => {
     expect(exe).toBe("powershell.exe");
     expect(args.slice(0, 3)).toEqual(["-NoProfile", "-NonInteractive", "-EncodedCommand"]);
     const script = Buffer.from(args[3] as string, "base64").toString("utf16le");
-    expect(script).toContain(`'${path.resolve("C:\\Users\\o'brien\\npm\\node_modules\\excel-partner").replace(/'/g, "''")}'`); // a quote in the path cannot end the literal
+    expect(script).toContain(`'${path.win32.resolve("C:\\Users\\o'brien\\npm\\node_modules\\excel-partner").replace(/'/g, "''")}'`); // a quote in the path cannot end the literal
     expect(script).toContain(`$spared = @(${process.pid},111)`);
     expect(script).toContain("Spare $id");              // itself and the kept pids are never stopped
-    expect(script).toContain("CommandLine.IndexOf($root"); // named on the command line
+    expect(script).toContain("[regex]::Escape($root)"); // named on the command line with a path boundary
     expect(script).toContain("[EpCwd]::Get");            // working directory inside the folder
     expect(script).toContain("ParentProcessId");         // descendants go too
     expect(script).toContain("Stop-Process");
   });
 
-  it("also stops an update or an npm install of this package that is already running, but never the shell that ran this one", () => {
+  it("requires a verified target for rival installs and updaters, and spares the calling shell", () => {
     const run = vi.fn().mockReturnValue({ status: 0, stdout: "2\r\n" });
     stopPackageProcesses({ root: "C:\\npm\\node_modules\\excel-partner", packageName: "excel-partner", run, platform: "win32" });
     const script = Buffer.from(run.mock.calls[0]![1][3] as string, "base64").toString("utf16le");
     expect(script).toContain("$pkg = 'excel-partner'");
     expect(script).toContain("update-runner");                          // another update, running from its temporary folder
     expect(script).toContain("npm-cli");                                // npm itself, installing globally ...
-    expect(script).toMatch(/\(install\|i\|add\)/);
-    expect(script).toContain("IndexOf($pkg");                           // ... this package
+    expect(script).toContain("@('install', 'i', 'add')");
+    expect(script).toContain("[regex]::Escape($pkg)");
+    expect(script).toContain("target.json");
+    expect(script).toContain("[IO.Path]::IsPathRooted($prefix)");
     expect(script).toContain(`$cur = ${process.pid}`);                  // the parents of this process ...
-    expect(script).toContain("-not $ancestors.Contains($id)");          // ... are never taken for a rival
+    expect(script).toMatch(/function Spare\(\$id\).*\$ancestors.Contains\(\$id\)/);
   });
 
   it("leaves npm's staging folders alone unless they are this package's", () => {

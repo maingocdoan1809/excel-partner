@@ -10,6 +10,8 @@ export interface RangeTarget {
   address: string;
   /** Use only the top-left cell of `address` and grow it to this many rows/columns (write_range). */
   grow?: { rows: number; columns: number };
+  /** Expand a copy's destination to fit its source before taking the snapshot. */
+  copyFrom?: string;
 }
 
 /** Every visible sheet's used range (find_replace without a sheet). */
@@ -157,7 +159,7 @@ export function planUndo(tool: string, input: unknown): UndoPlan {
       const formats = copyType === "all" || copyType === "formats";
       return {
         kind: "cells",
-        targets: [{ sheet, address: args.destination }],
+        targets: [{ sheet, address: args.destination, ...(typeof args.source === "string" ? { copyFrom: args.source } : {}) }],
         style: formats,
         merged: formats,
         ...(formats ? { caveats: ["conditional formats and data validation copied from the source are not removed"] } : {}),
@@ -182,7 +184,7 @@ export function planUndo(tool: string, input: unknown): UndoPlan {
       if (!box) return { kind: "irreversible", reason: "the cell addresses could not be read" };
       const specs = Object.values(args.cells as Record<string, Args>);
       const targets: UndoTarget[] = [{ sheet, address: toA1(box) }];
-      if (typeof args.copyTo === "string") targets.push({ sheet, address: args.copyTo });
+      if (typeof args.copyTo === "string") targets.push({ sheet, address: args.copyTo, copyFrom: toA1(box) });
       const dimensions: Array<"width" | "height"> = [];
       if (args.resizeWidth) dimensions.push("width");
       if (args.resizeHeight) dimensions.push("height");

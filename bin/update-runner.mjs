@@ -30,6 +30,15 @@ const STEP_TEXT = {
   starting: "Starting the new version",
 };
 
+function startGateway(installedRoot) {
+  const result = spawnSync(process.execPath, [path.join(installedRoot, "bin", "excel-partner.mjs"), "gateway", "start"], { cwd: dataDir, stdio: "inherit", windowsHide: true });
+  if (result.error || result.status !== 0) {
+    throw new Error(`Could not restart Agent Gateway (${result.error?.message ?? `exit ${result.status ?? "unknown"}`}). Run excel-partner gateway start.`);
+  }
+}
+
+let gatewayAttempted = false;
+
 try {
   status({ state: "running", step: "preparing", message: "Getting ready", pid: process.pid, error: null, to: null, finishedAt: null });
   // Give the bridge time to answer the request that started this, and the pane time to show "Updating".
@@ -41,16 +50,28 @@ try {
     wasRunning: true,
     spec,
     report: (step) => status({ state: "running", step, message: STEP_TEXT[step] ?? step }),
-    stop: async () => { stopPackageProcesses({ root }); },
+    stop: async () => {
+      // The bridge launched this runner, so it is one of the ancestors the process sweep deliberately spares.
+      // Stop that known service explicitly before sweeping the remaining package processes.
+      const stopped = spawnSync(process.execPath, [path.join(root, "bin", "excel-partner.mjs"), "stop"], { cwd: dataDir, stdio: "inherit", windowsHide: true });
+      if (stopped.error || stopped.status !== 0) throw new Error("Could not stop the bridge. Run excel-partner stop, then retry the update.");
+      stopPackageProcesses({ root });
+    },
   });
   if (process.env.EP_GATEWAY === "1") {
-    spawnSync(process.execPath, [path.join(result.installedRoot, "bin", "excel-partner.mjs"), "gateway", "start"], { cwd: dataDir, stdio: "inherit", windowsHide: true });
+    gatewayAttempted = true;
+    startGateway(result.installedRoot);
   }
   status({ state: "done", step: "done", message: "Updated", to: result.version ?? installedVersion(result.installedRoot), finishedAt: new Date().toISOString() });
   removeOwnFolder();
 } catch (error) {
-  console.error(error instanceof Error ? error.message : String(error));
-  status({ state: "failed", step: "failed", message: "The update did not finish", error: error instanceof Error ? error.message : String(error), finishedAt: new Date().toISOString() });
+  let message = error instanceof Error ? error.message : String(error);
+  if (process.env.EP_GATEWAY === "1" && !gatewayAttempted) {
+    try { startGateway(root); }
+    catch (recoveryError) { message += ` ${recoveryError instanceof Error ? recoveryError.message : String(recoveryError)}`; }
+  }
+  console.error(message);
+  status({ state: "failed", step: "failed", message: "The update did not finish", error: message, finishedAt: new Date().toISOString() });
   process.exitCode = 1;
   removeOwnFolder();
 }

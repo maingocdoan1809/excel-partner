@@ -79,7 +79,7 @@ function raw<T>(value: T): T {
   return ((value as unknown as Record<symbol, T>)?.[RAW] ?? value) as T;
 }
 
-const RANGE_PROPS = ["address", "rowIndex", "columnIndex", "rowCount", "columnCount", "values", "formulas", "numberFormat", "left", "top", "width", "height"] as const;
+const RANGE_PROPS = ["address", "rowIndex", "columnIndex", "rowCount", "columnCount", "values", "valueTypes", "formulas", "numberFormat", "left", "top", "width", "height"] as const;
 const SHEET_PROPS = ["name", "id", "position", "visibility", "tabColor"] as const;
 const SHAPE_PROPS = ["rotation", "id", "isNullObject", "name", "type", "geometricShapeType", "left", "top", "width", "height"] as const;
 
@@ -471,6 +471,12 @@ export class MockRange {
   get text() {
     return this.values.map((row) => row.map((value) => (value === null || value === undefined ? "" : String(value))));
   }
+  get valueTypes() {
+    return this.grid(cell => {
+      const value = cell.f ? computeFormula(this.sheet, cell.f) : cell.v;
+      return value === null ? "Empty" : typeof value === "string" ? "String" : typeof value === "boolean" ? "Boolean" : Number.isInteger(value) ? "Integer" : "Double";
+    });
+  }
   get formulas() {
     return this.grid((cell) => cell.f ?? (cell.v === null ? "" : String(cell.v)));
   }
@@ -671,8 +677,9 @@ export class MockRange {
   }
   copyFrom(sourceRange: MockRange, type = "All") {
     const source = raw(sourceRange);
-    for (let r = 0; r < this.rowCount; r++)
-      for (let c = 0; c < this.columnCount; c++) {
+    // Office expands a smaller destination to fit its source; the range object itself retains its address.
+    for (let r = 0; r < Math.max(this.rowCount, source.rowCount); r++)
+      for (let c = 0; c < Math.max(this.columnCount, source.columnCount); c++) {
         // Tile the source over the destination; each tile shifts relative references by its own offset.
         const sr = r % source.rowCount;
         const sc = c % source.columnCount;
