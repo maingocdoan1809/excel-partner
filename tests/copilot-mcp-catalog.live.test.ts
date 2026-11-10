@@ -34,11 +34,12 @@ it.skipIf(!installed)('builds current Copilot native schemas on/off/on without a
       await session.rpc.tools.initializeAndValidate();
       const { tools } = await session.rpc.tools.getCurrentMetadata();
       expect(tools?.length).toBeGreaterThan(0);
-      const external = tools.filter((tool: any) => tool.mcpToolName?.startsWith('ext_'));
-      expect(external.map((tool: any) => tool.mcpToolName.split('__').at(-1)).sort()).toEqual(enabled ? ['echo', 'env', 'fail'] : []);
+      // The tools are the host's own, not an MCP server of the CLI, so a CLI policy against MCP servers cannot block them.
+      const external = tools.filter((tool: any) => String(tool.name).startsWith('ext_'));
+      expect(external.map((tool: any) => tool.name.split('__').at(-1)).sort()).toEqual(enabled ? ['echo', 'env', 'fail'] : []);
       for (const tool of external) {
         expect(tool.deferLoading).not.toBe(true);
-        if (tool.mcpToolName.endsWith('__echo')) expect(tool.input_schema).toMatchObject({ required: ['text'], properties: { text: { type: 'string' } } });
+        if (tool.name.endsWith('__echo')) expect(tool.input_schema ?? tool.inputSchema ?? tool.parameters).toMatchObject({ required: ['text'], properties: { text: { type: 'string' } } });
       }
       await manager.close(id);
     }

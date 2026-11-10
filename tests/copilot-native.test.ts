@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import type { ProviderEvent, UserInputResponse } from "../protocol/src/index.js";
 import type { StartSessionContext } from "../providers/src/types.js";
+import type { McpToolBridge } from "../providers/src/mcp-tool-bridge.js";
 
 const sdk = vi.hoisted(() => ({ config: null as any, client: null as any, session: null as any, handler: null as any,
   run: null as any, open: null as any, resumeId: undefined as string | undefined }));
@@ -13,8 +14,10 @@ vi.mock("@github/copilot-sdk", () => ({
     items: string[] = [];
     addBuiltIn(value: string | string[]) { this.items.push(...(Array.isArray(value) ? value : [value]).map(x => `builtin:${x}`)); return this; }
     addMcp(value: string) { this.items.push(`mcp:${value}`); return this; }
+    addCustom(value: string) { this.items.push(`custom:${value}`); return this; }
     toArray() { return this.items; }
   },
+  convertMcpCallToolResult: (result: any) => ({ textResultForLlm: result.content.map((part: any) => part.text).join(""), resultType: result.isError ? "failure" : "success" }),
   CopilotClient: class {
     constructor(options: any) { sdk.client = options; }
     async start() {}
@@ -25,6 +28,18 @@ vi.mock("@github/copilot-sdk", () => ({
 }));
 import { CopilotNativeSessions, resolveCopilotPath } from "../providers/src/copilot-native.js";
 
+const schema = { type: "object", properties: { address: { type: "string" } }, required: ["address"] };
+const bridge = { calls: [] as Array<{ name: string; args: unknown; signal?: AbortSignal }>, closed: 0, reply: null as any, fail: null as Error | null };
+const fakeBridge: McpToolBridge = {
+  // The MCP server lists more than one session may offer; the session keeps only the tools it is allowed to.
+  tools: ["read_range", "get_sheets", "get_selection", "read_probe", "not_exposed"].map(name => ({ name, description: `${name} description`, inputSchema: schema })),
+  call: async (name, args, signal) => {
+    bridge.calls.push({ name, args, signal });
+    if (bridge.fail) throw bridge.fail;
+    return bridge.reply ?? { content: [{ type: "text", text: `${name} ok` }] };
+  },
+  close: async () => { bridge.closed++; },
+};
 let manager: CopilotNativeSessions;
 let dir: string;
 let ctx: StartSessionContext;
@@ -32,7 +47,8 @@ beforeEach(() => {
   dir = fs.mkdtempSync(path.join(os.tmpdir(), "copilot-native-test-"));
   vi.stubEnv("EXCEL_AI_HOME", dir);
   vi.stubEnv("COPILOT_HOME", dir);
-  manager = new CopilotNativeSessions();
+  manager = new CopilotNativeSessions(async () => fakeBridge);
+  Object.assign(bridge, { calls: [], closed: 0, reply: null, fail: null });
   ctx = { workbookConnectionId: "workbook", sessionId: "bridge", signal: new AbortController().signal,
     mcp: { command: "node", args: ["excel.js"], env: {}, bridgeUrl: "", sessionId: "", token: "" },
     requestUserInput: vi.fn(async () => ({ cancelled: false, answers: { answer: ["New sheet"] } })),
@@ -57,14 +73,59 @@ describe("Copilot native question transport", () => {
     expect(manager.has(id)).toBe(true);
     expect(sdk.client.connection.path).toBe(fs.realpathSync(process.execPath));
     expect(sdk.client.connection.args).toContain("--disable-builtin-mcps");
-    expect(sdk.config.mcpServers.excel).toMatchObject({ disableToolCache: true, deferTools: "never" });
+    expect(sdk.config.mcpServers).toBeUndefined();
     expect(sdk.config.toolSearch).toEqual({ enabled: false });
     const tools = sdk.config.availableTools.toArray();
     expect(tools).toContain("builtin:ask_user");
-    expect(tools).toContain("mcp:excel-read_range");
+    expect(tools).toContain("custom:read_range");
     expect(tools).not.toContain("builtin:shell");
-    expect(sdk.config.onPermissionRequest({ kind: "mcp", serverName: "excel" })).toEqual({ kind: "approve-once" });
     expect(sdk.config.onPermissionRequest({ kind: "shell" })).toEqual({ kind: "reject" });
+    expect(sdk.config.onPermissionRequest({ kind: "url" })).toEqual({ kind: "reject" });
+  });
+  it("registers the tools as the host's own tools, not as an MCP server the CLI can block or hide", async () => {
+    await manager.start(ctx, process.execPath, process.env);
+    expect(sdk.config.mcpServers).toBeUndefined();
+    expect(sdk.config.toolSearch).toEqual({ enabled: false });
+    // Only what this session may offer, with the schema and description the MCP server gave each tool.
+    expect(sdk.config.tools.map((tool: any) => tool.name)).toEqual(["read_range", "get_sheets", "get_selection"]);
+    expect(sdk.config.tools[0]).toMatchObject({ description: "read_range description", parameters: schema, skipPermission: true, defer: "never" });
+    expect(sdk.config.availableTools.toArray()).toEqual(["builtin:ask_user", "custom:read_range", "custom:get_sheets", "custom:get_selection"]);
+  });
+  it("offers a client-supplied catalog as listed by the server, and lists it again when a session resumes", async () => {
+    ctx.mcp.toolNames = ["read_probe", "get_sheets"];
+    await manager.start(ctx, process.execPath, process.env);
+    expect(sdk.config.tools.map((tool: any) => tool.name)).toEqual(["get_sheets", "read_probe"]);
+    fakeBridge.tools.push({ name: "ext_demo__echo", description: "echo", inputSchema: schema });
+    ctx.mcp.toolNames = ["read_probe", "ext_demo__echo"];
+    ctx.resumeSessionId = "native-id";
+    await manager.start(ctx, process.execPath, process.env);
+    expect(sdk.resumeId).toBe("native-id");
+    expect(sdk.config.tools.map((tool: any) => tool.name)).toEqual(["read_probe", "ext_demo__echo"]);
+    fakeBridge.tools.pop();
+  });
+  it("runs a host tool through the MCP server and reports failures to the model instead of throwing", async () => {
+    const id = await manager.start(ctx, process.execPath, process.env);
+    const [readRange] = sdk.config.tools;
+    expect(await readRange.handler({ address: "A1" })).toMatchObject({ textResultForLlm: "read_range ok", resultType: "success" });
+    expect(bridge.calls.at(-1)).toMatchObject({ name: "read_range", args: { address: "A1" } });
+    bridge.reply = { content: [{ type: "text", text: "no such sheet" }], isError: true };
+    expect(await readRange.handler({ address: "A1" })).toMatchObject({ textResultForLlm: "no such sheet", resultType: "failure" });
+    bridge.fail = new Error("MCP error -32001: Request timed out");
+    expect(await readRange.handler({ address: "A1" })).toEqual({ textResultForLlm: "MCP error -32001: Request timed out", resultType: "failure", error: "MCP error -32001: Request timed out" });
+    expect(manager.has(id)).toBe(true);
+  });
+  it("lets Stop reach a tool call that is waiting on the application", async () => {
+    const id = await manager.start(ctx, process.execPath, process.env);
+    const stop = new AbortController();
+    sdk.run = async () => { await sdk.config.tools[0].handler({ address: "A1" }); };
+    await turn(id, stop.signal);
+    expect(bridge.calls.at(-1)?.signal).toBe(stop.signal);
+  });
+  it("closes the MCP connection with the session", async () => {
+    const id = await manager.start(ctx, process.execPath, process.env);
+    expect(bridge.closed).toBe(0);
+    await manager.close(id);
+    expect(bridge.closed).toBe(1);
   });
   it("returns native answers and streams messages without duplicating final text", async () => {
     const id = await manager.start(ctx, process.execPath, process.env);
@@ -170,14 +231,15 @@ describe("Copilot native question transport", () => {
     await expect(manager.start(ctx, process.execPath, process.env)).rejects.toThrow("Authentication failed");
     expect(sdk.open).toHaveBeenCalledTimes(1);
     expect(sdk.client.stopped).toBe(true);
+    expect(bridge.closed).toBe(1);
   });
   it.each([["word", false], ["powerpoint", false], ["excel", true]])("exposes only %s tools through the host fallback (Excel tools allowed: %s)", async (host, excel) => {
     ctx.mcp.env = { OFFICE_HOST: host };
     await manager.start(ctx, process.execPath, process.env);
     const tools = sdk.config.availableTools.toArray();
     expect(tools).toContain("builtin:ask_user");
-    expect(tools).toContain("mcp:excel-get_selection");
-    expect(tools.includes("mcp:excel-read_range")).toBe(excel);
+    expect(tools).toContain("custom:get_selection");
+    expect(tools.includes("custom:read_range")).toBe(excel);
   });
   it("refuses to start for a host it does not know", async () => {
     ctx.mcp.env = { OFFICE_HOST: "outlook" };
