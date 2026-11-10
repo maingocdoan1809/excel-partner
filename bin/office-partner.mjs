@@ -95,12 +95,14 @@ async function start() {
     stdio: ["ignore", out, err] });
   child.unref();
   writeFileSync(pidFile, String(child.pid));
-  for (let i = 0; i < 30; i++) {
+  // Right after an install Windows is still scanning thousands of new files, so a healthy start can take well over
+  // the few seconds it takes later; stop waiting early only if the process has already died.
+  for (let i = 0; i < 150; i++) {
     await new Promise((resolve) => setTimeout(resolve, 200));
     if (await health()) { console.log("Bridge ready at https://localhost:8765"); return; }
     if (!livePid()) break;
   }
-  rmSync(pidFile, { force: true });
+  if (!livePid()) rmSync(pidFile, { force: true });
   fail(`Bridge did not start. See ${path.join(dataDir, "bridge.err.log")}`);
 }
 async function stop() {
