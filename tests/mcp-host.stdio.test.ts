@@ -28,7 +28,8 @@ describe("excel-mcp process per OFFICE_HOST", () => {
   }, 30_000);
 
   it("refuses to start for an unknown host", () => {
-    const run = spawnSync(tsx, [cli], { env: { ...process.env, ...base, OFFICE_HOST: "outlook" }, encoding: "utf8", timeout: 30_000 });
+    const run = spawnSync(process.execPath, [path.join(root, "node_modules", "tsx", "dist", "cli.mjs"), cli], { env: { ...process.env, ...base, OFFICE_HOST: "outlook" }, encoding: "utf8", timeout: 30_000 });
+    expect(run.error).toBeUndefined();
     expect(run.status).toBe(2);
     expect(run.stderr).toMatch(/OFFICE_HOST/);
   }, 40_000);

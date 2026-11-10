@@ -152,7 +152,7 @@ export class OpencodeAdapter extends BaseCliAdapter {
   private readonly sessions = new Map<string, OpencodeSession>();
 
   private get command(): string {
-    return process.env.OPENCODE_BIN ?? "opencode";
+    return this.env.OPENCODE_BIN ?? "opencode";
   }
 
   protected probe(): CliProbe {

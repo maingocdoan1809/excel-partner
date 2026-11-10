@@ -79,6 +79,18 @@ function results(message: ApiMessage, value = "SENTINEL"): ChatMessage[] {
     .map(b => ({ type: "tool_result", tool_use_id: b.id, content: value })) }];
 }
 describe("Anthropic-compatible CLI gateway", () => {
+  it("authenticates maintenance, gates new requests, and refuses to drain pending official-client tool results", async () => {
+    const w = await start();
+    const control = (action: string, key = token) => fetch(`${w.url}/gateway/${action}`, { method: "POST", headers: { "x-api-key": key } });
+    expect((await control("maintenance", "wrong")).status).toBe(401);
+    expect((await control("maintenance")).status).toBe(200);
+    expect((await w.post()).status).toBe(503);
+    expect((await control("resume")).status).toBe(200);
+    const response = await w.post(); expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ stop_reason: "tool_use" });
+    expect((await control("maintenance")).status).toBe(409);
+    expect(w.adapter.turns).toHaveLength(1);
+  });
   it("routes explicit providers and aliases without silent provider fallback", () => {
     const config = ConfigSchema.parse({ aliases: { fast: { provider: "copilot", model: "small" } } });
     expect(routeModel("copilot/some/native/model", config).model).toBe("some/native/model");

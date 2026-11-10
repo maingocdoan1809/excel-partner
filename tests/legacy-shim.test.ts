@@ -6,7 +6,7 @@ import { NEW_PACKAGE, ensureOfficePartner, forward, globalRoot, installSpec, new
 
 const root = path.join("/npm", "global");
 const cli = newCliPath(root);
-const modules = path.join("/npm", "lib", "node_modules");
+const modules = path.resolve("/npm", "lib", "node_modules");
 
 /** A fake `spawnSync`: `npm root` answers `root`; an install makes the CLI appear; anything else is recorded. */
 function world(options: { installed?: boolean; installStatus?: number; npmRoot?: string | null; cliStatus?: number } = {}) {
@@ -35,7 +35,7 @@ describe("the excel-partner package that stays on npm after the rename", () => {
     expect(manifest.files).toEqual(["bin/", "README.md"]);
     const [a, b, c] = (manifest.version as string).split(".").map(Number);
     expect(a! > 0 || b! > 1 || c! > 21).toBe(true); // newer than 0.1.21, the last release under the old name
-    expect(Object.keys(main.bin)).toEqual(["office-partner", "agent-gateway"]); // no `excel-partner` here: that would clash with this package
+    expect(Object.keys(main.bin)).toEqual(["office-partner", "office-partner-doctor", "agent-gateway"]); // no `excel-partner` here: that would clash with this package
   });
 
   it("finds the global folder and the new command line in it", () => {
@@ -83,7 +83,7 @@ describe("the excel-partner package that stays on npm after the rename", () => {
   });
 
   it("also looks where this copy itself sits, because npm hides what looks like a secret in the path it prints", () => {
-    expect(ownGlobalRoot(path.join(modules, "excel-partner", "bin"))).toBe(modules);
+    expect(ownGlobalRoot(path.join(modules, "excel-partner", "bin"))).toBe(path.resolve(modules));
     expect(ownGlobalRoot(path.join("/work", "legacy", "excel-partner", "bin"))).toBeNull(); // a source checkout, not a global install
     const ownCli = newCliPath(modules);
     let installed = false;

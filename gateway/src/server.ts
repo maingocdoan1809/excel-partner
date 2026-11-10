@@ -29,6 +29,7 @@ export class GatewayServer {
   private url = "";
   private stopping = false;
   private ready = false;
+  private maintenance = false;
   private readonly probes = new Map<string, { message: ApiMessage; expires: number }>();
   private readonly probing = new Map<string, Promise<ApiMessage>>();
   private catalog?: { value: Awaited<ReturnType<GatewayServer["computeModels"]>>; expires: number };
@@ -127,11 +128,20 @@ export class GatewayServer {
     res.setHeader("access-control-allow-private-network", "true");
     res.setHeader("access-control-expose-headers", "request-id, x-agent-gateway-provider, x-agent-gateway-model, x-agent-gateway-usage");
     if (req.method === "OPTIONS") { res.writeHead(204); res.end(); return; }
-    if (req.method === "GET" && ["/", "/health"].includes(route)) return this.json(res, 200, { status: "ok", service: "agent-gateway", mode: "cli", ready: this.ready, sessions: this.engine?.activeSessions ?? 0, instance: process.env.AGENT_GATEWAY_INSTANCE ?? null });
+    if (req.method === "GET" && ["/", "/health"].includes(route)) return this.json(res, 200, { status: "ok", service: "agent-gateway", mode: "cli", ready: this.ready, sessions: this.engine?.activeSessions ?? 0, busySessions: this.engine?.busySessions ?? 0, instance: process.env.AGENT_GATEWAY_INSTANCE ?? null });
     const valid = matches(typeof req.headers["x-api-key"] === "string" ? req.headers["x-api-key"] : undefined, this.options.token)
       || matches(req.headers.authorization, `Bearer ${this.options.token}`);
     if (!valid) throw new ApiError(401, "authentication_error", "Invalid gateway token");
+    if (req.method === "POST" && route === "/gateway/maintenance") {
+      const busy = this.engine.busySessions > 0 || this.probing.size > 0;
+      if (busy) return this.json(res, 409, { busy: true });
+      this.maintenance = true; return this.json(res, 200, { busy: false, maintenance: true });
+    }
+    if (req.method === "POST" && route === "/gateway/resume") { this.maintenance = false; return this.json(res, 200, { maintenance: false }); }
+    if (this.maintenance && ["/v1/messages", "/v1/models", "/gateway/warmup"].includes(route)) throw new ApiError(503, "api_error", "Gateway is switching releases; retry after it restarts");
     if (req.method === "POST" && route === "/gateway/shutdown" && this.options.onShutdown) {
+      if (this.engine.busySessions > 0 || this.probing.size > 0) return this.json(res, 409, { busy: true });
+      this.maintenance = true;
       this.json(res, 200, { status: "stopping" });
       setImmediate(this.options.onShutdown); return;
     }

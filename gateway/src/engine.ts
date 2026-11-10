@@ -107,6 +107,7 @@ export class GatewayEngine {
     });
   }
   get activeSessions() { return this.jobs.size; }
+  get busySessions() { return [...this.jobs.values()].filter(job => !job.idle || job.pending.size > 0).length; }
   tools(id: string) {
     const job = this.jobs.get(id);
     if (!job || job.disposed) throw new ApiError(404, "not_found_error", "Tool session expired");

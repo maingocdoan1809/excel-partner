@@ -157,7 +157,7 @@ export class ClaudeAdapter extends BaseCliAdapter {
   }
 
   private get command(): string {
-    return process.env.CLAUDE_BIN ?? "claude";
+    return this.env.CLAUDE_BIN ?? "claude";
   }
 
   protected override async checkLogin(
@@ -170,7 +170,7 @@ export class ClaudeAdapter extends BaseCliAdapter {
     } catch {
       /* fall through */
     }
-    if (process.env.ANTHROPIC_API_KEY) return { status: "ready", hint: null };
+    if (this.env.ANTHROPIC_API_KEY) return { status: "ready", hint: null };
     return { status: "login_required", hint: `Run \`claude\` on ${cliEnvironment()} and complete /login, then retry.` };
   }
 
@@ -204,7 +204,7 @@ export class ClaudeAdapter extends BaseCliAdapter {
         [MCP_SERVER_NAME]: { command: ctx.mcp.command, args: ctx.mcp.args, env: ctx.mcp.env },
       } }), { mode: 0o600 });
       const conversationId = ctx.resumeSessionId ?? randomUUID();
-      const model = ctx.model ?? process.env.CLAUDE_MODEL;
+      const model = ctx.model ?? this.env.CLAUDE_MODEL;
       const systemPrompt = ctx.systemPrompt ?? SYSTEM_PROMPT;
       const webTools = ctx.mcp.env.EXCEL_WEB_SEARCH === "1" ? ["WebSearch", "WebFetch"] : [];
       let session: ClaudeSession | undefined;

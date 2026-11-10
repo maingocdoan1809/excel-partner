@@ -95,6 +95,7 @@ export interface ProviderModelCatalog {
  * normalised `ProviderEvent`s, never CLI-specific output.
  */
 export interface ProviderAdapter {
+  runtimeRevision?(): string;
   listCommands?(providerSessionId?: string): Promise<import("../../protocol/src/commands.js").ProviderCommand[]>;
   readonly id: ProviderId;
   /** Whether the CLI is installed and what it supports. */
@@ -122,6 +123,8 @@ export interface ProviderAdapter {
 }
 
 export interface ProviderRuntime {
+  /** Immutable per-profile child environment; credentials remain provider-owned. */
+  env?: NodeJS.ProcessEnv;
   bridgeUrl: string;
   mcp: { command: string; args: string[] };
   logger: { debug(msg: string, extra?: unknown): void; warn(msg: string, extra?: unknown): void };

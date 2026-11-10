@@ -13,9 +13,11 @@
   },
   "bin": {
     "office-partner": "bin/office-partner.mjs",
+    "office-partner-doctor": "bin/doctor.mjs",
     "agent-gateway": "gateway/bin/agent-gateway.mjs"
   },
   "files": [
+    "npm-shrinkwrap.json",
     "addin/assets/",
     "addin/dist/",
     "addin/manifest.xml",
@@ -27,6 +29,7 @@
     "gateway/dist/*.mjs",
     "gateway/README.md",
     "docs/mcp-runtime.md",
+    "docs/diagnostics.md",
     "dist/bridge/src/",
     "dist/runtime/src/",
     "dist/excel_mcp/src/",
@@ -37,7 +40,7 @@
     "!**/*.map"
   ],
   "engines": {
-    "node": ">=20"
+    "node": "^20.19.0 || >=22.12.0"
   },
   "scripts": {
     "update:codex-commands": "node scripts/update-codex-commands.mjs",

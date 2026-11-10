@@ -5,7 +5,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import https from "node:https";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { ConfigSchema, dataDir, loadConfig } from "../dist/config.mjs";
 
 const dir = dataDir();
@@ -124,7 +124,10 @@ async function setup() {
 const runKey = "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run", runName = "Agent Gateway";
 function autostart(enable) {
   if (process.platform !== "win32") { console.log("Automatic startup is only managed on Windows."); return; }
-  const args = enable ? ["add", runKey, "/v", runName, "/t", "REG_SZ", "/d", `"${process.execPath}" "${fileURLToPath(import.meta.url)}" start`, "/f"]
+  const startup = process.env.OFFICE_PARTNER_RECOVERY_ENTRY
+    ? `"${process.execPath}" "${process.env.OFFICE_PARTNER_RECOVERY_ENTRY}" start gateway`
+    : `"${process.execPath}" "${fileURLToPath(import.meta.url)}" start`;
+  const args = enable ? ["add", runKey, "/v", runName, "/t", "REG_SZ", "/d", startup, "/f"]
     : ["delete", runKey, "/v", runName, "/f"];
   const result = spawnSync("reg.exe", args, { stdio: "ignore", windowsHide: true });
   if (result.status !== 0 && enable) throw new Error("Could not register Windows sign-in startup");
@@ -179,6 +182,15 @@ async function main() {
   const argv = process.argv.slice(2);
   const copyToken = argv.includes("--copy");
   const [command = "status", a, b, c, d] = argv.filter(arg => arg !== "--copy");
+  if (process.env.OFFICE_PARTNER_GATEWAY_MANAGED !== "1") {
+    const packageRoot = path.dirname(root);
+    if (["setup", "uninstall"].includes(command)) {
+      const result = spawnSync(process.execPath, [path.join(packageRoot, "bin", "office-partner.mjs"), command, "gateway"], { stdio: "inherit", windowsHide: true });
+      process.exitCode = result.status ?? 1; return;
+    }
+    const { dispatchActive } = await import(pathToFileURL(path.join(packageRoot, "bin", "manage.mjs")).href);
+    if (dispatchActive(packageRoot, ["gateway", ...argv])) return;
+  }
   if (command === "setup") await setup();
   else if (command === "start") await start();
   else if (command === "stop") await stop();

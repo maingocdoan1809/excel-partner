@@ -13,29 +13,20 @@ Excel task pane  <-->  local bridge (localhost:8765)  <-->  your provider CLI (C
 ```
 
 - The task pane is the chat UI inside Excel, Word or PowerPoint. Changes run through Office.js in the file you have open.
-- The bridge runs on your PC. It uses the provider CLI you already installed and signed in to. Office Partner never asks for or stores an API key.
+- The bridge runs on your PC. It can install private, pinned provider CLIs for each Office Partner release. Existing installations can keep using their system CLI during migration. Office Partner never asks for or stores an API key.
 - Billing, usage limits and data policy belong to the provider you choose.
 
 ## Requirements
 
 - Windows with Excel, Word and/or PowerPoint desktop (ExcelApi 1.9+, WordApi 1.1+, PowerPointApi 1.2+; many features need a newer version, and a tool that needs one says so instead of failing)
-- Node.js 20+ and npm, installed on Windows
-- At least one provider CLI, installed and signed in on Windows (not only inside WSL)
+- Node.js 20.19+ or 22.12+ and npm, installed on Windows
+- An account with at least one supported provider; sign-in stays under the provider CLI's control
 
 ## Quick start
 
 Run in **Windows PowerShell**.
 
-**1. Install a provider** (pick at least one):
-
-| Provider | Install | Sign in |
-| --- | --- | --- |
-| Claude Code | `npm install -g @anthropic-ai/claude-code` | `claude` |
-| GitHub Copilot | `npm install -g @github/copilot` | `copilot login` |
-| Codex | `npm install -g @openai/codex` | `codex login` |
-| OpenCode | `npm install -g opencode-ai` | `opencode auth login` |
-
-**2. Install Office Partner** (save your work and close Word, Excel and PowerPoint first):
+**1. Install Office Partner** (save your work and close Word, Excel and PowerPoint first):
 
 ```powershell
 npm install -g office-partner
@@ -45,7 +36,9 @@ office-partner status
 
 `setup` trusts a localhost certificate for your user, registers the add-in, starts the bridge and adds it to Windows start-up. A healthy bridge prints `Bridge running at https://localhost:8765`.
 
-**3. Use it:** reopen Excel, Word or PowerPoint, open a file, choose **Home > Office Partner**, pick a provider, select cells, text or a slide shape, type a request, press **Enter**. (**Ctrl+Enter** adds a new line.)
+**2. Choose providers.** Interactive setup asks which private CLIs to install (`copilot`, `claude`, `codex`, `opencode`). Enter keeps existing system CLIs. For an unattended selection use `office-partner setup --providers copilot,codex`; `--providers none` keeps external CLIs. System CLI files and PATH are never changed. Sign in with `office-partner providers login copilot` (substitute the provider name); Copilot also supports sign-in in Settings. A private CLI that needs sign-in stays pending while the previous selection is retained.
+
+**3. Use it:** reopen Excel, Word or PowerPoint, open a file, choose **Home > Office Partner**, pick a provider, select cells, text or a slide shape, type a request, press **Enter**. (**Ctrl+Enter** adds a new line.) Settings > App & storage > System & recovery also manages private providers. See [runtime management and recovery](docs/diagnostics.md).
 
 ## What it can do
 
@@ -190,11 +183,11 @@ Cells that already hold something are not overwritten unless you agree; cells th
 | `office-partner uninstall` | Stop, unregister and remove start-up and certificate trust |
 | `office-partner help` | Full CLI usage |
 
-**Update:** open **Settings > Updates** in the task pane. It shows the installed version, **Check for updates** asks the npm registry, and when a newer release exists **Update now** (click twice to confirm) installs it. Excel does not need to be closed: the add-in is served by the local bridge, so the connection drops for about a minute while the bridge and gateway restart, then the pane reloads by itself and says which version it is now on. It refuses to start while the assistant is working, and only works for the copy installed with `npm install -g` (a source checkout says so; run `git pull` and `npm run build` there). If something goes wrong the old version is started again and Settings shows the error; the log is `%LOCALAPPDATA%\Excel Partner\update.log`.
+**Update:** use **Settings > Updates** or `office-partner update`. A complete release, dependencies and selected provider versions are staged and verified before services stop. Busy services refuse the switch. If activation fails, the retained release and CLI selection are restored. Settings reports failures; the update log is `%LOCALAPPDATA%\Excel Partner\update.log`. Source checkouts can also stage managed releases. A global npm install updates the launcher; use `office-partner update` to switch the managed installation.
 
-From a terminal: `office-partner update` does the same (`--from <npm spec or .tgz>` installs that instead of the latest release). Reopen the pane and start a new chat afterwards. Configuration, skills and templates are kept.
+`office-partner update --from office-partner@<exact-version>` or `--from <path.tgz>` selects an artifact. `office-partner versions` lists retained releases and provider versions. `office-partner rollback [version]` restores a complete cached release without a download. Saved conversations keep their recorded adapter/SDK/CLI profile; failed turns are never replayed during fallback. Settings > App & storage > System & recovery offers rollback, repair, diagnostics and temporary debug logging. See [diagnostics](docs/diagnostics.md) for migration, recovery commands and validation limits.
 
-**Uninstall:** `office-partner uninstall`, then `npm uninstall -g office-partner` (and `npm uninstall -g excel-partner` if the old name is still installed), then restart Word, Excel and PowerPoint. Local data stays on disk (see below).
+**Uninstall:** `office-partner uninstall all`, then `npm uninstall -g office-partner` (and `npm uninstall -g excel-partner` if the old name is still installed), then restart Word, Excel and PowerPoint. Managed app releases and CLIs are removed after both add-in and gateway are uninstalled. Uninstalling one retains shared runtimes for the other. User data, provider sign-ins/history, the recovery launcher and external CLIs stay on disk. Running only `npm uninstall -g` does not perform this application cleanup.
 
 ## External MCP servers
 
@@ -237,6 +230,8 @@ Useful environment variables: `BRIDGE_ALLOW_OFFICE_JS`, `BRIDGE_PYTHON_BIN`, `BR
 The bridge listens only on `localhost:8765` over HTTPS. Chat history is stored in the task pane; the usage ledger (IDs, provider, model, duration, token counts) is local and contains no workbook content. Click the info icon beside **Ask/Auto** to see session tokens and export usage as CSV.
 
 ## Troubleshooting
+
+Run `office-partner doctor --json --output partner-report.json` to save a diagnostic report, or `office-partner doctor --provider copilot --probe` to check that CLI's version and sign-in status without a model request. `office-partner doctor addin --mcp --host excel` checks the local MCP tool catalog. A standalone `office-partner-doctor` works when the bridge or its dependencies cannot load. See [diagnostics](docs/diagnostics.md) for scope, privacy and exit codes.
 
 Start with `office-partner doctor`. Then:
 

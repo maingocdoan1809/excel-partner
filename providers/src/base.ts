@@ -50,7 +50,7 @@ export abstract class BaseCliAdapter implements ProviderAdapter {
   protected abstract probe(): CliProbe;
 
   protected get env(): NodeJS.ProcessEnv {
-    return process.env;
+    return this.runtime.env ?? process.env;
   }
 
   async detect(force = false): Promise<ProviderDetection> {

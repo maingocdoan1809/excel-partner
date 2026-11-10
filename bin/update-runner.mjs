@@ -1,16 +1,15 @@
 #!/usr/bin/env node
-// Runs an update that the bridge started from Settings. The bridge copies this file and update.mjs to a temporary
-// folder first: the installed package is replaced while this runs, and the bridge itself is stopped on the way.
+// Detached release management, copied with the dependency-free bin tools before services stop.
 //
 // Environment: EP_ROOT (installed package), EP_DATA (data folder), EP_SPEC (npm spec), EP_FROM (version before),
 // EP_GATEWAY ("1" when the gateway is set up and must be started again).
-import { spawnSync } from "node:child_process";
 import { rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { setTimeout as sleep } from "node:timers/promises";
-import { installedVersion, packageNameOf, stopPackageProcesses, updatePackage, writeUpdateStatus } from "./update.mjs";
+import { packageNameOf, writeUpdateStatus } from "./update.mjs";
+import { managementMain } from "./manage.mjs";
 
 const root = process.env.EP_ROOT;
 const dataDir = process.env.EP_DATA;
@@ -34,19 +33,11 @@ try {
   status({ state: "running", step: "preparing", message: "Getting ready", pid: process.pid, error: null, to: null, finishedAt: null });
   // Give the bridge time to answer the request that started this, and the pane time to show "Updating".
   await sleep(1500);
-  const result = await updatePackage({
-    root,
-    dataDir,
-    nodePath: process.execPath,
-    wasRunning: true,
-    spec,
-    report: (step) => status({ state: "running", step, message: STEP_TEXT[step] ?? step }),
-    stop: async () => { stopPackageProcesses({ root }); },
-  });
-  if (process.env.EP_GATEWAY === "1") {
-    spawnSync(process.execPath, [path.join(result.installedRoot, "bin", "office-partner.mjs"), "gateway", "start"], { cwd: dataDir, stdio: "inherit", windowsHide: true });
-  }
-  status({ state: "done", step: "done", message: "Updated", to: result.version ?? installedVersion(result.installedRoot), finishedAt: new Date().toISOString() });
+  const action = ["update", "rollback", "repair"].includes(process.env.EP_ACTION) ? process.env.EP_ACTION : "update";
+  const argv = action === "update" ? ["update", "--from", spec] : action === "rollback" ? ["rollback", ...(process.env.EP_TARGET_VERSION ? [process.env.EP_TARGET_VERSION] : [])] : ["repair"];
+  const result = await managementMain(argv, { root, dataDir,
+    report: step => status({ state: "running", step, message: STEP_TEXT[step] ?? step }) });
+  status({ state: "done", step: "done", message: action === "update" ? "Updated" : action === "rollback" ? "Rolled back" : "Repaired", to: result?.version ?? null, finishedAt: new Date().toISOString() });
   removeOwnFolder();
 } catch (error) {
   console.error(error instanceof Error ? error.message : String(error));

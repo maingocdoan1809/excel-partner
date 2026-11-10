@@ -1,5 +1,6 @@
 import http from "node:http";
 import https from "node:https";
+import { timingSafeEqual } from "node:crypto";
 import os from "node:os";
 import path from "node:path";
 import { createReadStream, readFileSync, statSync } from "node:fs";
@@ -22,6 +23,7 @@ import { ProviderRoutes } from "./routes/providers.js";
 import { SkillRoutes } from "./routes/skills.js";
 import { TestingRoutes } from "./routes/testing.js";
 import { WorkspaceRoutes } from "./routes/workspaces.js";
+import { SystemRoutes } from "./routes/system.js";
 import { SavedReferences } from "./saved-references.js";
 import { SessionManager } from "./session-manager.js";
 import { discoverSessionMcp } from "./session-mcp.js";
@@ -42,6 +44,7 @@ import { enrichWindowsSelection, type SelectionEnricher } from "./windows-select
 import { activateWorkbook } from "./windows-workspace.js";
 
 export interface BridgeOptions {
+  onShutdown?: () => void;
   selectionEnricher?: SelectionEnricher;
   registry?: ProviderRegistry;
   logger?: Logger;
@@ -77,16 +80,19 @@ export class Bridge {
   private heartbeat: NodeJS.Timeout | null = null;
   private reaper: NodeJS.Timeout | null = null;
   private readonly startedAt = Date.now();
+  private maintenance = false;
+  private readonly onShutdown?: () => void;
   private readonly skills: SkillStore;
   private readonly logins = new ProviderLoginManager();
   private readonly mcpServers: McpServers;
   private readonly updater: UpdateService | null;
   private readonly panes: PaneSockets;
   private readonly routes: {
-    files: FileRoutes; mcp: McpRoutes; providers: ProviderRoutes; skills: SkillRoutes; testing: TestingRoutes; workspaces: WorkspaceRoutes;
+    files: FileRoutes; mcp: McpRoutes; providers: ProviderRoutes; skills: SkillRoutes; testing: TestingRoutes; workspaces: WorkspaceRoutes; system: SystemRoutes;
   };
 
   constructor(config: BridgeConfig, options: BridgeOptions = {}) {
+    this.onShutdown = options.onShutdown;
     this.config = config;
     const enrichSelection = options.selectionEnricher ?? enrichWindowsSelection;
     const usage = new UsageStore(options.usageFile === undefined
@@ -161,6 +167,7 @@ export class Bridge {
 
     const discoverMcp = (session: WorkbookSession) => discoverSessionMcp(this.mcpServers, config.allowOfficeJs, session);
     const turns = new TurnRunner({
+      isUpdating: () => this.maintenance,
       config, logger: this.logger, providers: this.providers, providerSessions, delegations, externalTools: this.gateway.externalTools,
       usage, skills: this.skills, systemPrompt, savedReferences, references, enrichSelection, discoverMcp,
     });
@@ -170,6 +177,7 @@ export class Bridge {
       isTrustedRequest: req => this.isTrustedRequest(req), addinBuildId: () => this.addinBuildId(),
     });
     this.routes = {
+      system: new SystemRoutes(this.sessions, this.providers, this.updater, () => this.logins.isBusy),
       files: new FileRoutes({ sessions: this.sessions, backups, logger: this.logger, activateWorkbook: options.activateWorkbook ?? activateWorkbook }),
       mcp: new McpRoutes({ sessions: this.sessions, mcpServers: this.mcpServers, discover: discoverMcp }),
       providers: new ProviderRoutes({ sessions: this.sessions, providers: this.providers, logins: this.logins, usage, logger: this.logger }),
@@ -255,6 +263,23 @@ export class Bridge {
     const url = new URL(req.url ?? "/", "http://localhost");
     const method = req.method;
     const { files, mcp, providers, skills, testing, workspaces } = this.routes;
+    if (this.maintenance && url.pathname.startsWith("/session/") && method !== "GET") return sendJson(res, 503, { error: "Office Partner is switching releases. Retry after it reconnects." });
+    if (url.pathname === "/session/system") return this.routes.system.handle(req, res, url);
+
+    if (method === "POST" && ["/admin/maintenance", "/admin/resume", "/admin/shutdown"].includes(url.pathname)) {
+      const configured = process.env.OFFICE_PARTNER_CONTROL_TOKEN, supplied = req.headers["x-office-partner-control"];
+      if (!configured || typeof supplied !== "string" || Buffer.byteLength(configured) !== Buffer.byteLength(supplied)
+        || !timingSafeEqual(Buffer.from(configured), Buffer.from(supplied))) return sendJson(res, 401, { error: "unauthorized" });
+      const busy = this.logins.isBusy || this.sessions.list().some(session => session.isBusy);
+      if (url.pathname === "/admin/resume") { this.maintenance = false; return sendJson(res, 200, { busy, maintenance: false }); }
+      if (busy) return sendJson(res, 409, { busy: true });
+      this.maintenance = true;
+      if (url.pathname === "/admin/shutdown") {
+        if (!this.onShutdown) return sendJson(res, 503, { error: "shutdown_unavailable" });
+        sendJson(res, 200, { status: "stopping" }); setImmediate(this.onShutdown); return;
+      }
+      return sendJson(res, 200, { busy: false, maintenance: true });
+    }
 
     if (url.pathname === "/session/mcp") return mcp.handle(req, res);
     if (method === "GET" && (url.pathname === "/" || url.pathname === "/index.html")) return this.serveStandalonePage(res);
@@ -263,6 +288,10 @@ export class Bridge {
         status: "ok",
         name: "excel-ai-addin-bridge",
         protocolVersion: PROTOCOL_VERSION,
+        instance: process.env.OFFICE_PARTNER_BRIDGE_INSTANCE ?? null,
+        controlSupported: true,
+        busy: this.logins.isBusy || this.sessions.list().some(session => session.isBusy),
+        maintenance: this.maintenance,
         uptimeMs: Date.now() - this.startedAt,
         tls: Boolean(this.config.tls),
         sessions: this.sessions.list().map((session) => session.toJSON()),

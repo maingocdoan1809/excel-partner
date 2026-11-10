@@ -6,11 +6,10 @@ import https from "node:https";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import selfsigned from "selfsigned";
-import { stopPackageProcesses, updatePackage } from "./update.mjs";
+import runtimeStore from "./runtime-store.cjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const dataDir = path.join(process.env.LOCALAPPDATA || os.homedir(), "Excel Partner");
+const dataDir = runtimeStore.home();
 const cert = path.join(dataDir, "localhost.crt");
 const key = path.join(dataDir, "localhost.key");
 const pidFile = path.join(dataDir, "bridge.pid");
@@ -26,7 +25,7 @@ function requireWindows() {
 function powershell(action, extra = []) {
   const result = spawnSync("powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", windowsScript,
     "-Action", action, "-DataDir", dataDir, "-ManifestPath", manifest,
-    "-NodePath", process.execPath, "-CliPath", fileURLToPath(import.meta.url), ...extra], { stdio: "inherit" });
+    "-NodePath", process.execPath, "-CliPath", existsSync(path.join(dataDir, "recovery", "recovery.mjs")) ? path.join(dataDir, "recovery", "recovery.mjs") : fileURLToPath(import.meta.url), ...extra], { stdio: "inherit" });
   if (result.error) throw result.error;
   if (result.status !== 0) fail(`Windows setup failed (${action}, exit ${result.status ?? "unknown"}).`);
 }
@@ -38,8 +37,12 @@ function livePid() {
 }
 function bridgeEnv() {
   return { ...process.env, BRIDGE_CERT: cert, BRIDGE_KEY: key, BRIDGE_CONFIG: configFile,
+    OFFICE_PARTNER_DATA_DIR: dataDir, OFFICE_PARTNER_BRIDGE_INSTANCE: cryptoInstance(),
+    OFFICE_PARTNER_CONTROL_TOKEN: existsSync(path.join(dataDir, "control-token.txt")) ? readFileSync(path.join(dataDir, "control-token.txt"), "utf8").trim() : undefined,
+    OFFICE_PARTNER_LOG_FILE: path.join(dataDir, "bridge-events.log"),
     BRIDGE_USAGE_FILE: process.env.BRIDGE_USAGE_FILE ?? path.join(dataDir, "usage.jsonl") };
 }
+function cryptoInstance() { return `${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}`; }
 async function health() {
   return new Promise((resolve) => {
     if (!existsSync(cert)) return resolve(false);
@@ -67,6 +70,7 @@ async function ensureCertificate() {
     console.log(`Reusing the Agent Gateway certificate from ${shared}`);
     return;
   }
+  const { default: selfsigned } = await import("selfsigned");
   const pems = await selfsigned.generate([{ name: "commonName", value: "localhost" }], {
     algorithm: "sha256",
     notAfterDate: new Date(Date.now() + 365 * 86400000),
@@ -107,12 +111,37 @@ async function start() {
 }
 async function stop() {
   const pid = livePid();
+    const { controlRequest } = await import("./manage.mjs");
+    const status = await controlRequest(dataDir, "addin", "health");
+    if (status.busy) fail("The assistant is still working. Stop the response before stopping the bridge.");
+    if (status.error) fail(status.error);
+    if (status.running) {
+      const shutdown = await controlRequest(dataDir, "addin", "shutdown");
+      if (shutdown.ok) {
+        for (let i = 0; i < 100; i++) {
+          if ((await controlRequest(dataDir, "addin", "health")).absent) { rmSync(pidFile, { force: true }); return; }
+          await new Promise(resolve => setTimeout(resolve, 100));
+        }
+        fail("Bridge shutdown timed out. Use office-partner doctor before retrying.");
+      }
+      if (shutdown.error === "SERVICE_BUSY" || status.controlled) fail(shutdown.error ?? "SERVICE_CONTROL_UNAVAILABLE");
+      if (!pid) fail("Legacy bridge has no process record. Stop it from its original installation.");
+    }
   if (pid) {
+    // Legacy bridge: confirm this PID is Node executing this installation before terminating it.
+    if (process.platform !== "win32") fail("Legacy bridge ownership could not be verified. Stop it from its original installation.");
+    const script = `Get-CimInstance Win32_Process -Filter 'ProcessId = ${pid}' | Select-Object Name,CommandLine | ConvertTo-Json -Compress`;
+    const observed = spawnSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-EncodedCommand", Buffer.from(script, "utf16le").toString("base64")], { encoding: "utf8", windowsHide: true, timeout: 5000 });
+    let processInfo; try { processInfo = JSON.parse(observed.stdout); } catch { fail("Could not verify the recorded bridge process."); }
+    const escapedBridge = bridge.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    if (!/^node(?:\.exe)?$/i.test(processInfo?.Name ?? "") || !new RegExp(escapedBridge + '(?=["\\s]|$)', "i").test(processInfo?.CommandLine ?? "")) fail("Bridge PID belongs to another process; no process was stopped.");
     process.kill(pid);
     for (let i = 0; i < 25; i++) {
       try { process.kill(pid, 0); } catch { break; }
       await new Promise((resolve) => setTimeout(resolve, 200));
     }
+    try { process.kill(pid, 0); fail("Bridge did not stop; its process record was retained."); }
+    catch (error) { if (error.code !== "ESRCH") throw error; }
     console.log(`Stopped bridge process ${pid}`);
   }
   rmSync(pidFile, { force: true });
@@ -124,7 +153,7 @@ const gatewayDir = process.env.AGENT_GATEWAY_HOME ?? path.join(process.env.LOCAL
 /** Runs one Agent Gateway CLI command; its own output and exit code are passed through. */
 function gateway(args) {
   if (!existsSync(gatewayBin)) fail("This installation is missing the gateway. Reinstall office-partner.");
-  const result = spawnSync(process.execPath, [gatewayBin, ...args], { stdio: "inherit" });
+  const result = spawnSync(process.execPath, [gatewayBin, ...args], { stdio: "inherit", env: { ...process.env, OFFICE_PARTNER_GATEWAY_MANAGED: "1" } });
   if (result.error) throw result.error;
   if (result.status !== 0) { process.exitCode = result.status ?? 1; return false; }
   return true;
@@ -134,7 +163,7 @@ function tail(file, lines = 40) {
   return readFileSync(file, "utf8").split(/\r?\n/).filter(Boolean).slice(-lines);
 }
 function logsAddin() {
-  for (const name of ["bridge.err.log", "bridge.log"]) {
+  for (const name of ["bridge.err.log", "bridge.log", "bridge-events.log"]) {
     console.log(`--- ${path.join(dataDir, name)}`);
     console.log(tail(path.join(dataDir, name)).join("\n") || "(empty)");
   }
@@ -247,23 +276,6 @@ async function workbookBackups(rest) {
   if (!list.length) console.log("No backups yet. The assistant saves a copy of the workbook, document or presentation before it does something Undo cannot reverse (free-form Office.js, deleting sheets, charts, pivots...). Only the newest 10 are kept.");
   for (const item of list) console.log(`  ${item.savedAt.slice(0, 19).replace("T", " ")}  ${String(Math.max(1, Math.round(item.size / 1024))).padStart(7)} KB  ${item.file}`);
 }
-async function doctorAddin() {
-  const line = (ok, text) => console.log(`${ok === true ? "[ ok ]" : ok === false ? "[fail]" : "[warn]"} ${text}`);
-  line(Number(process.versions.node.split(".")[0]) >= 20, `Node.js ${process.versions.node} (20 or later required)`);
-  const hasCert = existsSync(cert) && existsSync(key);
-  line(hasCert, hasCert ? "Certificate present" : "Certificate missing. Run: office-partner setup");
-  if (hasCert) {
-    const days = Math.floor((new Date(new X509Certificate(readFileSync(cert)).validTo).getTime() - Date.now()) / 86400000);
-    line(days > 30 ? true : days > 0 ? null : false, `Certificate valid for ${days} more day(s)`);
-  }
-  const run = spawnSync("reg.exe", ["query", "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run", "/v", "Excel Partner Bridge"], { stdio: "ignore", windowsHide: true });
-  line(run.status === 0, run.status === 0 ? "Starts automatically at Windows sign-in" : "No sign-in startup entry. Run: office-partner setup");
-  const healthy = await health();
-  line(healthy, healthy ? "Bridge running at https://localhost:8765" : "Bridge not running. Run: office-partner start");
-  const extra = readConfig().allowedHosts;
-  line(true, Array.isArray(extra) && extra.length ? `Also answers to: ${extra.join(", ")}` : "Answers to localhost only. To reach it by another name (WSL IP): office-partner allow-host <name>");
-}
-
 const TARGETS = { addin: "addin", app: "addin", gateway: "gateway", all: "all" };
 const HELP = `Usage: office-partner <command> [addin|gateway|all]
 
@@ -274,7 +286,15 @@ const HELP = `Usage: office-partner <command> [addin|gateway|all]
   status     Show what is running (default: both).
   info       Show the gateway URL and token (add --copy to copy the token).
   logs       Show recent log lines.
-  doctor     Check the installation and explain what to fix (default: both).
+  doctor     Check installation/services (default: both). --provider <id> --probe checks a CLI; --mcp checks local tool schemas.
+             --integrity hashes retained releases/CLIs. --json prints a report; --output <new-file.json> saves it.
+             --host excel|word|powerpoint selects MCP host.
+  providers  list | install <provider> | remove <provider> | login <provider>. CLI versions are pinned by this release.
+  versions   Show retained releases and managed CLI versions.
+  rollback   Restore the previous complete release, or rollback <version>.
+  repair     Verify the release and repair its managed runtimes while services are stopped.
+  diagnostics export <new-file.json> saves diagnostic metadata for support.
+  debug      on | off (on expires after 15 minutes).
   login      Sign in once for the QA assistant: login <name> <url> [--origin <url>]. Also: sessions, logout <name>.
   knowledge  What the assistant has learned about each system: knowledge [<url>] | show <url> <note> | delete <url> <note> | path.
   scripts    Playwright regression scripts saved per test case: scripts [<url>] | show <url> <case id> | delete <url> <case id> | path.
@@ -289,6 +309,12 @@ Examples: office-partner setup            office-partner setup gateway
 
 async function main() {
   let args = process.argv.slice(2).filter(arg => arg !== "--help");
+  const providersAt = args.indexOf("--providers");
+  const providersSpec = providersAt >= 0 ? args[providersAt + 1] : undefined;
+  if (providersAt >= 0 && (!providersSpec || providersSpec.startsWith("--"))) fail("Use setup --providers copilot,codex (or none).");
+  const skipProviders = args.includes("--skip-providers");
+  args = args.filter((arg, index) => arg !== "--skip-providers" && (providersAt < 0 || index !== providersAt && index !== providersAt + 1));
+  if (providersSpec && providersSpec !== "none" && !providersSpec.split(",").every(id => runtimeStore.ids.includes(id))) fail("Unknown provider in --providers.");
   // `update --from <npm spec or .tgz>` installs that instead of the latest release (mirrors, offline, testing).
   const fromAt = args.indexOf("--from");
   const updateSpec = fromAt >= 0 ? args[fromAt + 1] : undefined;
@@ -298,6 +324,20 @@ async function main() {
   }
   const command = args[0] || "help";
   if (command === "help" || process.argv.includes("--help")) { console.log(HELP); return; }
+  if (command === "doctor" || command === "gateway" && args[1] === "doctor") {
+    const { doctorMain } = await import("./doctor.mjs");
+    process.exitCode = await doctorMain(command === "doctor" ? args.slice(1) : ["gateway", ...args.slice(2)], { root }).catch(() => {
+      console.error("Doctor could not run. Check doctor arguments, the report output destination and the bin/doctor files.");
+      return 2;
+    });
+    return;
+  }
+  if (["providers", "versions", "rollback", "repair", "diagnostics", "debug", "update"].includes(command)) {
+    const { managementMain } = await import("./manage.mjs");
+    await managementMain(command === "update" && updateSpec ? ["update", "--from", updateSpec] : args, { root, dataDir }); return;
+  }
+  const { dispatchActive } = await import("./manage.mjs");
+  if (command !== "setup" && dispatchActive(root, args, dataDir)) return;
   if (command === "gateway") { gateway(args.slice(1)); return; }
   if (command === "login" || command === "sessions" || command === "logout") { await testSessions(command, args.slice(1)); return; }
   if (command === "knowledge") { await siteKnowledge(args.slice(1)); return; }
@@ -311,6 +351,32 @@ async function main() {
   const everything = ["status", "doctor", "update", "info", "token"].includes(command);
   const target = given ?? (everything ? "all" : "addin");
   const wantAddin = target !== "gateway", wantGateway = target !== "addin";
+  if (command === "setup") {
+    const { installRecovery, ensureBaseline } = await import("./manage.mjs");
+    const { installRuntime } = await import("./runtime-manager.mjs");
+    let selected = providersSpec;
+    if (!skipProviders && selected === undefined && process.stdin.isTTY && !runtimeStore.readState(dataDir).selected.length) {
+      const { createInterface } = await import("node:readline/promises");
+      const input = createInterface({ input: process.stdin, output: process.stdout });
+      try { selected = (await input.question("Providers to install (copilot, claude, codex, opencode; comma separated; Enter keeps existing CLIs): ")).trim() || "none"; }
+      finally { input.close(); }
+      if (selected !== "none" && !selected.split(",").every(id => runtimeStore.ids.includes(id))) fail("Unknown provider selection.");
+    }
+    installRecovery(root, dataDir);
+    const baseline = ensureBaseline(root, dataDir);
+    if (!skipProviders && selected && selected !== "none") {
+      for (const provider of selected.split(",")) {
+        console.log(`Installing the private ${provider} CLI version for this release. Your system CLI is kept.`);
+        try { await installRuntime(root, provider, { dataDir, adapterRoot: baseline.root }); }
+        catch (error) {
+          console.error(`${provider}: ${String(error).includes("NATIVE_PREFLIGHT_AUTH_REQUIRED") ? `private CLI installed; sign in with office-partner providers login ${provider}` : "managed installation was not activated"}. The previous CLI configuration is retained. Retry with office-partner providers install ${provider}.`);
+        }
+      }
+    }
+    runtimeStore.changeState(dataDir, state => { if (wantAddin) state.owners.addin = true; if (wantGateway) state.owners.gateway = true; });
+    if (path.resolve(root) !== path.resolve(baseline.root) && livePid()) await stop();
+    if (dispatchActive(root, ["setup", target, "--skip-providers"], dataDir)) return;
+  }
   // The add-in needs Word, Excel or PowerPoint desktop on Windows; the gateway does not. Each part
   // runs on its own, so a failure in one never prevents the other from running.
   const addin = fn => async () => { requireWindows(); await fn(); };
@@ -357,27 +423,6 @@ async function main() {
       if (wantAddin) add("Add-in", logsAddin);
       if (wantGateway) add("Gateway", gatewayStep(["logs"]));
       break;
-    case "doctor":
-      if (wantAddin) add("Add-in", async () => { console.log("Office add-in"); await doctorAddin(); });
-      if (wantGateway) add("Gateway", () => { console.log("\nAgent Gateway"); gatewayStep(["doctor"])(); });
-      break;
-    case "update":
-      add("Update", addin(async () => {
-        // The gateway ships in the same package: stop it while files are replaced, then start the new one.
-        const gatewaySetUp = existsSync(path.join(gatewayDir, "token.txt"));
-        if (gatewaySetUp) gateway(["stop"]);
-        try {
-          await updatePackage({
-            root, dataDir, nodePath: process.execPath, wasRunning: Boolean(livePid()), ...(updateSpec ? { spec: updateSpec } : {}),
-            // Also stop what the bridge started (relay, helper scripts): any of them can keep npm from replacing the folder.
-            stop: async () => { await stop(); stopPackageProcesses({ root }); },
-          });
-        }
-        finally {
-          if (gatewaySetUp) spawnSync(process.execPath, [fileURLToPath(import.meta.url), "gateway", "start"], { stdio: "inherit" });
-        }
-      }));
-      break;
     case "uninstall":
       if (wantGateway) add("Gateway", gatewayStep(["uninstall"]));
       if (wantAddin) add("Add-in", addin(async () => {
@@ -394,6 +439,10 @@ async function main() {
   for (const [name, step] of steps) {
     try { await step(); }
     catch (error) { console.error(`${name}: ${error.message || error}`); process.exitCode = 1; }
+  }
+  if (command === "uninstall" && !process.exitCode) {
+    const { releaseOwners } = await import("./manage.mjs");
+    releaseOwners(dataDir, { addin: wantAddin, gateway: wantGateway, gatewayConfigured: existsSync(path.join(gatewayDir, "token.txt")) });
   }
 }
 main().catch((error) => { console.error(error.message || error); process.exitCode = 1; });

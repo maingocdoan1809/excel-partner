@@ -4,10 +4,11 @@ import { ClaudeAdapter } from "./claude.js";
 import { CopilotAdapter } from "./copilot.js";
 import { CodexAdapter } from "./codex.js";
 import { OpencodeAdapter } from "./opencode.js";
+import { ProfiledAdapter } from "./profiled.js";
 
 export class ProviderRegistry {
   private readonly adapters = new Map<ProviderId, ProviderAdapter>();
-  private readonly modelCatalogs = new Map<ProviderId, { at: number; value: ProviderModelCatalog }>();
+  private readonly modelCatalogs = new Map<ProviderId, { at: number; value: ProviderModelCatalog; revision?: string }>();
 
   register(adapter: ProviderAdapter): this {
     this.adapters.set(adapter.id, adapter);
@@ -30,10 +31,11 @@ export class ProviderRegistry {
   }
 
   async listModels(id: ProviderId): Promise<ProviderModelCatalog> {
+    const revision = this.require(id).runtimeRevision?.();
     const cached = this.modelCatalogs.get(id);
-    if (cached && Date.now() - cached.at < 5 * 60_000) return cached.value;
+    if (cached && cached.revision === revision && Date.now() - cached.at < 5 * 60_000) return cached.value;
     const value = await this.require(id).listModels?.() ?? { models: [], defaultModelId: null };
-    this.modelCatalogs.set(id, { at: Date.now(), value });
+    this.modelCatalogs.set(id, { at: Date.now(), value, revision });
     return value;
   }
 
@@ -61,6 +63,6 @@ const factories: Record<ProviderId, (runtime: ProviderRuntime) => ProviderAdapte
 
 export function createDefaultRegistry(runtime: ProviderRuntime): ProviderRegistry {
   const registry = new ProviderRegistry();
-  for (const id of PROVIDER_IDS) registry.register(factories[id](runtime));
+  for (const id of PROVIDER_IDS) registry.register(new ProfiledAdapter(id, runtime, factories[id]));
   return registry;
 }

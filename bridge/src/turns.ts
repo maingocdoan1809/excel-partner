@@ -21,6 +21,7 @@ import type { UsageRecord, UsageStore } from "./usage.js";
 import type { SelectionEnricher } from "./windows-selection.js";
 
 export interface TurnRunnerDeps {
+  isUpdating?: () => boolean;
   config: BridgeConfig;
   logger: Logger;
   providers: ProviderRegistry;
@@ -86,6 +87,11 @@ export class TurnRunner {
   }
 
   async run(session: WorkbookSession, input: PromptInput): Promise<void> {
+    if (this.deps.isUpdating?.()) {
+      session.send({ type: "error", requestId: input.requestId, code: "maintenance", message: "Office Partner is switching releases. Try again after it reconnects." });
+      session.send({ type: "turn_finished", requestId: input.requestId, reason: "error" });
+      return;
+    }
     const { requestId, attachmentIds, referencePaths, model, chatSessionId, resumeSessionId, delegationId, context,
       effort = "medium", isCommand = false } = input;
     let { prompt, selection, capabilities = { webSearch: false, playwright: false } } = input;

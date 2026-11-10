@@ -24,7 +24,7 @@ export function sessionMcpEndpoint(config: BridgeConfig, session: WorkbookSessio
     bridgeUrl: config.publicBaseUrl,
     sessionId: session.id,
     token: session.sessionToken,
-    ...(session.provider === "copilot" && session.externalMcpTools.size ? { toolNames: [...officeToolCatalog(session.host, config.allowOfficeJs, session.capabilities).map(tool => tool.name), ...session.externalMcpTools.keys()] } : {}),
+    ...(session.provider === "copilot" ? { toolNames: [...officeToolCatalog(session.host, config.allowOfficeJs, session.capabilities).map(tool => tool.name), ...session.externalMcpTools.keys()] } : {}),
     command: config.mcp.command,
     args: config.mcp.args,
     env: {

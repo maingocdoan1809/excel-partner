@@ -7,7 +7,7 @@ import { stopWorkspaceHelper, warmWorkspaceHelper } from "./windows-workspace.js
 async function main(): Promise<void> {
   const config = loadConfig();
   const logger = new Logger("bridge", config.logLevel);
-  const bridge = new Bridge(config, { logger });
+  const bridge = new Bridge(config, { logger, onShutdown: () => { void shutdown("management"); } });
 
   const { url } = await bridge.listen();
   logger.info("ready", { url, health: `${url}/health` });

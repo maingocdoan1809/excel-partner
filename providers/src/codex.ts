@@ -57,7 +57,7 @@ export class CodexAdapter extends BaseCliAdapter {
     return session.title;
   }
   async listModels(): Promise<ProviderModelCatalog> {
-    const peer = new JsonRpcPeer({ command: process.env.CODEX_BIN ?? "codex", args: ["app-server"], env: this.env });
+    const peer = new JsonRpcPeer({ command: this.env.CODEX_BIN ?? "codex", args: ["app-server"], env: this.env });
     try {
       await peer.request("initialize", {
         clientInfo: { name: "excel-ai-addin", title: "Excel AI Add-in", version: "0.1.0" },
@@ -95,7 +95,7 @@ export class CodexAdapter extends BaseCliAdapter {
 
   protected probe(): CliProbe {
     return {
-      command: process.env.CODEX_BIN ?? "codex",
+      command: this.env.CODEX_BIN ?? "codex",
       versionArgs: ["--version"],
       installHint: "npm install -g @openai/codex",
       loginHint: "codex login",
@@ -111,7 +111,7 @@ export class CodexAdapter extends BaseCliAdapter {
 
   override async startSession(ctx: StartSessionContext): Promise<string> {
     if (ctx.resumeSessionId && !validNativeId(ctx.resumeSessionId)) throw new Error("Invalid Codex resume thread ID");
-    const command = process.env.CODEX_BIN ?? "codex";
+    const command = this.env.CODEX_BIN ?? "codex";
     const cwd = ensureWorkspaceDir();
     const providerSessionId = `codex-${randomUUID()}`;
     const log = this.runtime.logger;

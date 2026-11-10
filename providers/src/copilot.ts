@@ -107,7 +107,7 @@ export class CopilotAdapter extends BaseCliAdapter {
   private readonly native = new CopilotNativeSessions();
 
   private get command(): string {
-    return process.env.COPILOT_BIN ?? "copilot";
+    return this.env.COPILOT_BIN ?? "copilot";
   }
 
   protected probe(): CliProbe {

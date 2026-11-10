@@ -1,6 +1,7 @@
 import spawn from "cross-spawn";
 import type { ChildProcess } from "node:child_process";
 import type { ProviderLoginStatus } from "../../protocol/src/provider-login.js";
+import { activateProviderAfterLogin, providerExecution } from "../../providers/src/profiled.js";
 
 interface LoginAttempt {
   status: ProviderLoginStatus;
@@ -15,7 +16,9 @@ export class ProviderLoginError extends Error {}
 export class ProviderLoginManager {
   private readonly attempts = new Map<string, LoginAttempt>();
 
-  constructor(private readonly command = process.env.COPILOT_BIN ?? "copilot") {}
+  constructor(private readonly command?: string) {}
+
+  get isBusy() { return [...this.attempts.values()].some(attempt => this.isActive(attempt)); }
 
   status(sessionId: string): ProviderLoginStatus {
     return { ...(this.attempts.get(sessionId)?.status ?? {
@@ -36,9 +39,10 @@ export class ProviderLoginManager {
     };
     this.attempts.set(sessionId, attempt);
     try {
-      const child = spawn(this.command, ["login", "--device-code"], {
+      const execution = this.command ? { command: this.command, env: process.env } : providerExecution("copilot", process.env, true);
+      const child = spawn(execution.command, ["login", "--device-code"], {
         windowsHide: true, stdio: ["ignore", "pipe", "pipe"],
-        env: { ...process.env, NO_COLOR: "1", FORCE_COLOR: "0" },
+        env: { ...execution.env, NO_COLOR: "1", FORCE_COLOR: "0" },
       });
       attempt.child = child;
       const receive = (chunk: Buffer) => {
@@ -60,7 +64,12 @@ export class ProviderLoginManager {
       child.once("close", (code) => {
         if (!this.isActive(attempt)) return;
         if (code === 0 && attempt.status.userCode) {
-          this.finish(attempt, "success", "Signed in to GitHub Copilot.");
+          if (this.command) this.finish(attempt, "success", "Signed in to GitHub Copilot.");
+          else {
+            attempt.status.message = "Verifying the signed-in provider runtime…";
+            void activateProviderAfterLogin("copilot", process.env, () => this.isActive(attempt)).then(() => this.finish(attempt, "success", "Signed in to GitHub Copilot."),
+              () => this.finish(attempt, "error", "Sign-in finished, but runtime verification failed. Run office-partner doctor and retry provider installation."));
+          }
         } else {
           const expired = /expired|timed?\s*out/i.test(attempt.output);
           this.finish(attempt, expired ? "expired" : "error", expired

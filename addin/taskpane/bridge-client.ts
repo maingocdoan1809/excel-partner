@@ -319,6 +319,15 @@ export class BridgeClient {
     return this.sessionFetch("/session/provider-login", { method });
   }
 
+  async systemInfo(): Promise<import("./ui/system-panel.js").SystemInfo> { return this.sessionFetch("/session/system"); }
+  async systemAction(action: string, provider?: ProviderId, version?: string): Promise<void> {
+    await this.sessionFetch("/session/system", { method: "POST", body: JSON.stringify({ action, provider, version }) });
+  }
+  async systemDiagnostics(options: { provider?: ProviderId; probe?: boolean; mcp?: boolean } = {}): Promise<import("./ui/system-panel.js").DiagnosticReport> {
+    const query = new URLSearchParams({ diagnostics: "1", ...(options.provider ? { provider: options.provider } : {}), ...(options.probe ? { probe: "1" } : {}), ...(options.mcp ? { mcp: "1" } : {}) });
+    return this.sessionFetch(`/session/system?${query}`);
+  }
+
   async listSkillTemplates(skill: string): Promise<SkillTemplate[]> {
     const data = await this.sessionFetch<{ templates: SkillTemplate[] }>(`/session/skill-templates?skill=${encodeURIComponent(skill)}`);
     return data.templates;

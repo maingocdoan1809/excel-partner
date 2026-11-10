@@ -7,17 +7,17 @@ export type PanelName = "settings" | "skills" | "login" | "changes" | "history" 
 
 /** CLI command that signs the provider in on the bridge machine. */
 const PROVIDER_LOGIN_COMMANDS: Record<ProviderId, string> = {
-  claude: "claude",
-  copilot: "copilot login",
-  codex: "codex login",
-  opencode: "opencode auth login",
+  claude: "office-partner providers login claude",
+  copilot: "office-partner providers login copilot",
+  codex: "office-partner providers login codex",
+  opencode: "office-partner providers login opencode",
 };
 /** Hint shown under the manual login command. */
 const PROVIDER_LOGIN_HINTS: Record<ProviderId, string> = {
-  claude: "Open a terminal, run the command below and use /login. To install the CLI: npm install -g @anthropic-ai/claude-code",
+  claude: "Open a terminal and run the command below. Office Partner selects the provider CLI for this installation.",
   copilot: "",
-  codex: "Open a terminal and run the command below. To install the CLI: npm install -g @openai/codex",
-  opencode: "Open a terminal and run the command below. To install the CLI: npm install -g opencode-ai",
+  codex: "Open a terminal and run the command below. Install a private CLI from System & recovery if needed.",
+  opencode: "Open a terminal and run the command below. Install a private CLI from System & recovery if needed.",
 };
 
 export interface PanelsDeps {

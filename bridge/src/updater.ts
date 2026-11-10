@@ -105,7 +105,7 @@ export class UpdateService {
       platform: process.platform,
       spec: process.env.OFFICE_PARTNER_UPDATE_SPEC || process.env.EXCEL_PARTNER_UPDATE_SPEC || `${packageNameOf(options.packageRoot)}@latest`,
       now: Date.now,
-      staleAfterMs: 15 * 60_000,
+      staleAfterMs: (fs.existsSync(path.join(options.packageRoot, "bin", "deployment.mjs")) ? 90 : 15) * 60_000,
       cacheMs: 10 * 60_000,
       ...options,
     };
@@ -168,6 +168,8 @@ export class UpdateService {
   /** Why this installation cannot update itself, or null when it can. */
   unsupportedReason(): string | null {
     if (this.opts.platform !== "win32") return "Updating from the task pane works on Windows with Excel desktop.";
+    // Managed releases are installed alongside the current copy, including source installations.
+    if (fs.existsSync(path.join(this.opts.packageRoot, "bin", "deployment.mjs"))) return null;
     const root = this.globalRoot();
     if (!root) return "npm was not found. Install Node.js, or run office-partner update from a terminal.";
     if (path.resolve(root, this.packageName).toLowerCase() !== path.resolve(this.opts.packageRoot).toLowerCase()) {
@@ -202,14 +204,17 @@ export class UpdateService {
   }
 
   /** Start the update in a separate process; it outlives this bridge, which it stops. */
-  start(options: { busy: boolean }): UpdateStatus {
+  start(options: { busy: boolean; action?: "update" | "rollback" | "repair"; version?: string }): UpdateStatus {
     const reason = this.unsupportedReason();
     if (reason) throw new UpdateError("unsupported", reason);
     if (this.status().state === "running") throw new UpdateError("running", "An update is already running.");
     if (options.busy) throw new UpdateError("busy", "The assistant is still working. Wait for it to finish, or stop it, then update.");
 
     const runnerDir = fs.mkdtempSync(path.join(os.tmpdir(), "excel-partner-update-"));
-    for (const file of ["update-runner.mjs", "update.mjs"]) fs.copyFileSync(path.join(this.opts.packageRoot, "bin", file), path.join(runnerDir, file));
+    for (const file of fs.readdirSync(path.join(this.opts.packageRoot, "bin"))) {
+      const source = path.join(this.opts.packageRoot, "bin", file);
+      if (fs.statSync(source).isFile()) fs.copyFileSync(source, path.join(runnerDir, file));
+    }
     fs.mkdirSync(this.opts.dataDir, { recursive: true });
     const gatewaySetUp = !!this.opts.gatewayDir && fs.existsSync(path.join(this.opts.gatewayDir, "token.txt"));
     const env: NodeJS.ProcessEnv = {
@@ -219,6 +224,8 @@ export class UpdateService {
       EP_SPEC: this.opts.spec,
       EP_FROM: this.version,
       EP_GATEWAY: gatewaySetUp ? "1" : "0",
+      EP_ACTION: options.action ?? "update",
+      EP_TARGET_VERSION: options.version,
     };
     const started: UpdateStatus = {
       state: "running", step: "preparing", message: "Getting ready", from: this.version, to: null, error: null,

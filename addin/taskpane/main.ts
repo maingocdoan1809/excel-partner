@@ -34,6 +34,7 @@ import { setupSavedReferences } from "./ui/saved-references.js";
 import { setupUserSkills } from "./ui/user-skills.js";
 import { showUserInput } from "./ui/user-input.js";
 import { setupSettings } from "./ui/settings.js";
+import { setupSystemPanel } from "./ui/system-panel.js";
 import { renderToolCard, paintTool, formatToolValue, toolChevron } from "./ui/tool-view.js";
 import { ThoughtView } from "./ui/thought.js";
 import { mentionsFile, mentionsSheet } from "./ui/cell-links.js";
@@ -230,11 +231,13 @@ const settings = setupSettings({
   historyCount: () => store.list().length,
   clearHistory: () => els.historyClear.click(), historyClearButton: els.historyClear,
 });
+const systemPanel = setupSystemPanel(() => client, () => currentRequestId !== null);
 
 const { showPanel, openPanel, backFromPanel, openFloating, closeFloating, openMenu, closeMenu } = setupPanels({
   getProvider: () => provider, elements: els, loginPanel,
   renderHistory: () => renderHistory(), renderChanges: () => renderChanges(), renderProviderMenu: () => renderProviderMenu(),
   openSettings: returning => {
+    void systemPanel.refresh();
     void mcpSettings.refresh();
     persistNow();
     void settings.open(returning);
