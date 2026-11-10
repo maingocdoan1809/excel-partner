@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
 export const UPDATE_STATUS_FILE = "update-status.json";
@@ -27,18 +27,24 @@ const CSHARP_BLOCK = "Add-Type -TypeDefinition @'\nusing System;\nusing System.R
  * directory or holds a file in it, and npm then fails with EBUSY. Programs the bridge starts inherit the package
  * folder as their working directory without naming it on their command line, and some outlive their parent, so three
  * things count: a command line naming the folder, a working directory inside it, and descendants of either.
- * The calling process and the `keep` pids are spared.
+ * An update or `npm install` of this package that is already running counts too: two of them in the same global folder
+ * are what npm reports as a lock. The calling process, the `keep` pids and the calling process's own parents (the shell
+ * that ran `update` can mention the package and `install` in its command line) are spared.
  */
-export function stopPackageProcesses({ root, keep = [], run = spawnSync, platform = process.platform }) {
+export function stopPackageProcesses({ root, keep = [], packageName = "excel-partner", run = spawnSync, platform = process.platform }) {
   if (platform !== "win32") return { stopped: 0 };
   const spared = [process.pid, ...keep].filter(Number.isSafeInteger);
   const literal = (text) => `'${String(text).replace(/'/g, "''")}'`;
   const script = [
     CSHARP_BLOCK,
     `$root = ${literal(path.resolve(root))}`,
+    `$pkg = ${literal(packageName)}`,
     `$spared = @(${spared.join(",")})`,
     "$self = $PID",
     "$all = @(Get-CimInstance Win32_Process)",
+    "$ancestors = New-Object 'System.Collections.Generic.HashSet[int]'",
+    `$cur = ${Number.isSafeInteger(process.pid) ? process.pid : 0}`,
+    "while ($cur -gt 0 -and $ancestors.Add($cur)) { $row = $all | Where-Object { $_.ProcessId -eq $cur } | Select-Object -First 1; $cur = if ($row) { [int]$row.ParentProcessId } else { 0 } }",
     "$ids = New-Object 'System.Collections.Generic.HashSet[int]'",
     "function Spare($id) { $id -eq $self -or $spared -contains $id }",
     "foreach ($p in $all) {",
@@ -46,7 +52,11 @@ export function stopPackageProcesses({ root, keep = [], run = spawnSync, platfor
     "  $named = $p.CommandLine -and $p.CommandLine.IndexOf($root, [StringComparison]::OrdinalIgnoreCase) -ge 0",
     "  $cwd = [EpCwd]::Get($id)",
     "  $inside = $cwd -and $cwd.StartsWith($root, [StringComparison]::OrdinalIgnoreCase)",
-    "  if ($named -or $inside) { [void]$ids.Add($id) }",
+    "  $cl = [string]$p.CommandLine",
+    String.raw`  $updater = $cl -match '[\\/](excel|office)-partner-update-[^\\/]+[\\/]update-runner\.mjs'`,
+    String.raw`  $installer = ($cl -match 'npm-cli\.js"?\s+(install|i|add)\s') -and ($cl -match '(^|\s)(-g|--global)(\s|$)') -and $cl.IndexOf($pkg, [StringComparison]::OrdinalIgnoreCase) -ge 0`,
+    "  $rival = (-not $ancestors.Contains($id)) -and ($updater -or $installer)",
+    "  if ($named -or $inside -or $rival) { [void]$ids.Add($id) }",
     "}",
     "do { $before = $ids.Count; foreach ($p in $all) { $id = [int]$p.ProcessId; if (-not (Spare $id) -and $ids.Contains([int]$p.ParentProcessId)) { [void]$ids.Add($id) } } } while ($ids.Count -ne $before)",
     "foreach ($id in $ids) { Stop-Process -Id $id -Force -ErrorAction SilentlyContinue }",
@@ -60,8 +70,31 @@ export function stopPackageProcesses({ root, keep = [], run = spawnSync, platfor
   return { stopped: Number.isFinite(stopped) ? stopped : 0 };
 }
 
+/** What npm says when something has the folder open or a file is in the way. Anything else (offline, no such version) cannot be cured by trying again. */
+const NPM_LOCK_ERROR = /\b(EBUSY|EPERM|EACCES|ENOTEMPTY|EEXIST|ELOCKED)\b|resource busy|locked|operation not permitted/i;
+const INSTALL_ATTEMPTS = 3;
+const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/**
+ * npm renames the old package folder to `.<name>-<random>` while it replaces it and deletes it afterwards. A run that
+ * failed leaves it behind, and it gets in the way of the next one.
+ */
+export function removeNpmLeftovers(globalRoot, packageName, fs = { readdirSync, rmSync }) {
+  const pattern = new RegExp(`^\\.${packageName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}-[A-Za-z0-9]+$`);
+  let removed = 0;
+  try {
+    for (const entry of fs.readdirSync(globalRoot)) {
+      if (!pattern.test(entry)) continue;
+      try { fs.rmSync(path.join(globalRoot, entry), { recursive: true, force: true, maxRetries: 5, retryDelay: 200 }); removed++; }
+      catch { /* still in use: npm will say so */ }
+    }
+  } catch { /* no global folder to look in */ }
+  return removed;
+}
+
 /** Run setup from the newly installed package, after npm has replaced this one. */
-export async function updatePackage({ root, dataDir, nodePath, stop, wasRunning, run = spawnSync, spec = "excel-partner@latest", report = () => {} }) {
+export async function updatePackage({ root, dataDir, nodePath, stop, wasRunning, run = spawnSync, spec = "excel-partner@latest", report = () => {}, wait = pause }) {
+  const packageName = "excel-partner";
   mkdirSync(dataDir, { recursive: true });
   // npm.cmd needs the Windows command shell. Every argument is a fixed literal, except `spec`, which only the CLI
   // (`update --from`) and the bridge's own configuration can set.
@@ -78,7 +111,22 @@ export async function updatePackage({ root, dataDir, nodePath, stop, wasRunning,
   report("stopping");
   await stop();
   report("installing");
-  const installed = run("npm.cmd", ["install", "--global", /\s/.test(spec) ? `"${spec}"` : spec], { ...npmOptions, stdio: "inherit" });
+  // --force replaces files npm did not write (an older copy of a command it links) and --prefer-online skips a stale
+  // answer to "what is the latest version"; both are what a forced update needs.
+  const installArgs = ["install", "--global", "--force", "--prefer-online", "--no-audit", "--no-fund", /\s/.test(spec) ? `"${spec}"` : spec];
+  let installed;
+  for (let attempt = 1; attempt <= INSTALL_ATTEMPTS; attempt++) {
+    if (attempt > 1) {
+      console.log(`npm could not replace the package (attempt ${attempt - 1} of ${INSTALL_ATTEMPTS}). Closing whatever still holds it and trying again…`);
+      await stop();
+      await wait(attempt * 2000);
+    }
+    removeNpmLeftovers(path.dirname(installedRoot), packageName);
+    installed = run("npm.cmd", installArgs, { ...npmOptions, stdio: ["inherit", "inherit", "pipe"], encoding: "utf8" });
+    const errors = String(installed.stderr ?? "");
+    if (errors) process.stderr.write(errors);
+    if (installed.error || installed.status === 0 || !NPM_LOCK_ERROR.test(errors)) break;
+  }
   const cli = path.join(installedRoot, "bin", "excel-partner.mjs");
   if (installed.error || installed.status !== 0) {
     report("recovering");
@@ -86,7 +134,7 @@ export async function updatePackage({ root, dataDir, nodePath, stop, wasRunning,
       const recovery = run(nodePath, [cli, "start"], { cwd: dataDir, stdio: "inherit", windowsHide: true });
       if (recovery.error || recovery.status !== 0) console.error("Could not restart the bridge. After fixing npm, run excel-partner setup.");
     }
-    throw new Error("Update failed during npm install. Check the npm error above and retry excel-partner update.");
+    throw new Error("Update failed during npm install. Check the npm error above. If it names EBUSY or EPERM, close Excel and any terminal or editor opened in the package folder, then run excel-partner update again.");
   }
   report("starting");
   const setup = run(nodePath, [cli, "setup"], { cwd: dataDir, stdio: "inherit", windowsHide: true });
