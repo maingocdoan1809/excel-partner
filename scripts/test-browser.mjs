@@ -1,18 +1,31 @@
 /** Real Chromium + real bridge/UI, with deterministic providers and isolated settings. */
-import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
+import { mkdtemp, mkdir, writeFile, readFile, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright-core';
 import { Bridge } from '../dist/bridge/src/server.js';
 import { loadConfig } from '../dist/bridge/src/config.js';
 import { MockAdapter } from '../dist/providers/src/mock.js';
 import { ProviderRegistry } from '../dist/providers/src/registry.js';
 
+// Node's in-process mock MCP client needs the same local CA as the browser and real MCP children.
+if (process.env.BROWSER_TEST_CERT && process.env.BROWSER_TEST_TLS_BOOTSTRAPPED !== '1') {
+  const result = spawnSync(process.execPath, [fileURLToPath(import.meta.url)], {
+    env: { ...process.env, NODE_EXTRA_CA_CERTS: path.resolve(process.env.BROWSER_TEST_CERT), BROWSER_TEST_TLS_BOOTSTRAPPED: '1' }, stdio: 'inherit',
+  });
+  process.exit(result.status ?? 1);
+}
 const temporary = await mkdtemp(path.join(os.tmpdir(), 'office-browser-'));
+process.env.OFFICE_PARTNER_DATA_DIR = temporary;
+process.env.BRIDGE_CONFIG = path.join(temporary, 'config.json');
 const output = path.resolve(process.env.BROWSER_TEST_OUTPUT ?? 'output/playwright/office-review');
 await mkdir(output, { recursive: true });
-const config = loadConfig({ host: '127.0.0.1', port: 0, tls: null, publicBaseUrl: 'http://127.0.0.1',
+const tls = process.env.BROWSER_TEST_CERT && process.env.BROWSER_TEST_KEY
+  ? { certPath: process.env.BROWSER_TEST_CERT, keyPath: process.env.BROWSER_TEST_KEY } : null;
+const config = loadConfig({ host: '127.0.0.1', port: Number(process.env.BROWSER_TEST_PORT ?? 0), tls, publicBaseUrl: 'http://127.0.0.1',
   logLevel: 'error', configFile: path.join(temporary, 'config.json'), skillDirs: [], referenceDirs: [] });
 const registry = new ProviderRegistry();
 const mockCalls = new Map();
@@ -23,18 +36,25 @@ for (const id of ['claude', 'copilot', 'codex', 'opencode']) {
 const bridge = new Bridge(config, { registry, usageFile: null, updater: null,
   systemPromptFile: path.join(temporary, 'prompt.txt'), savedReferencesFile: path.join(temporary, 'references.json'),
   workspaceConfigPath: null, skillUploadDir: path.join(temporary, 'skills') });
-let browser;
+let browser, page;
 const checks = [], errors = [], failedRequests = [];
 const check = async (name, run) => {
   try { await run(); checks.push({ name, ok: true }); console.log(`PASS ${name}`); }
-  catch (error) { checks.push({ name, ok: false, error: error.message }); console.error(`FAIL ${name}: ${error.message}`); }
+  catch (error) {
+    const file = name.replace(/[^a-z0-9]+/gi, '-').toLowerCase();
+    await page?.screenshot({ path: path.join(output, `failure-${file}.png`), fullPage: true }).catch(() => {});
+    const state = await page?.evaluate(() => ({ provider: document.querySelector('#provider-select')?.value,
+      permission: document.querySelector('#permission-mode')?.value, errors: [...document.querySelectorAll('.bubble.error')].map(el => el.textContent) })).catch(() => undefined);
+    checks.push({ name, ok: false, error: error.message, state }); console.error(`FAIL ${name}: ${error.message} ${JSON.stringify(state)}`);
+  }
 };
 try {
-  const { url } = await bridge.listen();
+  const listening = await bridge.listen();
+  const url = process.env.BROWSER_TEST_PORT ? `${tls ? 'https' : 'http'}://localhost:${process.env.BROWSER_TEST_PORT}` : listening.url;
   config.publicBaseUrl = url;
-  browser = await chromium.launch({ headless: true,
-    ...(process.env.BROWSER_EXECUTABLE ? { executablePath: process.env.BROWSER_EXECUTABLE } : {}) });
-  const page = await browser.newPage({ viewport: { width: 1200, height: 900 } });
+  browser = await chromium.launch({ headless: process.env.BROWSER_TEST_HEADED !== '1',
+    ...(process.env.BROWSER_EXECUTABLE ? { executablePath: process.env.BROWSER_EXECUTABLE } : process.platform === 'win32' ? { channel: 'msedge' } : {}) });
+  page = await browser.newPage({ viewport: { width: 1200, height: 900 }, ignoreHTTPSErrors: Boolean(tls) });
   page.setDefaultTimeout(10000);
   page.on('pageerror', error => errors.push(error.message));
   page.on('requestfailed', request => failedRequests.push({ url: request.url(), error: request.failure()?.errorText }));
@@ -109,6 +129,7 @@ try {
     const registered = await (await page.request.get(`${url}/internal/tools`, { headers: { authorization: auth } })).json();
     const echo = registered.tools.find(tool => tool.name.endsWith('__echo'));
     assert.ok(echo); assert.ok(!registered.tools.some(tool => tool.name === 'mcp_call_tool'));
+    assert.equal(await page.locator('#provider-select').inputValue(), 'codex', 'MCP fixture must use the selected codex mock');
     mockCalls.get('codex').push({ tool: echo.name, args: { text: 'MCP_UI_RESULT' } });
     await page.locator('#prompt-input').fill('Use the selected MCP echo tool');
     await page.locator('#send-button').click();
@@ -141,6 +162,45 @@ try {
     await page.locator('#panel-references [data-close]').click();
     assert.equal(await page.locator('#settings-instructions').inputValue(), 'An unsaved draft');
     assert.ok(Math.abs(await page.locator('.settings-body').evaluate(el => el.scrollTop) - scroll) <= 2);
+  });
+  await check('system controls use authenticated APIs and report the local MCP catalog', async () => {
+    assert.equal((await page.request.get(`${url}/session/system`)).status(), 401);
+    await page.locator('#system-version').scrollIntoViewIfNeeded();
+    await page.locator('#system-providers button').first().waitFor();
+    await page.locator('#system-check-mcp').click();
+    await page.waitForFunction(() => document.querySelector('#system-report')?.textContent.includes('MCP_CATALOG_OK'));
+    await page.waitForFunction(() => !document.querySelector('#system-export')?.disabled);
+    const download = page.waitForEvent('download'); await page.locator('#system-export').click();
+    const downloaded = await download, reportPath = path.join(output, 'system-diagnostics.json');
+    await downloaded.saveAs(reportPath);
+    const report = JSON.parse(await readFile(reportPath, 'utf8'));
+    assert.equal(report.schemaVersion, 1); assert.equal(report.scope.mcp, true);
+    assert.ok(report.checks.some(item => item.code === 'MCP_CATALOG_OK'));
+    assert.ok(!JSON.stringify(report).includes(temporary));
+    assert.ok(!JSON.stringify(report).includes(os.homedir()));
+  });
+  await check('temporary debug controls persist and stop their expiry', async () => {
+    await page.locator('#system-debug-on').click();
+    await page.waitForFunction(() => document.querySelector('#system-status')?.textContent.includes('enabled for 15 minutes'));
+    const enabled = JSON.parse(await readFile(path.join(temporary, 'debug.json'), 'utf8'));
+    assert.ok(enabled.expires > Date.now() && enabled.expires <= Date.now() + 15 * 60000);
+    await page.locator('#system-debug-off').click();
+    await page.waitForFunction(() => document.querySelector('#system-status')?.textContent.includes('Debug logging disabled'));
+    assert.equal(JSON.parse(await readFile(path.join(temporary, 'debug.json'), 'utf8')).expires, 0);
+  });
+  await check('rollback explains unavailable cached releases without starting an updater', async () => {
+    await page.locator('#system-rollback').click();
+    await page.waitForFunction(() => document.querySelector('#system-status')?.textContent.includes('No retained version'));
+  });
+  await check('recovery controls fit a narrow pane in both themes', async () => {
+    for (const theme of ['light', 'dark']) {
+      await page.setViewportSize({ width: 320, height: 900 }); await page.locator('#theme-select').selectOption(theme);
+      await page.locator('#settings-system-section').scrollIntoViewIfNeeded();
+      const bounds = await page.locator('#settings-system-section').evaluate(el => ({ width: el.clientWidth, scroll: el.scrollWidth }));
+      assert.ok(bounds.scroll <= bounds.width + 2, `recovery controls overflow in ${theme}: ${JSON.stringify(bounds)}`);
+      await page.screenshot({ path: path.join(output, `recovery-320-${theme}.png`), fullPage: true, animations: 'disabled' });
+    }
+    await page.setViewportSize({ width: 1200, height: 900 });
   });
   await check('Settings and Testing fit desktop and narrow panes in both themes', async () => {
     for (const width of [1200, 380, 320]) {

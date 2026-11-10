@@ -1,0 +1,3 @@
+# Preserve executable hashbang parsing when these tools are imported by Vite on Windows.
+*.mjs text eol=lf
+*.cjs text eol=lf

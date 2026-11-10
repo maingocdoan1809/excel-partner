@@ -46,6 +46,21 @@ function fixture() {
 }
 
 describe("managed runtime installation", () => {
+  it.skipIf(process.platform !== "win32")("uses OpenCode's packaged native executable instead of the Windows batch launcher", async () => {
+    const w = fixture(), baseline = ensureBaseline(w.root, w.dataDir);
+    const install = async (prefix: string, spec: string) => {
+      await w.install(prefix, spec);
+      const version = spec.slice(spec.lastIndexOf("@") + 1), nativeName = `opencode-windows-${process.arch}`;
+      w.put(prefix, "node_modules/opencode-ai/package.json", JSON.stringify({ name: "opencode-ai", version, bin: { opencode: "bin/opencode.cmd" } }));
+      w.put(prefix, "node_modules/opencode-ai/bin/opencode.cmd", "@echo off\nstart opencode.exe");
+      w.put(prefix, `node_modules/${nativeName}/package.json`, JSON.stringify({ name: nativeName, version }));
+      w.put(prefix, `node_modules/${nativeName}/bin/opencode.exe`, JSON.stringify({ version }));
+    };
+    const profile = await installRuntime(w.root, "opencode", { ...w, install, adapterRoot: baseline.root });
+    expect(profile.command).toContain(`opencode-windows-${process.arch}`);
+    expect(path.extname(profile.command)).toBe(".exe");
+    expect(store.childEnvironment({ OPENCODE_BIN_PATH: "user-global.exe" }, profile)).not.toHaveProperty("OPENCODE_BIN_PATH");
+  });
   it("the standalone native preflight rejects unsigned-in providers before creating a session", () => {
     const w = fixture();
     w.put(w.root, "bin/provider-preflight.mjs", fs.readFileSync("bin/provider-preflight.mjs", "utf8"));

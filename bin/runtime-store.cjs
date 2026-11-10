@@ -123,6 +123,7 @@ function childEnvironment(env, profile) {
       if (profile.provider === 'claude') result.CLAUDE_CONFIG_DIR = profile.stateHome;
       if (profile.provider === 'codex') result.CODEX_HOME = profile.stateHome;
       if (profile.provider === 'opencode') {
+        delete result.OPENCODE_BIN_PATH;
         for (const [key, directory] of Object.entries({ XDG_CONFIG_HOME: 'config', XDG_DATA_HOME: 'data', XDG_STATE_HOME: 'state', XDG_CACHE_HOME: 'cache' })) result[key] = path.join(profile.stateHome, directory);
         result.OPENCODE_CONFIG_DIR = path.join(profile.stateHome, 'config', 'opencode');
         delete result.OPENCODE_DB;

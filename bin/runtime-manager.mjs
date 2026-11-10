@@ -36,6 +36,18 @@ function entrypoint(prefix, item) {
   if (pkg.version !== item.version) throw new Error("INSTALLED_VERSION_MISMATCH");
   const entry = typeof pkg.bin === "string" ? pkg.bin : pkg.bin?.[item.bin];
   if (typeof entry !== "string") throw new Error("CLI_ENTRYPOINT_MISSING");
+  // OpenCode 1.x's Windows batch launcher uses `start`, which loses ACP's piped stdin.
+  // Select the packaged native executable directly, retaining its exact platform package.
+  if (item.bin === "opencode" && process.platform === "win32" && /\.cmd$/i.test(entry)) {
+    const nativeName = `opencode-windows-${process.arch}`;
+    let command;
+    try { command = createRequire(path.join(root, "package.json")).resolve(`${nativeName}/bin/opencode.exe`); }
+    catch { throw new Error("CLI_ENTRYPOINT_MISSING"); }
+    const native = store.readJson(path.join(path.dirname(command), "..", "package.json"));
+    if (native.name !== nativeName || native.version !== item.version) throw new Error("INSTALLED_VERSION_MISMATCH");
+    if (!store.inside(prefix, fs.realpathSync(command))) throw new Error("CLI_ENTRYPOINT_INVALID");
+    return command;
+  }
   const command = path.resolve(root, entry);
   if (!store.inside(root, command) || !fs.existsSync(command) || !store.inside(prefix, fs.realpathSync(command))) throw new Error("CLI_ENTRYPOINT_INVALID");
   return command;

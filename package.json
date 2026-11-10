@@ -30,6 +30,7 @@
     "gateway/README.md",
     "docs/mcp-runtime.md",
     "docs/diagnostics.md",
+    "docs/managed-runtime-validation.md",
     "dist/bridge/src/",
     "dist/runtime/src/",
     "dist/excel_mcp/src/",

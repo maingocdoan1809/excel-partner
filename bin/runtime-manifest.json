@@ -4,6 +4,6 @@
     "claude": { "package": "@anthropic-ai/claude-code", "version": "2.1.294", "bin": "claude" },
     "copilot": { "package": "@github/copilot", "version": "1.0.95", "bin": "copilot", "sdkVersion": "1.0.18" },
     "codex": { "package": "@openai/codex", "version": "0.162.1", "bin": "codex" },
-    "opencode": { "package": "opencode-ai", "version": "1.0.0", "bin": "opencode" }
+    "opencode": { "package": "opencode-ai", "version": "1.19.5", "bin": "opencode" }
   }
 }

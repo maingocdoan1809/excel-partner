@@ -114,7 +114,7 @@ office-partner versions
 ```
 
 The release manifest pins Claude Code `2.1.294`, Copilot CLI `1.0.95` with SDK
-`1.0.18`, Codex `0.162.1` and OpenCode `1.0.0`. These are explicit adapter
+`1.0.18`, Codex `0.162.1` and OpenCode `1.19.5`. These are explicit adapter
 baseline pins, not a claim of production live certification. Installation checks
 the package/version, full file inventory, exact SDK dependency and native adapter
 initialization before activation. Preflight also checks sign-in (Copilot uses its
@@ -236,12 +236,15 @@ history, credentials, external CLIs and provider-data are retained deliberately.
 
 ## Validation boundary
 
-Automated checks use mock installers/providers and local MCP schema discovery.
+Default automated checks use mock installers/providers and local MCP schema discovery.
 They cover version isolation, pending login, dependency corruption, initial-only
 fallback, saved native resume, busy services, failed activation, interrupted
-updates, offline rollback and owner-aware uninstall. No production provider
-installation, account login, model inference or Excel/Word/PowerPoint document
-write was performed as part of this implementation. Before a broad rollout,
-validate each pinned profile on disposable Office documents with the explicit
-live-provider workflow. The reported original Copilot failure has not been
-reproduced from a supplied error trace.
+updates, offline rollback and owner-aware uninstall. Separate opt-in Windows
+checks installed real private CLIs and verified Copilot native registration,
+real model-driven MCP execution in Chrome, continuation and History resume.
+OpenCode's compatible pin was updated after live initialization checks. Private
+Claude and Codex profiles without a sign-in remained pending as intended.
+No Excel/Word/PowerPoint document write was performed. Before a broad rollout,
+validate each signed-in profile on disposable Office documents. See the
+[validation report](managed-runtime-validation.md) for exact coverage and limits.
+The originally reported Copilot failure has not been reproduced from its error trace.
