@@ -244,7 +244,7 @@ const settings = setupSettings({
   historyCount: () => store.total || store.list().length,
   clearHistory: () => els.historyClear.click(), historyClearButton: els.historyClear,
 });
-const historyStorage = setupHistoryStorage(() => client, store, () => session.id, records => { const recovered = records.find(r => r.originalId === session.id); if (recovered && !currentRequestId) loadSession(recovered.session); }, () => currentRequestId !== null);
+const historyStorage = setupHistoryStorage(() => client, store, records => { const recovered = records.find(r => r.originalId === session.id); if (recovered && !currentRequestId) loadSession(recovered.session); }, () => currentRequestId !== null);
 const systemPanel = setupSystemPanel(() => client, () => currentRequestId !== null);
 
 const { showPanel, openPanel, backFromPanel, openFloating, closeFloating, openMenu, closeMenu } = setupPanels({

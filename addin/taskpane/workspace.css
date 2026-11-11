@@ -172,6 +172,9 @@ body.settings-active .settings-panel { padding: 0; }
 .settings-link-copy small { font-size: 11px; line-height: 1.5; color: var(--text-secondary); }
 .settings-links button > span:last-child { font-size: 20px; }
 .settings-account { margin-top: 12px; }
+.provider-status { margin: 8px 0 0; font-size: 12px; color: var(--muted); }
+.provider-status[data-state="ready"] { color: var(--ok); font-weight: 600; }
+.provider-status[data-state="login_required"], .provider-status[data-state="error"], .provider-status[data-state="not_installed"] { color: var(--error); }
 .settings-tools { margin: 0; }
 .settings-tools .settings-toggle { display: flex; justify-content: space-between; align-items: center; gap: 12px; color: var(--text); font-size: 13px; font-weight: 500; cursor: pointer; }
 .settings-toggle input { appearance: none; flex: 0 0 34px; width: 34px; height: 20px; margin: 0; padding: 2px; border: 1px solid var(--field); border-radius: 12px; background: var(--blue-200); cursor: pointer; transition: background .15s; }

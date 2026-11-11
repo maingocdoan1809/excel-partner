@@ -1,6 +1,16 @@
 import type { BridgeClient } from "../bridge-client.js";
 import { createTextEditor } from "./text-editor.js";
 
+/** A small square button that shows a symbol; the label lives in its tooltip so the row stays compact. */
+function iconButton(symbol: string, label: string): HTMLButtonElement {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "secondary skill-icon";
+  button.textContent = symbol;
+  button.title = label;
+  return button;
+}
+
 export function setupUserSkills(client: () => BridgeClient, changed: () => void): { refresh(): Promise<void> } {
   const list = document.getElementById("user-skills-list")!;
   const message = document.getElementById("user-skills-status")!;
@@ -22,6 +32,8 @@ export function setupUserSkills(client: () => BridgeClient, changed: () => void)
         const row = document.createElement("div");
         row.className = "user-skill";
         row.dataset.enabled = String(skill.enabled);
+        const head = document.createElement("div");
+        head.className = "user-skill-head";
         const copy = document.createElement("div");
         copy.className = "user-skill-copy";
         const title = document.createElement("strong");
@@ -35,12 +47,12 @@ export function setupUserSkills(client: () => BridgeClient, changed: () => void)
           badge.textContent = "Disabled";
           copy.append(badge);
         }
-        copy.append(detail);
-        row.append(copy);
-        const toggle = document.createElement("button");
-        toggle.type = "button";
-        toggle.className = "secondary";
-        toggle.textContent = skill.enabled ? "Disable" : "Enable";
+        const actions = document.createElement("div");
+        actions.className = "user-skill-actions";
+        head.append(copy, actions);
+        row.append(head, detail);
+        const toggle = iconButton(skill.enabled ? "⏻" : "○", skill.enabled ? "Disable this skill" : "Enable this skill");
+        toggle.dataset.on = String(skill.enabled);
         toggle.setAttribute("role", "switch");
         toggle.setAttribute("aria-checked", String(skill.enabled));
         toggle.setAttribute("aria-label", `Enable /${skill.name}`);
@@ -56,14 +68,10 @@ export function setupUserSkills(client: () => BridgeClient, changed: () => void)
           } catch (error) { message.textContent = error instanceof Error ? error.message : "Could not update skill."; }
           finally { busy = false; toggle.disabled = false; }
         });
-        row.append(toggle);
+        actions.append(toggle);
         if (skill.removable) {
-          const actions = document.createElement("div");
-          actions.className = "user-skill-actions";
-          const edit = document.createElement("button");
-          edit.type = "button";
-          edit.className = "secondary";
-          edit.textContent = "Edit";
+          const edit = iconButton("✎", "Edit this skill");
+          edit.setAttribute("aria-label", `Edit /${skill.name}`);
           edit.addEventListener("click", async () => {
             if (busy) return;
             busy = true;
@@ -78,16 +86,15 @@ export function setupUserSkills(client: () => BridgeClient, changed: () => void)
             } catch (error) { message.textContent = error instanceof Error ? error.message : "Could not edit this skill."; }
             finally { busy = false; edit.disabled = false; }
           });
-          const remove = document.createElement("button");
-          remove.type = "button";
-          remove.className = "secondary";
-          remove.textContent = "Remove";
+          const remove = iconButton("🗑", "Remove this skill");
+          remove.setAttribute("aria-label", `Remove /${skill.name}`);
           remove.addEventListener("click", async () => {
             if (busy) return;
             if (remove.dataset.confirm !== "true") {
               remove.dataset.confirm = "true";
-              remove.textContent = "Confirm";
-              window.setTimeout(() => { remove.dataset.confirm = "false"; remove.textContent = "Remove"; }, 3000);
+              remove.textContent = "✓";
+              remove.title = "Click again to remove";
+              window.setTimeout(() => { remove.dataset.confirm = "false"; remove.textContent = "🗑"; remove.title = "Remove this skill"; }, 3000);
               return;
             }
             busy = true;
@@ -102,7 +109,6 @@ export function setupUserSkills(client: () => BridgeClient, changed: () => void)
             finally { busy = false; upload.disabled = false; remove.disabled = false; }
           });
           actions.append(edit, remove);
-          row.append(actions);
         }
         list.append(row);
       }

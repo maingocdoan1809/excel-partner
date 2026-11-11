@@ -1,11 +1,8 @@
 import type { BridgeClient } from "../bridge-client.js";
 import type { DurableHistory } from "./durable-history.js";
-import { confirmAction } from "./confirm-action.js";
 
-const DAY_MS = 86_400_000;
-
-/** Settings controls for saved history: one export, one clean-up, and recovery only while chats are unsaved. */
-export function setupHistoryStorage(getClient: () => BridgeClient, store: DurableHistory, activeId: () => string,
+/** Settings controls for saved history: one export, and recovery only while chats are unsaved. */
+export function setupHistoryStorage(getClient: () => BridgeClient, store: DurableHistory,
   recover: (records: Awaited<ReturnType<DurableHistory["recoverPending"]>>) => void, isBusy: () => boolean) {
   const info = document.getElementById("history-storage-info");
   const status = document.getElementById("history-storage-status");
@@ -16,7 +13,7 @@ export function setupHistoryStorage(getClient: () => BridgeClient, store: Durabl
     try {
       const stats = await getClient().historyStats();
       const unsaved = store.pendingCount ? ` · ${store.pendingCount} not saved yet` : "";
-      if (info) info.textContent = `${stats.count} saved chats in this app · ${(stats.bytes / 1024 / 1024).toFixed(1)} MB on disk${unsaved}`;
+      if (info) info.textContent = `${(stats.bytes / 1024 / 1024).toFixed(1)} MB on disk${unsaved}`;
     } catch {
       say("History storage is unavailable. Unsaved chats are kept and saved again automatically.");
     }
@@ -56,18 +53,6 @@ export function setupHistoryStorage(getClient: () => BridgeClient, store: Durabl
     const records = await store.recoverPending();
     recover(records);
     say(`Recovered ${records.length} unsaved chats as separate copies. Saved originals were kept.`);
-  });
-
-  on("history-cleanup", async () => {
-    const field = document.getElementById("history-cleanup-days") as HTMLInputElement | null;
-    const days = Number(field?.value);
-    if (!Number.isFinite(days) || days < 1) throw new Error("Choose a positive number of days.");
-    const before = Date.now() - days * DAY_MS;
-    if (!await confirmAction(document.getElementById("history-storage-section")!, `Delete chats older than ${days} days in this app? The current and unsaved chats are kept.`, "Delete old chats")) return false;
-    if (Number(field?.value) !== days) { say("The age range changed. Review it and choose Delete old chats again."); return false; }
-    const result = await getClient().historyCleanup(before, [activeId(), ...store.pendingExport().map(s => s.id)]);
-    await store.refresh();
-    say(`Deleted ${result.removed} old chats.`);
   });
 
   return { refresh };

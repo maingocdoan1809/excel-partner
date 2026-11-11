@@ -52,7 +52,22 @@ export function setupProviderPicker(deps: ProviderPickerDeps) {
     deps.refreshTools();
     byId<HTMLSelectElement>("provider-select").value = deps.getProvider();
     els.providerHint.textContent = providerHints.get(deps.getProvider()) ?? "";
-    byId("menu-login").textContent = `Sign in to ${PROVIDER_NAMES[deps.getProvider()]}`;
+    renderAccount();
+  }
+
+  /** Says whether the chosen provider can be used now; the sign-in button only offers to switch accounts once it is. */
+  function renderAccount(): void {
+    const provider = deps.getProvider();
+    const status = providerStatuses.get(provider) ?? "unknown";
+    const name = PROVIDER_NAMES[provider];
+    const line = byId("provider-status");
+    line.dataset.state = status;
+    line.textContent = status === "ready" ? `✓ Signed in to ${name} and ready to use`
+      : status === "login_required" ? `Not signed in to ${name}`
+      : status === "not_installed" ? `${name} is not installed on this computer`
+      : status === "error" ? `${name} has a problem. See the hint above`
+      : `Checking ${name}…`;
+    byId("menu-login").textContent = status === "ready" ? `Sign in with another ${name} account` : `Sign in to ${name}`;
   }
 
   function renderAuthNotice(): void {
@@ -61,6 +76,7 @@ export function setupProviderPicker(deps: ProviderPickerDeps) {
     byId("auth-notice-title").textContent = status === "not_installed" ? `Set up ${PROVIDER_NAMES[deps.getProvider()]}` : `Sign in to ${PROVIDER_NAMES[deps.getProvider()]}`;
     byId("auth-notice-detail").textContent = status === "not_installed" ? "Install the CLI on the bridge machine." : "Connect your account to start chatting.";
     byId("provider-login-button").textContent = status === "not_installed" ? "Set up ↗" : "Sign in ↗";
+    renderAccount();
   }
 
   function selectProvider(next: ProviderId): void {

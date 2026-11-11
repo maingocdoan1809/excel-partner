@@ -583,15 +583,17 @@ body.login-active .composer, body.login-active .pane-tabs { display: none; }
 body.login-active .auth-notice { display: none; }
 .login-command { display: block; border: 1px solid var(--border); background: var(--blue-50); color: var(--text); border-radius: 6px; padding: 10px; user-select: all; font-size: 12px; }
 .skill-upload-actions { padding: 0 0 12px; }
-.user-skill { display: flex; align-items: flex-start; gap: 12px; padding: 12px; border: 1px solid var(--border); border-radius: 9px; background: var(--panel); }
-.user-skill > div { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.user-skill { display: flex; flex-direction: column; gap: 6px; padding: 12px; border: 1px solid var(--border); border-radius: 9px; background: var(--panel); }
+.user-skill-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.user-skill-copy { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .user-skill strong { color: var(--accent-strong); font-size: 12px; font-weight: 500; }
-.user-skill p { margin: 5px 0 0; color: var(--muted); font-size: 11px; }
-.user-skill button { flex-shrink: 0; padding: 4px 7px; font-size: 10px; }
-.user-skill > .user-skill-actions { display: flex; flex: 0 0 auto; flex-wrap: wrap; gap: 5px; max-width: 110px; }
+.user-skill p { margin: 0; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; color: var(--muted); font-size: 11px; }
+.user-skill-actions { display: flex; flex: 0 0 auto; gap: 4px; }
+.user-skill .skill-icon { width: 26px; height: 26px; padding: 0; font-size: 13px; line-height: 1; border-radius: 6px; }
+.user-skill .skill-icon[data-on="false"] { opacity: .6; }
 .user-skill[data-enabled="false"] { border-style: dashed; background: var(--blue-50); }
 .user-skill[data-enabled="false"] .user-skill-copy > strong { color: var(--muted); }
-.user-skill[data-enabled="false"] .user-skill-copy > p { opacity: .65; }
+.user-skill[data-enabled="false"] > p { opacity: .65; }
 .skill-disabled-label { display: inline-block; margin: 3px 0 0 6px; padding: 1px 5px; border: 1px solid var(--border); border-radius: 4px; color: var(--muted); font-size: 9px; line-height: 1.5; vertical-align: middle; }
 .text-editor { width: min(720px, calc(100vw - 20px)); }
 .text-editor textarea { min-height: 250px; height: 48vh; font: 12px/1.5 ui-monospace, Consolas, monospace; tab-size: 2; }

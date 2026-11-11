@@ -208,12 +208,6 @@ try {
     const data = JSON.parse(await readFile(file, 'utf8')); assert.ok(data.sessions.length >= 2);
     assert.ok(data.sessions.some(session => session.messages.some(message => message.text.includes('Browser review message'))));
     await page.waitForFunction(() => document.querySelector('#history-storage-status')?.textContent.includes('History exported'));
-    await page.evaluate(() => { window.confirm = () => { throw new Error('Function window.confirm is not supported.'); }; });
-    await page.locator('#history-cleanup').click();
-    await page.locator('[data-confirm-cancel]').click();
-    await page.locator('#history-cleanup').click();
-    await page.locator('[data-confirm-accept]').click();
-    await page.waitForFunction(() => document.querySelector('#history-storage-status')?.textContent.includes('Deleted 0 old chats'));
   });
   await check('temporary debug controls persist and stop their expiry', async () => {
     await page.locator('#system-debug').click();
@@ -254,7 +248,7 @@ try {
         assert.ok(layout.buttons.every(b => b.inside && b.height >= 36 && b.scroll <= b.client + 1), `buttons must fit readable touch targets at ${width}: ${JSON.stringify(layout)}`);
         if (width <= 320) {
           const ids = section === 'settings-system-section' ? ['system-check', 'system-export', 'system-repair', 'system-debug']
-            : ['history-export', 'history-cleanup'];
+            : ['history-export', 'settings-clear-history'];
           const actions = await page.locator(ids.map(id => `#${id}`).join(',')).evaluateAll(buttons => buttons.map(b => { const r = b.getBoundingClientRect(); return { left: r.left, right: r.right }; }));
           assert.ok(actions.every(b => Math.abs(b.left - actions[0].left) <= 1 && Math.abs(b.right - actions[0].right) <= 1), `small-panel actions must align at ${width}`);
         }

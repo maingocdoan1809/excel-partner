@@ -332,7 +332,6 @@ export class BridgeClient {
   historyImport(sessions: StoredSession[]): Promise<{ imported: number }> { return this.sessionFetch("/session/history", { method: "POST", body: JSON.stringify({ action: "import", sessions }) }); }
   historyDelete(id?: string): Promise<HistoryStats> { return this.sessionFetch(`/session/history${id ? `?id=${encodeURIComponent(id)}` : ""}`, { method: "DELETE" }); }
   historyExport(): Promise<{ sessions: StoredSession[] }> { return this.sessionFetch("/session/history?view=export"); }
-  historyCleanup(before: number, protectedIds: string[]): Promise<{ removed: number }> { return this.sessionFetch("/session/history", { method: "POST", body: JSON.stringify({ action: "cleanup", before, protectedIds }) }); }
 
   async systemInfo(): Promise<import("./ui/system-panel.js").SystemInfo> { return this.sessionFetch("/session/system"); }
   async systemAction(action: string, provider?: ProviderId, version?: string): Promise<void> {
