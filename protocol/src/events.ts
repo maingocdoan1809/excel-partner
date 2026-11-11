@@ -35,6 +35,12 @@ export const ProviderEventSchema = z.discriminatedUnion("type", [
     requestId: z.string(),
   }),
   z.object({
+    type: z.literal("provider_progress"),
+    requestId: z.string(),
+    state: z.enum(["waiting", "retrying"]),
+    message: z.string().max(300),
+  }),
+  z.object({
     type: z.literal("turn_started"),
     requestId: z.string(),
   }),

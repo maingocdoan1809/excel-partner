@@ -174,7 +174,9 @@ export class TurnRunner {
       if (!isCommand && selection) selection = await enrichSelectionForHost(session.host, selection, this.deps.enrichSelection, controller.signal);
       controller.signal.throwIfAborted();
       const detection = await adapter.detect();
-      if (!detection.installed) throw new Error(detection.hint ?? "Provider CLI is not installed.");
+      // Availability of a new worker must not invalidate an existing worker or
+      // a saved conversation's retained profile. ensure() enforces new-chat rules.
+      if (!detection.installed && !session.providerSessionId && !resumeSessionId && !session.providerNativeSessionId) throw new Error(detection.hint ?? "Provider CLI is not installed.");
       let command: NativeCommand | undefined;
       if (isCommand) {
         const parsed = parseNativeCommand(userPrompt);

@@ -22,7 +22,7 @@ class FakeSocket {
   close() { this.readyState = 3; }
 }
 
-async function boot(host: "Excel" | "Word" | "PowerPoint") {
+async function boot(host: "Excel" | "Word" | "PowerPoint", connected = false) {
   vi.resetModules();
   FakeSocket.instances = [];
   document.documentElement.innerHTML = html.replace(/<script[^>]*><\/script>/g, "");
@@ -40,12 +40,31 @@ async function boot(host: "Excel" | "Word" | "PowerPoint") {
   g.ResizeObserver = class { observe() {} disconnect() {} unobserve() {} };
   g.matchMedia ??= () => ({ matches: false, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {} });
   window.matchMedia ??= g.matchMedia;
-  g.fetch = vi.fn(async () => new Response("{}", { status: 200 }));
+  const saved = new Map<string, any>();
+  let generation = 0;
+  g.fetch = vi.fn(async (target: string, options: RequestInit = {}) => {
+    const url = new URL(String(target), "https://localhost:8765");
+    let data: unknown = {};
+    if (url.pathname === "/session/history") {
+      const input = options.body ? JSON.parse(String(options.body)) : {};
+      if (options.method === "POST" && input.action === "import") for (const item of input.sessions) if (!saved.has(item.id)) saved.set(item.id, { ...item, host: host.toLowerCase(), revision: 1 });
+      if (options.method === "POST" && input.action === "save") saved.set(input.session.id, { ...input.session, revision: (saved.get(input.session.id)?.revision ?? 0) + 1 });
+      if (options.method === "DELETE") { const id = url.searchParams.get("id"); if (id) saved.delete(id); else { saved.clear(); generation++; } }
+      const view = url.searchParams.get("view");
+      if (view === "stats" || options.method === "DELETE") data = { count: saved.size, bytes: 100, generation };
+      else if (view === "chat") { const item = saved.get(url.searchParams.get("id")!); data = { session: item, revision: item?.revision ?? 0, generation, totalMessages: item?.messages.length ?? 0, totalChanges: item?.changes.length ?? 0 }; }
+      else if (input.action === "save") data = { revision: saved.get(input.session.id)?.revision, generation };
+      else data = { items: [...saved.values()].map(item => ({ ...item, messageCount: item.messages.length, changeCount: item.changes.length })), total: saved.size, generation };
+    }
+    return new Response(JSON.stringify(data), { status: 200 });
+  });
   await import("../addin/taskpane/main.js");
   expect(ready, "main.ts must register Office.onReady").toBeTypeOf("function");
   ready!({ host });
   await new Promise((resolve) => setTimeout(resolve, 20));
-  return FakeSocket.instances[0]!;
+  const socket = FakeSocket.instances[0]!;
+  if (connected) { socket.onmessage?.({ data: JSON.stringify({ type: "hello_ok", protocolVersion: 1, sessionToken: "fixture-session-token-123456", workbookConnectionId: "0123456789abcdef", serverTime: new Date().toISOString(), addinBuildId: "none" }) }); await new Promise(resolve => setTimeout(resolve, 30)); }
+  return socket;
 }
 
 describe("task pane start-up in each Office application", () => {
@@ -149,7 +168,7 @@ describe("which chat the pane opens", () => {
   it("starts a new chat when the pane is opened again, and keeps the old one in the history", async () => {
     seedLastChat();
     installWordFake(new FakeWordDoc());
-    await boot("Word");
+    await boot("Word", true);
     expect(document.getElementById("messages")?.textContent ?? "").not.toContain(OLD_CHAT);
     expect(document.querySelector("#messages .welcome")).not.toBeNull();
     expect(JSON.parse(localStorage.getItem("excelPartner.sessions.v1") ?? "[]")).toHaveLength(1);
@@ -165,40 +184,54 @@ describe("which chat the pane opens", () => {
       chat("e", "excel", "Excel budget question"), chat("w", "word", "Word intro rewrite"), chat("p", "powerpoint", "Slide four layout"), chat("old", undefined, "Chat from before apps were recorded"),
     ]));
     installWordFake(new FakeWordDoc());
-    await boot("Word");
+    await boot("Word", true);
     (document.getElementById("menu-history") ?? document.querySelector<HTMLElement>("[data-action=history]"))?.click();
+    await new Promise(resolve => setTimeout(resolve, 30));
     const shown = document.getElementById("history-list")?.textContent ?? "";
     expect(shown).toContain("Word intro rewrite");
     for (const other of ["Excel budget question", "Slide four layout", "Chat from before apps were recorded"]) expect(shown).not.toContain(other);
     expect(JSON.parse(localStorage.getItem("excelPartner.sessions.v1") ?? "[]")).toHaveLength(4); // the other apps' chats are untouched
   });
 
+  it("H24 restores this pane's exact chat instead of a newer chat from another pane", async () => {
+    seedLastChat(); const source = JSON.parse(localStorage.getItem("excelPartner.sessions.v1")!);
+    localStorage.setItem("excelPartner.sessions.v1", JSON.stringify([...source, { ...source[0], id: "other-window", title: "Other window", updatedAt: Date.now(), messages: [{ kind: "user", text: "OTHER_WINDOW_NEWEST" }] }]));
+    sessionStorage.setItem("excelPartner.restoreChat", "1"); sessionStorage.setItem("excelPartner.activeChatId", "earlier-chat");
+    installWordFake(new FakeWordDoc()); await boot("Word", true);
+    expect(document.getElementById("messages")?.textContent).toContain(OLD_CHAT);
+    expect(document.getElementById("messages")?.textContent).not.toContain("OTHER_WINDOW_NEWEST");
+  });
+
   it("brings the chat back when the pane reloaded itself, and only that once", async () => {
     seedLastChat();
     sessionStorage.setItem("excelPartner.restoreChat", "1");
     installWordFake(new FakeWordDoc());
-    await boot("Word");
+    await boot("Word", true);
     expect(document.getElementById("messages")?.textContent ?? "").toContain(OLD_CHAT);
     expect(sessionStorage.getItem("excelPartner.restoreChat")).toBeNull();
     uninstallWordFake();
     installWordFake(new FakeWordDoc());
-    await boot("Word");
+    await boot("Word", true);
     expect(document.getElementById("messages")?.textContent ?? "").not.toContain(OLD_CHAT);
   });
 
   it("continues a saved chat and deletes the current chat through History", async () => {
     seedLastChat();
     installWordFake(new FakeWordDoc());
-    await boot("Word");
+    await boot("Word", true);
     document.getElementById("history-button")!.click();
+    await new Promise(resolve => setTimeout(resolve, 30));
     document.querySelector<HTMLButtonElement>(".history-item")!.click();
+    await new Promise(resolve => setTimeout(resolve, 30));
     expect(document.getElementById("session-transcript")!.textContent).toContain(OLD_CHAT);
     document.getElementById("session-continue")!.click();
-    expect(document.getElementById("messages")!.textContent).toContain(OLD_CHAT);
+    await vi.waitFor(() => expect(document.getElementById("messages")!.textContent).toContain(OLD_CHAT));
     expect(localStorage.getItem("excelPartner.provider")).toBe("claude");
     document.getElementById("history-button")!.click();
+    await new Promise(resolve => setTimeout(resolve, 30));
     expect(document.querySelector<HTMLButtonElement>(".history-item")!.dataset.current).toBe("true");
     document.querySelector<HTMLButtonElement>(".history-delete")!.click();
+    await new Promise(resolve => setTimeout(resolve, 30));
     expect(document.querySelector("#messages .welcome")).not.toBeNull();
     expect(JSON.parse(localStorage.getItem("excelPartner.sessions.v1") ?? "[]")).toHaveLength(0);
   });
@@ -207,12 +240,13 @@ describe("which chat the pane opens", () => {
     seedLastChat();
     sessionStorage.setItem("excelPartner.restoreChat", "1");
     installWordFake(new FakeWordDoc());
-    await boot("Word");
+    await boot("Word", true);
     const clear = document.getElementById("history-clear")!;
     clear.click();
     expect(document.getElementById("messages")!.textContent).toContain(OLD_CHAT);
     expect(JSON.parse(localStorage.getItem("excelPartner.sessions.v1") ?? "[]")).toHaveLength(1);
     clear.click();
+    await new Promise(resolve => setTimeout(resolve, 30));
     expect(document.querySelector("#messages .welcome")).not.toBeNull();
     expect(JSON.parse(localStorage.getItem("excelPartner.sessions.v1") ?? "[]")).toHaveLength(0);
     expect(clear.dataset.confirm).toBe("0");

@@ -1,13 +1,14 @@
+import type { ChatHistoryStore } from "./durable-history.js";
 import type { ProviderId, TokenUsage, UsageSummary } from "../../../protocol/src/index.js";
 import type { BridgeClient } from "../bridge-client.js";
-import type { SessionStore, StoredMessage, StoredSession } from "./sessions.js";
+import type { StoredMessage, StoredSession } from "./sessions.js";
 import { formatCredits, formatDuration, usageCsv } from "./usage.js";
 
 export interface UsagePanelDeps {
   getClient(): BridgeClient;
   getSession(): StoredSession;
   getProvider(): ProviderId;
-  store: SessionStore;
+  store: ChatHistoryStore;
   persistNow(): void;
   append(message: StoredMessage): HTMLElement;
   elements: {

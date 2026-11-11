@@ -27,11 +27,24 @@ const tls = process.env.BROWSER_TEST_CERT && process.env.BROWSER_TEST_KEY
   ? { certPath: process.env.BROWSER_TEST_CERT, keyPath: process.env.BROWSER_TEST_KEY } : null;
 const config = loadConfig({ host: '127.0.0.1', port: Number(process.env.BROWSER_TEST_PORT ?? 0), tls, publicBaseUrl: 'http://127.0.0.1',
   logLevel: 'error', configFile: path.join(temporary, 'config.json'), skillDirs: [], referenceDirs: [] });
+class ProgressMock extends MockAdapter {
+  async *sendTurn(input) {
+    if (input.prompt === 'BROWSER_OPENCODE_PROGRESS') {
+      yield { type: 'turn_started', requestId: input.requestId };
+      yield { type: 'provider_progress', requestId: input.requestId, state: 'retrying', message: 'OpenCode: model service overloaded; retrying (attempt 2)…' };
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      yield { type: 'error', requestId: input.requestId, code: 'empty_response', message: 'OpenCode ended without a response. Try again or select another model.' };
+      yield { type: 'turn_finished', requestId: input.requestId, reason: 'error' };
+      return;
+    }
+    yield* super.sendTurn(input);
+  }
+}
 const registry = new ProviderRegistry();
 const mockCalls = new Map();
 for (const id of ['claude', 'copilot', 'codex', 'opencode']) {
   const toolCalls = []; mockCalls.set(id, toolCalls);
-  registry.register(new MockAdapter({ id, toolCalls, reply: 'WEB_SMOKE_OK', delayMs: 150 }));
+  registry.register(new ProgressMock({ id, toolCalls, reply: 'WEB_SMOKE_OK', delayMs: 150 }));
 }
 const bridge = new Bridge(config, { registry, usageFile: null, updater: null,
   systemPromptFile: path.join(temporary, 'prompt.txt'), savedReferencesFile: path.join(temporary, 'references.json'),
@@ -159,17 +172,24 @@ try {
     await page.locator('#menu-references').scrollIntoViewIfNeeded();
     const scroll = await page.locator('.settings-body').evaluate(el => el.scrollTop);
     await page.locator('#menu-references').click();
+    assert.ok((await page.locator('#panel-references > .panel-head').boundingBox()).height <= 52);
     await page.locator('#panel-references [data-close]').click();
     assert.equal(await page.locator('#settings-instructions').inputValue(), 'An unsaved draft');
     assert.ok(Math.abs(await page.locator('.settings-body').evaluate(el => el.scrollTop) - scroll) <= 2);
+    for (const child of ['skills', 'templates']) {
+      await page.locator(`#menu-${child}`).click();
+      assert.ok((await page.locator(`#panel-${child} > .panel-head`).boundingBox()).height <= 52, `${child} header should stay compact`);
+      await page.locator(`#panel-${child} [data-close]`).click();
+    }
   });
   await check('system controls use authenticated APIs and report the local MCP catalog', async () => {
     assert.equal((await page.request.get(`${url}/session/system`)).status(), 401);
     await page.locator('#system-version').scrollIntoViewIfNeeded();
     await page.locator('#system-providers button').first().waitFor();
-    await page.locator('#system-check-mcp').click();
+    assert.equal(await page.locator('#system-export').isHidden(), true, 'export appears only after a check');
+    await page.locator('#system-check').click();
     await page.waitForFunction(() => document.querySelector('#system-report')?.textContent.includes('MCP_CATALOG_OK'));
-    await page.waitForFunction(() => !document.querySelector('#system-export')?.disabled);
+    await page.waitForFunction(() => !document.querySelector('#system-export')?.hidden && !document.querySelector('#system-export')?.disabled);
     const download = page.waitForEvent('download'); await page.locator('#system-export').click();
     const downloaded = await download, reportPath = path.join(output, 'system-diagnostics.json');
     await downloaded.saveAs(reportPath);
@@ -179,18 +199,34 @@ try {
     assert.ok(!JSON.stringify(report).includes(temporary));
     assert.ok(!JSON.stringify(report).includes(os.homedir()));
   });
+  await check('SQLite history exposes storage, one full JSON export and confirmed clean-up', async () => {
+    await page.locator('#history-storage-section').scrollIntoViewIfNeeded();
+    assert.ok((await readFile(path.join(temporary, 'history.db'))).subarray(0, 15).toString() === 'SQLite format 3');
+    assert.equal(await page.locator('#history-recover-pending').isHidden(), true, 'recovery appears only while chats are unsaved');
+    const download = page.waitForEvent('download'); await page.locator('#history-export').click();
+    const exported = await download; const file = path.join(output, 'history-export.json'); await exported.saveAs(file);
+    const data = JSON.parse(await readFile(file, 'utf8')); assert.ok(data.sessions.length >= 2);
+    assert.ok(data.sessions.some(session => session.messages.some(message => message.text.includes('Browser review message'))));
+    await page.waitForFunction(() => document.querySelector('#history-storage-status')?.textContent.includes('History exported'));
+    await page.evaluate(() => { window.confirm = () => { throw new Error('Function window.confirm is not supported.'); }; });
+    await page.locator('#history-cleanup').click();
+    await page.locator('[data-confirm-cancel]').click();
+    await page.locator('#history-cleanup').click();
+    await page.locator('[data-confirm-accept]').click();
+    await page.waitForFunction(() => document.querySelector('#history-storage-status')?.textContent.includes('Deleted 0 old chats'));
+  });
   await check('temporary debug controls persist and stop their expiry', async () => {
-    await page.locator('#system-debug-on').click();
+    await page.locator('#system-debug').click();
     await page.waitForFunction(() => document.querySelector('#system-status')?.textContent.includes('enabled for 15 minutes'));
     const enabled = JSON.parse(await readFile(path.join(temporary, 'debug.json'), 'utf8'));
     assert.ok(enabled.expires > Date.now() && enabled.expires <= Date.now() + 15 * 60000);
-    await page.locator('#system-debug-off').click();
+    await page.waitForFunction(() => document.querySelector('#system-debug')?.textContent === 'Stop debug');
+    await page.locator('#system-debug').click();
     await page.waitForFunction(() => document.querySelector('#system-status')?.textContent.includes('Debug logging disabled'));
     assert.equal(JSON.parse(await readFile(path.join(temporary, 'debug.json'), 'utf8')).expires, 0);
   });
-  await check('rollback explains unavailable cached releases without starting an updater', async () => {
-    await page.locator('#system-rollback').click();
-    await page.waitForFunction(() => document.querySelector('#system-status')?.textContent.includes('No retained version'));
+  await check('there is no rollback control: older releases are not kept', async () => {
+    assert.equal(await page.locator('#system-rollback, #system-rollback-version').count(), 0);
   });
   await check('recovery controls fit a narrow pane in both themes', async () => {
     for (const theme of ['light', 'dark']) {
@@ -202,6 +238,31 @@ try {
     }
     await page.setViewportSize({ width: 1200, height: 900 });
   });
+  await check('Settings actions and fields stay aligned and readable in small panels', async () => {
+    for (const width of [280, 320, 380]) for (const theme of ['light', 'dark']) {
+      await page.setViewportSize({ width, height: 720 }); await page.locator('#theme-select').selectOption(theme);
+      assert.ok((await page.locator('#panel-settings > .panel-head').boundingBox()).height <= 52, `Settings header should stay compact at ${width}`);
+      for (const section of ['settings-system-section', 'history-storage-section']) {
+        await page.locator(`#${section}`).scrollIntoViewIfNeeded();
+        const layout = await page.locator(`#${section}`).evaluate(el => {
+          const bounds = el.getBoundingClientRect();
+          return { width: el.clientWidth, scroll: el.scrollWidth, buttons: [...el.querySelectorAll('button')].filter(b => !b.hidden).map(b => {
+            const r = b.getBoundingClientRect(); return { left: r.left, right: r.right, height: r.height, width: r.width, scroll: b.scrollWidth, client: b.clientWidth, inside: r.left >= bounds.left && r.right <= bounds.right };
+          }) };
+        });
+        assert.ok(layout.scroll <= layout.width + 1, `${section} must not overflow at ${width}`);
+        assert.ok(layout.buttons.every(b => b.inside && b.height >= 36 && b.scroll <= b.client + 1), `buttons must fit readable touch targets at ${width}: ${JSON.stringify(layout)}`);
+        if (width <= 320) {
+          const ids = section === 'settings-system-section' ? ['system-check', 'system-export', 'system-repair', 'system-debug']
+            : ['history-export', 'history-cleanup'];
+          const actions = await page.locator(ids.map(id => `#${id}`).join(',')).evaluateAll(buttons => buttons.map(b => { const r = b.getBoundingClientRect(); return { left: r.left, right: r.right }; }));
+          assert.ok(actions.every(b => Math.abs(b.left - actions[0].left) <= 1 && Math.abs(b.right - actions[0].right) <= 1), `small-panel actions must align at ${width}`);
+        }
+        await page.screenshot({ path: path.join(output, `${section}-${width}-${theme}.png`), animations: 'disabled' });
+      }
+    }
+    await page.setViewportSize({ width: 1200, height: 900 });
+  });
   await check('Settings and Testing fit desktop and narrow panes in both themes', async () => {
     for (const width of [1200, 380, 320]) {
       await page.setViewportSize({ width, height: 900 });
@@ -210,6 +271,8 @@ try {
         await page.locator('.settings-body').evaluate(el => { el.scrollTop = 0; });
         for (const panel of ['settings', 'testing']) {
           if (panel === 'testing') await page.locator('#menu-testing').click();
+          const header = await page.locator(`#panel-${panel} > .panel-head`).boundingBox();
+          assert.ok(header.height >= 40 && header.height <= 52, `${panel} header should stay compact at ${width}: ${header.height}px`);
           const bounds = await page.locator(`#panel-${panel}`).evaluate(el => ({ width: el.clientWidth, scroll: el.scrollWidth }));
           assert.ok(bounds.scroll <= bounds.width + 2, `${panel} overflow at ${width}`);
           if (panel === 'testing') {
@@ -226,7 +289,91 @@ try {
     }
     await page.locator('[data-close="settings"]').click();
   });
-  await check('root route also boots', async () => { await page.goto(url); await connected(); });
+  await check('pending history survives closing a pane and is saved when a new pane reconnects', async () => {
+    const context = await browser.newContext();
+    let tab = await context.newPage();
+    try {
+      await tab.route('**/session/history', route => {
+        const request = route.request();
+        if (request.method() === 'POST' && request.postDataJSON()?.action === 'save') return route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: 'Fixture history storage unavailable', code: 'HISTORY_STORAGE_FAILED' }) });
+        return route.continue();
+      });
+      await tab.goto(`${url}/index.html`); await tab.waitForFunction(() => document.querySelector('#connection-status')?.dataset.state === 'open');
+      await tab.locator('#prompt-input').fill('PENDING_CLOSE_RECOVERY'); await tab.locator('#send-button').click();
+      await tab.getByText('WEB_SMOKE_OK', { exact: true }).waitFor();
+      await tab.waitForFunction(() => /could not be saved|not saved/i.test(document.querySelector('#history-save-status')?.textContent ?? ''));
+      assert.ok(await tab.evaluate(() => Object.keys(localStorage).some(key => key.startsWith('excelPartner.historyOutbox.v1.') && localStorage.getItem(key).includes('PENDING_CLOSE_RECOVERY'))));
+      await tab.close(); tab = await context.newPage(); await tab.goto(`${url}/index.html`);
+      await tab.waitForFunction(() => document.querySelector('#connection-status')?.dataset.state === 'open');
+      await tab.locator('#history-button').click(); await tab.locator('.history-item').filter({ hasText: 'PENDING_CLOSE_RECOVERY' }).waitFor();
+      assert.equal(await tab.locator('.history-item').filter({ hasText: 'PENDING_CLOSE_RECOVERY' }).count(), 1);
+    } finally { await context.close(); }
+  });
+  await check('legacy history migrates once and retains the original source for rollback', async () => {
+    const legacy = await browser.newPage();
+    try {
+      await legacy.goto(`${url}/index.html`);
+      await legacy.waitForFunction(() => document.querySelector('#connection-status')?.dataset.state === 'open');
+      await legacy.evaluate(() => {
+        const now = Date.now();
+        localStorage.setItem('excelPartner.sessions.v1', JSON.stringify(['excel', 'word'].map(host => ({ id: 'legacy-' + host, provider: 'claude', host, title: 'Legacy ' + host,
+          startedAt: now, updatedAt: now, messages: [{ kind: 'user', text: 'LEGACY_' + host.toUpperCase() }], changes: [] }))));
+        localStorage.removeItem('excelPartner.historyMigrated.v1.excel');
+      });
+      await legacy.reload();
+      await legacy.waitForFunction(() => localStorage.getItem('excelPartner.historyMigrated.v1.excel') === '1');
+      await legacy.locator('#history-button').click();
+      await legacy.locator('.history-item').filter({ hasText: 'Legacy excel' }).waitFor();
+      assert.equal(await legacy.locator('.history-item').filter({ hasText: 'Legacy word' }).count(), 0);
+      assert.equal(await legacy.evaluate(() => JSON.parse(localStorage.getItem('excelPartner.sessions.v1')).length), 2);
+      await legacy.reload(); await legacy.waitForFunction(() => document.querySelector('#connection-status')?.dataset.state === 'open');
+      await legacy.locator('#history-button').click(); await legacy.locator('.history-item').filter({ hasText: 'Legacy excel' }).waitFor();
+      assert.equal(await legacy.locator('.history-item').filter({ hasText: 'Legacy excel' }).count(), 1);
+    } finally { await legacy.close(); }
+  });
+  await check('two panes discard stale preexisting outbox copies without blocking History or losing saved messages', async () => {
+    const context = await browser.newContext(); let tab = await context.newPage(), token;
+    tab.on('websocket', socket => socket.on('framereceived', frame => { try { const value = JSON.parse(String(frame.payload)); if (value.type === 'hello_ok') token = value.sessionToken; } catch {} }));
+    try {
+      await tab.goto(`${url}/index.html`); await tab.waitForFunction(() => document.querySelector('#connection-status')?.dataset.state === 'open');
+      assert.ok(token);
+      await tab.evaluate(async token => {
+        const headers = { authorization: `Bearer ${token}`, 'content-type': 'application/json' };
+        const stats = await (await fetch('/session/history?view=stats', { headers })).json();
+        const old = { id: 'existing-history-sync', host: 'excel', provider: 'copilot', title: 'EXISTING_HISTORY_SYNC', startedAt: 1, updatedAt: 2, messages: [{ kind: 'user', text: 'EXISTING_HISTORY_SYNC' }], changes: [] };
+        const newer = { ...old, messages: [...old.messages, { kind: 'assistant', text: 'Already committed answer' }] };
+        const response = await fetch('/session/history', { method: 'POST', headers, body: JSON.stringify({ action: 'save', session: newer, baseRevision: 0, generation: stats.generation, operationId: 'existing-sync-server' }) });
+        if (!response.ok) throw Error('Could not seed the saved fixture');
+        localStorage.setItem('excelPartner.sessions.v1', JSON.stringify([old])); localStorage.removeItem('excelPartner.historyMigrated.v1.excel');
+        localStorage.setItem('excelPartner.historyOutbox.v1.closed-pane', JSON.stringify([{ session: old, host: 'excel', baseRevision: 0, generation: stats.generation, operationId: 'delayed-existing-snapshot' }]));
+      }, token);
+      const second = await context.newPage(); await Promise.all([tab.reload(), second.goto(`${url}/index.html`)]);
+      for (const pane of [tab, second]) {
+        await pane.waitForFunction(() => document.querySelector('#connection-status')?.dataset.state === 'open');
+        await pane.locator('#history-button').click(); const row = pane.locator('.history-item').filter({ hasText: 'EXISTING_HISTORY_SYNC' });
+        await row.waitFor(); assert.equal(await row.count(), 1); await row.click();
+        await pane.getByText('Already committed answer', { exact: true }).waitFor();
+        assert.ok(!(await pane.locator('#history-save-status').innerText()).includes('History is unavailable'));
+      }
+      await tab.waitForFunction(() => !Object.keys(localStorage).some(key => key.startsWith('excelPartner.historyOutbox.v1.') && (localStorage.getItem(key) ?? '').includes('delayed-existing-snapshot')));
+    } finally { await context.close(); }
+  });
+  await check('OpenCode retries are visible and an empty response releases the composer', async () => {
+    const context = await browser.newContext(), pane = await context.newPage();
+    try {
+      await pane.goto(`${url}/index.html`);
+      await pane.waitForFunction(() => document.querySelector('#connection-status')?.dataset.state === 'open');
+      await pane.locator('#menu-button').click(); await pane.locator('#provider-select').selectOption('opencode');
+      await pane.locator('[data-close="settings"]').click();
+      await pane.locator('#prompt-input').fill('BROWSER_OPENCODE_PROGRESS'); await pane.locator('#send-button').click();
+      await pane.locator('.thinking-label').filter({ hasText: 'model service overloaded; retrying' }).waitFor();
+      await pane.getByText('OpenCode ended without a response. Try again or select another model.', { exact: true }).waitFor();
+      assert.equal(await pane.locator('.thinking-label').count(), 0);
+      await pane.waitForFunction(() => document.querySelector('#send-button')?.dataset.mode !== 'stop');
+      assert.equal(await pane.locator('#prompt-input').isEditable(), true);
+    } finally { await context.close(); }
+  });
+  await check('root route also boots' , async () => { await page.goto(url); await connected(); });
   await check('no uncaught browser errors or failed requests', async () => { assert.deepEqual(errors, []); assert.deepEqual(failedRequests, []); });
 } finally {
   await browser?.close();

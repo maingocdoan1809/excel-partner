@@ -58,11 +58,12 @@ copied, and no global provider package or PATH entry is changed.
 
 ## Coverage limits
 
-Busy-service refusal, failed activation, interrupted update recovery, cached
-offline rollback, checksum repair and owner-aware uninstall have automated
+Busy-service refusal, failed activation, interrupted update recovery, deletion of
+the previous release after a switch, rollback by reinstalling, checksum repair and
+owner-aware uninstall have automated
 contract tests with fake installers and service lifecycle hooks. A production
 Office installation was not upgraded, rolled back or uninstalled during these
-checks. Browser rollback with no cached release was exercised directly.
+checks. The browser checks confirm that Settings has no rollback control.
 
 Excel was not running and no connected Office document session was available.
 These checks therefore do not prove Office.js execution or writes in a real

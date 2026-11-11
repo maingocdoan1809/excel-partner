@@ -35,6 +35,10 @@ function livePid() {
   if (!Number.isSafeInteger(pid) || pid <= 0) return null;
   try { process.kill(pid, 0); return pid; } catch { return null; }
 }
+/** The leftover-process-record helpers live beside the gateway CLI, which uses them too. */
+const recordTools = () => import(pathToFileURL(path.join(root, "gateway", "bin", "process-record.mjs")).href);
+/** Any release of this product, wherever it is installed: node running dist/bridge/src/index.js. */
+const BRIDGE_PROCESS = /node(?:\.exe)?"?\s+"?[^"]*[\\/]dist[\\/]bridge[\\/]src[\\/]index\.js/i;
 function bridgeEnv() {
   return { ...process.env, BRIDGE_CERT: cert, BRIDGE_KEY: key, BRIDGE_CONFIG: configFile,
     OFFICE_PARTNER_DATA_DIR: dataDir, OFFICE_PARTNER_BRIDGE_INSTANCE: cryptoInstance(),
@@ -52,6 +56,13 @@ async function health() {
     req.on("error", () => resolve(false));
     req.on("timeout", () => { req.destroy(); resolve(false); });
   });
+}
+async function waitForHealth(ms) {
+  for (let waited = 0; waited < ms; waited += 200) {
+    if (await health()) return true;
+    await new Promise((resolve) => setTimeout(resolve, 200));
+  }
+  return false;
 }
 async function ensureCertificate() {
   if (existsSync(cert) && existsSync(key)) {
@@ -84,13 +95,22 @@ async function ensureCertificate() {
   writeFileSync(cert, pems.cert, { mode: 0o600 });
   writeFileSync(key, pems.private, { mode: 0o600 });
 }
-async function start() {
+async function start({ repair = false } = {}) {
   if (!existsSync(cert) || !existsSync(key)) fail("Run 'office-partner setup' first.");
-  if (await health()) {
-    if (!livePid()) fail("Port 8765 is already in use by another bridge. Stop it before starting this package.");
-    console.log("Bridge is already running at https://localhost:8765"); return;
+  if (await health()) { console.log("Bridge is already running at https://localhost:8765"); return; }
+  const recorded = livePid();
+  if (recorded) {
+    // A process number alone proves nothing: after a restart Windows gives the same number to another program.
+    const { processOwner, decideRecorded } = await recordTools();
+    const action = await decideRecorded(processOwner(recorded, line => BRIDGE_PROCESS.test(line)), { repair, waitHealthy: () => waitForHealth(30_000) });
+    if (action === "ready") { console.log("Bridge is already running at https://localhost:8765"); return; }
+    if (action === "fail") fail(`Bridge process ${recorded} is running but not answering. Open Start > "Office Partner - Fix connection", or run 'office-partner stop' and retry.`);
+    if (action === "kill") {
+      process.kill(recorded);
+      for (let i = 0; i < 25 && livePid(); i++) await new Promise((resolve) => setTimeout(resolve, 200));
+    }
+    rmSync(pidFile, { force: true });
   }
-  if (livePid()) fail(`Bridge process ${livePid()} exists but is not healthy. Run 'office-partner stop' and retry.`);
   if (!existsSync(bridge)) fail("Package is missing its compiled bridge. Reinstall the package.");
   mkdirSync(dataDir, { recursive: true });
   const out = openSync(path.join(dataDir, "bridge.log"), "a");
@@ -130,11 +150,13 @@ async function stop() {
   if (pid) {
     // Legacy bridge: confirm this PID is Node executing this installation before terminating it.
     if (process.platform !== "win32") fail("Legacy bridge ownership could not be verified. Stop it from its original installation.");
-    const script = `Get-CimInstance Win32_Process -Filter 'ProcessId = ${pid}' | Select-Object Name,CommandLine | ConvertTo-Json -Compress`;
-    const observed = spawnSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-EncodedCommand", Buffer.from(script, "utf16le").toString("base64")], { encoding: "utf8", windowsHide: true, timeout: 5000 });
-    let processInfo; try { processInfo = JSON.parse(observed.stdout); } catch { fail("Could not verify the recorded bridge process."); }
     const escapedBridge = bridge.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    if (!/^node(?:\.exe)?$/i.test(processInfo?.Name ?? "") || !new RegExp(escapedBridge + '(?=["\\s]|$)', "i").test(processInfo?.CommandLine ?? "")) fail("Bridge PID belongs to another process; no process was stopped.");
+    const strict = new RegExp(escapedBridge + '(?=["\\s]|$)', "i");
+    const owner = (await recordTools()).processOwner(pid, line => strict.test(line));
+    if (owner === "unknown") fail("Could not verify the recorded bridge process.");
+    // Nothing answers and the recorded number now belongs to another program: the record is left over from before a restart.
+    if (owner === "other" && (await health()) === false) { rmSync(pidFile, { force: true }); return; }
+    if (owner !== "ours") fail("Bridge PID belongs to another process; no process was stopped.");
     process.kill(pid);
     for (let i = 0; i < 25; i++) {
       try { process.kill(pid, 0); } catch { break; }
@@ -293,6 +315,7 @@ const HELP = `Usage: office-partner <command> [addin|gateway|all]
   versions   Show retained releases and managed CLI versions.
   rollback   Restore the previous complete release, or rollback <version>.
   repair     Verify the release and repair its managed runtimes while services are stopped.
+  fix        Start the bridge and gateway again if the pane does not open (Start Menu: Office Partner - Fix connection).
   diagnostics export <new-file.json> saves diagnostic metadata for support.
   debug      on | off (on expires after 15 minutes).
   login      Sign in once for the QA assistant: login <name> <url> [--origin <url>]. Also: sessions, logout <name>.
@@ -306,6 +329,22 @@ const HELP = `Usage: office-partner <command> [addin|gateway|all]
 Gateway settings use: office-partner gateway <config|alias|model-name|provider|models|warmup|autostart> ...
 Examples: office-partner setup            office-partner setup gateway
           office-partner start all        office-partner info --copy`;
+
+/**
+ * Management commands (update, repair, rollback, doctor...) run the recovery tools in the data folder, not this package's own
+ * copy. A managed update installs the new release beside the old one and never touches the global npm package, so this
+ * package's copy of those commands would stay as old as the day it was installed. The recovery copy is refreshed by every
+ * update and does not depend on any release being intact. Without a recovery launcher (a source checkout, a fresh install
+ * before `setup`) the commands run from here as before.
+ */
+function runWithRecoveryTools(args) {
+  const entry = path.join(dataDir, "recovery", "recovery.mjs");
+  if (process.env.OFFICE_PARTNER_RECOVERY_ACTIVE === "1" || !existsSync(entry)) return false;
+  const result = spawnSync(process.execPath, [entry, ...args], { stdio: "inherit", env: { ...process.env, OFFICE_PARTNER_RECOVERY_ACTIVE: "1" } });
+  if (result.error) return false;
+  process.exitCode = result.status ?? 1;
+  return true;
+}
 
 async function main() {
   let args = process.argv.slice(2).filter(arg => arg !== "--help");
@@ -324,6 +363,8 @@ async function main() {
   }
   const command = args[0] || "help";
   if (command === "help" || process.argv.includes("--help")) { console.log(HELP); return; }
+  if (command === "doctor" && runWithRecoveryTools(args)) return;
+  if (command === "gateway" && args[1] === "doctor" && runWithRecoveryTools(["doctor", "gateway", ...args.slice(2)])) return;
   if (command === "doctor" || command === "gateway" && args[1] === "doctor") {
     const { doctorMain } = await import("./doctor.mjs");
     process.exitCode = await doctorMain(command === "doctor" ? args.slice(1) : ["gateway", ...args.slice(2)], { root }).catch(() => {
@@ -332,9 +373,11 @@ async function main() {
     });
     return;
   }
-  if (["providers", "versions", "rollback", "repair", "diagnostics", "debug", "update"].includes(command)) {
+  if (["providers", "versions", "rollback", "repair", "diagnostics", "debug", "update", "fix"].includes(command)) {
+    const managementArgs = command === "update" && updateSpec ? ["update", "--from", updateSpec] : args;
+    if (runWithRecoveryTools(managementArgs)) return;
     const { managementMain } = await import("./manage.mjs");
-    await managementMain(command === "update" && updateSpec ? ["update", "--from", updateSpec] : args, { root, dataDir }); return;
+    await managementMain(managementArgs, { root, dataDir }); return;
   }
   const { dispatchActive } = await import("./manage.mjs");
   if (command !== "setup" && dispatchActive(root, args, dataDir)) return;
@@ -396,8 +439,8 @@ async function main() {
       if (wantGateway) add("Gateway", gatewayStep(["setup"]));
       break;
     case "start":
-      if (wantAddin) add("Add-in", addin(start));
-      if (wantGateway) add("Gateway", gatewayStep(["start"]));
+      if (wantAddin) add("Add-in", addin(() => start({ repair: flags.includes("--repair") })));
+      if (wantGateway) add("Gateway", gatewayStep(["start", ...flags.filter(flag => flag === "--repair")]));
       break;
     case "stop":
       if (wantGateway) add("Gateway", gatewayStep(["stop"]));

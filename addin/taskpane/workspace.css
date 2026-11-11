@@ -95,21 +95,22 @@ button:focus-visible, select:focus-visible, textarea:focus-visible { outline: 2p
 .workspace-actions button:hover { background: var(--blue-100); color: var(--text); filter: none; }
 .panel { background: var(--bg); }
 .panel:not([hidden]) { animation: panel-enter .16s ease-out; }
-.panel-head { min-height: 64px; padding-top: 12px; flex-shrink: 0; }
-.panel-head h2 { font-size: 20px; font-weight: 600; }
-.back { display: grid; place-items: center; flex: 0 0 34px; width: 34px; height: 34px; padding: 0; border-radius: 9px; background: transparent; border: 0; color: var(--text-secondary); }
+.panel-head { min-height: 48px; padding: 8px 0; flex-shrink: 0; }
+.panel-head h2 { font-size: 16px; font-weight: 600; }
+.back { display: grid; place-items: center; flex: 0 0 28px; width: 28px; height: 28px; padding: 0; border-radius: 7px; background: transparent; border: 0; color: var(--text-secondary); }
 .back:hover { background: var(--blue-100); filter: none; }
 body.settings-active .app-header, body.settings-active .composer, body.settings-active .auth-notice { display: none; }
 body.settings-active .panel { padding: 0 20px; }
-body.settings-active .panel-head { min-height: 76px; border-bottom: 1px solid var(--border); margin-bottom: 16px; }
+body.settings-active .panel-head { min-height: 48px; padding-block: 8px; border-bottom: 1px solid var(--border); margin-bottom: 12px; }
+:is(#panel-templates, #panel-references, #panel-skills) > .panel-head { min-height: 48px; padding-block: 8px; margin-bottom: 12px; }
 body.settings-active .panel:not(.settings-panel) > .panel-head,
 body.settings-active .panel:not(.settings-panel) > .panel-body,
 body.settings-active .panel:not(.settings-panel) > .template-help { width: 100%; max-width: 672px; margin-inline: auto; }
 body.settings-active .panel:not(.settings-panel) > .panel-body { padding-bottom: 28px; scrollbar-width: thin; overscroll-behavior: contain; }
 body.settings-active .settings-panel { padding: 0; }
-.settings-panel .panel-head { width: 100%; max-width: 720px; margin-inline: auto; padding: 20px 24px 16px; gap: 12px; align-items: flex-start; }
+.settings-panel .panel-head { width: 100%; max-width: 720px; margin-inline: auto; padding: 8px 24px; gap: 10px; align-items: center; }
 .settings-heading { flex: 1; min-width: 0; }
-.settings-heading p { margin: 5px 0 0; font-size: 12px; color: var(--text-secondary); line-height: 1.5; }
+.settings-heading p { display: none; }
 .settings-body { flex: 1; min-height: 0; overflow-y: auto; padding: 8px 24px 32px; scrollbar-width: thin; scrollbar-gutter: stable; overscroll-behavior: contain; }
 .settings-group { max-width: 672px; margin: 0 auto 24px; }
 .settings-group-title { margin: 0 0 10px 2px; color: var(--text-secondary); font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; }
@@ -126,11 +127,36 @@ body.settings-active .settings-panel { padding: 0; }
 #settings-instructions-status { min-height: 18px; margin: 8px 0 0; color: var(--text-secondary); font-size: 11px; line-height: 1.6; overflow-wrap: anywhere; }
 #settings-instructions-status[data-state="error"] { color: var(--danger, #c94b4b); }
 #settings-instructions-status[data-state="saved"] { color: var(--accent-strong); }
-.settings-panel .secondary, .settings-primary { flex-shrink: 0; min-height: 34px; border: 1px solid var(--border); background: transparent; color: var(--text); font-size: 12px; border-radius: 8px; padding: 7px 11px; }
+.settings-panel .secondary, .settings-primary { min-width: 0; min-height: 38px; border: 1px solid var(--border); background: var(--panel); color: var(--text); font-size: 12px; font-weight: 500; line-height: 1.45; border-radius: 9px; padding: 9px 12px; white-space: normal; overflow-wrap: anywhere; justify-content: center; text-align: center; }
 .settings-panel .secondary:hover:not(:disabled) { background: var(--blue-100); filter: none; }
 .settings-panel .settings-primary { background: var(--btn); border-color: var(--btn); color: var(--on-mint); }
 .settings-panel button:disabled { opacity: .45; cursor: not-allowed; }
-.settings-panel .settings-danger { color: var(--danger, #c94b4b); }
+.settings-panel .settings-danger { color: #a32d2d; border-color: #a32d2d40; background: #a32d2d08; }
+:root[data-theme="dark"] .settings-panel .settings-danger { color: #f6a3a3; border-color: #f6a3a340; background: #f6a3a308; }
+.settings-panel button:active:not(:disabled) { transform: translateY(1px); }
+.settings-card, .settings-section { min-width: 0; }
+.settings-subsection { margin-top: 20px; padding-top: 18px; border-top: 1px solid var(--border); }
+.settings-subsection h4 { margin: 0 0 10px; font-size: 12px; font-weight: 600; color: var(--text); }
+.settings-subsection > .settings-description { margin: -3px 0 12px; }
+.settings-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-top: 10px; }
+.settings-actions > button { width: 100%; height: 100%; background: var(--blue-50); }
+.settings-actions > .settings-action-wide { grid-column: 1 / -1; }
+.inline-confirmation { margin-top: 14px; padding: 12px; border: 1px solid var(--field); border-radius: 10px; background: var(--blue-50); }
+.inline-confirmation > p { margin: 0; color: var(--text); font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; }
+.settings-field { display: grid; gap: 8px; min-width: 0; font-size: 12px; line-height: 1.5; color: var(--text-secondary); }
+.settings-field select, .settings-field input { min-width: 0; width: 100%; max-width: 100%; min-height: 38px; margin: 0; padding: 8px 10px; border: 1px solid var(--border); border-radius: 9px; background: var(--blue-50); color: var(--text); font: inherit; }
+.settings-number-field { display: flex; align-items: center; gap: 10px; }
+.settings-number-field input { flex: 0 1 90px; font-variant-numeric: tabular-nums; }
+#system-providers { display: grid; gap: 10px; margin-top: 14px; }
+.system-provider { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 12px; padding: 12px; border: 1px solid var(--border); border-radius: 11px; background: var(--blue-50); }
+.system-provider-copy { min-width: 0; }
+.system-provider-copy > strong { font-size: 12px; font-weight: 600; color: var(--text); }
+.system-provider .settings-description { margin-top: 4px; font-size: 11px; }
+.system-provider > button { background: var(--panel); }
+#system-status, #history-storage-status { margin-top: 12px; }
+#system-status[data-state="fail"] { padding: 10px 12px; border: 1px solid #a32d2d40; border-radius: 9px; background: #a32d2d08; color: #a32d2d; font-weight: 600; }
+:root[data-theme="dark"] #system-status[data-state="fail"] { color: #f6a3a3; border-color: #f6a3a340; background: #f6a3a308; }
+#system-report:not(:empty) { padding: 12px; border: 1px solid var(--border); border-radius: 9px; background: var(--blue-50); font-size: 11px; line-height: 1.6; }
 .settings-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
 .settings-row > div:first-child { min-width: 0; flex: 1; }
 .settings-row .theme-select { flex: 0 0 144px; width: 144px; max-width: 100%; min-height: 36px; margin: 0; border-color: var(--border); border-radius: 8px; font-size: 12px; background: var(--blue-50); }
@@ -188,11 +214,20 @@ body.settings-active .settings-panel { padding: 0; }
   .settings-row > div:first-child { flex-basis: 110px; }
   .settings-row .theme-select { flex-basis: 128px; width: 128px; }
   .settings-save-row { justify-content: flex-start; }
+  .system-provider { grid-template-columns: minmax(0, 1fr); gap: 10px; }
+  .system-provider > button { width: 100%; }
   .settings-panel .panel-head { padding-inline: 16px; }
   .settings-body { padding-inline: 12px; }
   body.settings-active .panel:not(.settings-panel) { padding-inline: 12px; }
   .testing-section { padding: 14px; }
   .testing-form button[type="submit"] { width: 100%; justify-content: center; }
+}
+@media (max-width: 360px) {
+  .settings-actions { grid-template-columns: minmax(0, 1fr); }
+  .settings-save-row { display: grid; grid-template-columns: minmax(0, 1fr); }
+  .settings-row > div:first-child { flex-basis: 100%; }
+  .settings-row .theme-select { flex-basis: 100%; width: 100%; }
+  .settings-row > .settings-danger { width: 100%; }
 }
 @media (forced-colors: active) {
   .settings-toggle input { appearance: auto; }

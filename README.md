@@ -19,7 +19,7 @@ Excel task pane  <-->  local bridge (localhost:8765)  <-->  your provider CLI (C
 ## Requirements
 
 - Windows with Excel, Word and/or PowerPoint desktop (ExcelApi 1.9+, WordApi 1.1+, PowerPointApi 1.2+; many features need a newer version, and a tool that needs one says so instead of failing)
-- Node.js 20.19+ or 22.12+ and npm, installed on Windows
+- Node.js 20.19+ (major 20), or 22.12+ below major 26, and npm, installed on Windows
 - An account with at least one supported provider; sign-in stays under the provider CLI's control
 
 ## Quick start
@@ -183,9 +183,9 @@ Cells that already hold something are not overwritten unless you agree; cells th
 | `office-partner uninstall` | Stop, unregister and remove start-up and certificate trust |
 | `office-partner help` | Full CLI usage |
 
-**Update:** use **Settings > Updates** or `office-partner update`. A complete release, dependencies and selected provider versions are staged and verified before services stop. Busy services refuse the switch. If activation fails, the retained release and CLI selection are restored. Settings reports failures; the update log is `%LOCALAPPDATA%\Excel Partner\update.log`. Source checkouts can also stage managed releases. A global npm install updates the launcher; use `office-partner update` to switch the managed installation.
+**Update:** use **Settings > Updates** or `office-partner update`. A complete release, dependencies and selected provider versions are staged and verified before services stop. Busy services refuse the switch. If activation fails, the previous release and CLI selection are restored. Once the new release is running, the old one is deleted: only the running release is kept on disk. Settings reports failures; the update log is `%LOCALAPPDATA%\Excel Partner\update.log`. Source checkouts can also stage managed releases. A global npm install updates the launcher; use `office-partner update` to switch the managed installation.
 
-`office-partner update --from office-partner@<exact-version>` or `--from <path.tgz>` selects an artifact. `office-partner versions` lists retained releases and provider versions. `office-partner rollback [version]` restores a complete cached release without a download. Saved conversations keep their recorded adapter/SDK/CLI profile; failed turns are never replayed during fallback. Settings > App & storage > System & recovery offers rollback, repair, diagnostics and temporary debug logging. See [diagnostics](docs/diagnostics.md) for migration, recovery commands and validation limits.
+`office-partner update --from office-partner@<exact-version>` or `--from <path.tgz>` selects an artifact. `office-partner versions` shows the installed release and provider versions. Going back to an older version means installing it from npm: `office-partner rollback <version>` is the same as `office-partner update --from office-partner@<version>`. Saved conversations keep resuming with the CLI version they were created with while one is still in use; failed turns are never replayed during fallback. Settings > App & storage > System & recovery offers repair (a damaged installation is installed again from npm), diagnostics and temporary debug logging. If the pane does not open after a restart, use Start > Office Partner - Fix connection. See [diagnostics](docs/diagnostics.md) for migration, recovery commands and validation limits.
 
 **Uninstall:** `office-partner uninstall all`, then `npm uninstall -g office-partner` (and `npm uninstall -g excel-partner` if the old name is still installed), then restart Word, Excel and PowerPoint. Managed app releases and CLIs are removed after both add-in and gateway are uninstalled. Uninstalling one retains shared runtimes for the other. User data, provider sign-ins/history, the recovery launcher and external CLIs stay on disk. Running only `npm uninstall -g` does not perform this application cleanup.
 
@@ -227,7 +227,7 @@ Optional `config.json` settings (restart the bridge after editing):
 
 Useful environment variables: `BRIDGE_ALLOW_OFFICE_JS`, `BRIDGE_PYTHON_BIN`, `BRIDGE_BASH_BIN`, `BRIDGE_PLAYWRIGHT_EXECUTABLE`, `BRIDGE_USAGE_FILE`.
 
-The bridge listens only on `localhost:8765` over HTTPS. Chat history is stored in the task pane; the usage ledger (IDs, provider, model, duration, token counts) is local and contains no workbook content. Click the info icon beside **Ask/Auto** to see session tokens and export usage as CSV.
+The bridge listens only on `localhost:8765` over HTTPS. Chat history is stored in a local SQLite database managed by the bridge (with browser recovery copies for pending saves); the usage ledger (IDs, provider, model, duration, token counts) is local and contains no workbook content. Click the info icon beside **Ask/Auto** to see session tokens and export usage as CSV.
 
 ## Troubleshooting
 
@@ -251,3 +251,5 @@ Start with `office-partner doctor`. Then:
 ## License
 
 MIT
+
+See [durable history storage](docs/history-storage.md) for migration, pending-save recovery, export, backups and Windows Node compatibility.

@@ -1,6 +1,6 @@
 # Troubleshooting
 
-Install, certificate, connection and update problems are covered in the README ("Troubleshooting" section). This page explains behavior you may see while the assistant works. Restarting the bridge means `office-partner restart`; from a source checkout it means `bash scripts/stop.sh && bash scripts/start.sh`.
+Install, certificate, connection and update problems are covered in the README ("Troubleshooting" section). This page explains behavior you may see while the assistant works. Restarting the bridge means `office-partner restart`.
 
 ## The AI says it cannot draw shapes / lacks a tool
 

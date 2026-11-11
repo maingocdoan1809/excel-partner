@@ -73,14 +73,25 @@ export class ProfiledAdapter implements ProviderAdapter {
   async startSession(ctx: StartSessionContext) {
     let state = await this.resolve(ctx.resumeSessionId);
     let id: string;
-    try { id = await state.adapter.startSession(ctx); }
+    const open = async (adapter: ProviderAdapter) => {
+      let starting = true, closed = false, accepted = false;
+      const worker = await adapter.startSession({ ...ctx, onRuntimeClosed: () => {
+        if (starting) closed = true;
+        else if (accepted) ctx.onRuntimeClosed?.();
+      } });
+      starting = false;
+      if (closed) { await adapter.closeSession(worker); throw new Error("Provider runtime closed during initialization"); }
+      accepted = true;
+      return worker;
+    };
+    try { id = await open(state.adapter); }
     catch (error) {
       // No prompt has been sent. Auth/policy/model errors never take this path.
       if (ctx.resumeSessionId || !state.profile || !/ENOENT|MODULE_NOT_FOUND|Cannot find module|ERR_DLOPEN_FAILED|CLI.*not found|unsupported protocol|protocol version mismatch|unknown option|unrecognized option/i.test(String(error))) throw error;
       const fallback = store.fallbackProfile(this.dataDir, this.id, state.profile.id);
       if (!fallback) throw error;
       state = await this.resolve(undefined, { ...fallback, fallbackFrom: state.profile.id });
-      id = await state.adapter.startSession(ctx);
+      id = await open(state.adapter);
     }
     this.sessions.set(id, state);
     if (state.profile?.fallbackFrom) this.runtime.logger.warn("provider_runtime_fallback", { provider: this.id });

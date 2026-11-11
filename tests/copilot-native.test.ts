@@ -272,6 +272,12 @@ describe("Copilot native question transport", () => {
       command: { name: "review", args: "" }, signal: new AbortController().signal }, process.env)) { /* drain */ }
     expect(sdk.run).toHaveBeenCalledWith({ prompt: "Review the changes", agentMode: "interactive" }, expect.any(Number));
   });
+  it("R10 resolves copied Windows Path and PathExt variables case-insensitively", () => {
+    const executable = path.join(dir, "copilot.TEST"); fs.writeFileSync(executable, "");
+    vi.stubGlobal("process", { ...process, platform: "win32" });
+    try { expect(resolveCopilotPath("copilot", { Path: dir, PathExt: ".TEST" })).toBe(fs.realpathSync(executable)); }
+    finally { vi.unstubAllGlobals(); }
+  });
   it.skipIf(process.platform !== "win32")("resolves Windows PATH commands with or without an extension", () => {
     const executable = path.join(dir, "copilot.EXE");
     fs.writeFileSync(executable, "");

@@ -289,11 +289,13 @@ export class CopilotNativeSessions {
 
 /** The SDK needs an actual file path, while the add-in setting also accepts PATH commands. */
 export function resolveCopilotPath(command: string, env: NodeJS.ProcessEnv): string {
-  const suffixes = (env.PATHEXT ?? ".EXE;.CMD;.BAT").split(";");
+  // Spreading process.env loses Windows' case-insensitive property lookup.
+  const value = (name: string) => env[Object.keys(env).find(key => process.platform === "win32" ? key.toUpperCase() === name : key === name) ?? name];
+  const suffixes = (value("PATHEXT") ?? ".EXE;.CMD;.BAT").split(";");
   // npm also installs a Unix shell script without an extension. Windows must prefer its .cmd shim.
   const extensions = process.platform === "win32" ? path.extname(command) ? ["", ...suffixes] : [...suffixes, ""] : [""];
   const candidates = path.isAbsolute(command) || command.includes(path.sep) ? [command]
-    : (env.PATH ?? "").split(path.delimiter).flatMap(directory => extensions.map(extension => path.join(directory, command + extension)));
+    : (value("PATH") ?? "").split(path.delimiter).flatMap(directory => extensions.map(extension => path.join(directory, command + extension)));
   for (const candidate of candidates) {
     if (!fs.existsSync(candidate)) continue;
     let resolved = fs.realpathSync(candidate);

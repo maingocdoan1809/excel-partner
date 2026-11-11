@@ -13,6 +13,7 @@ $developerKey = 'HKCU:\Software\Microsoft\Office\16.0\WEF\Developer'
 $runKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
 $manifestId = ([xml](Get-Content -LiteralPath $ManifestPath -Raw)).OfficeApp.Id
 $runName = 'Excel Partner Bridge'
+$fixShortcut = Join-Path ([Environment]::GetFolderPath('Programs')) 'Office Partner - Fix connection.lnk'
 
 if ($Action -eq 'register') {
   if (-not (Test-Path -LiteralPath $certPath)) { throw "Certificate missing: $certPath" }
@@ -30,11 +31,20 @@ if ($Action -eq 'register') {
   Copy-Item -LiteralPath $ManifestPath -Destination $installedManifest -Force
   New-Item -Path $developerKey -Force | Out-Null
   New-ItemProperty -Path $developerKey -Name $manifestId -Value $installedManifest -PropertyType String -Force | Out-Null
-  New-ItemProperty -Path $runKey -Name $runName -Value ('"' + $NodePath + '" "' + $CliPath + '" start') -PropertyType String -Force | Out-Null
+  New-ItemProperty -Path $runKey -Name $runName -Value ('"' + $NodePath + '" "' + $CliPath + '" start --at-logon') -PropertyType String -Force | Out-Null
+  # A button outside the task pane: the pane is served by the bridge, so it cannot offer one while the bridge is down.
+  $shell = New-Object -ComObject WScript.Shell
+  $link = $shell.CreateShortcut($fixShortcut)
+  $link.TargetPath = $NodePath
+  $link.Arguments = '"' + $CliPath + '" fix'
+  $link.WorkingDirectory = $DataDir
+  $link.Description = 'Start Office Partner again if its pane does not open or shows an error'
+  $link.Save()
   Write-Host 'Registered the add-in and bridge startup for this Windows user.'
 } else {
   Remove-ItemProperty -Path $developerKey -Name $manifestId -ErrorAction SilentlyContinue
   Remove-ItemProperty -Path $runKey -Name $runName -ErrorAction SilentlyContinue
+  Remove-Item -LiteralPath $fixShortcut -ErrorAction SilentlyContinue
   if (Test-Path -LiteralPath $certPath) {
     $cert = New-Object System.Security.Cryptography.X509Certificates.X509Certificate2 -ArgumentList $certPath
     $store = New-Object System.Security.Cryptography.X509Certificates.X509Store('Root', 'CurrentUser')
@@ -44,5 +54,5 @@ if ($Action -eq 'register') {
     } finally { $store.Close() }
   }
   Remove-Item -LiteralPath $installedManifest -ErrorAction SilentlyContinue
-  Write-Host 'Removed the add-in registration, startup entry and local certificate trust.'
+  Write-Host 'Removed the add-in registration, startup entry, Fix connection shortcut and local certificate trust.'
 }

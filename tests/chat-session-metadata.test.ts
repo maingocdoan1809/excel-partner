@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import fs from "node:fs";
 import vm from "node:vm";
 import ts from "typescript";
-import { bindProviderSession, newSession, SessionStore } from "../addin/taskpane/ui/sessions.js";
+import { bindProviderSession, newSession, type StoredSession } from "../addin/taskpane/ui/sessions.js";
 
 // Exercise the task pane's actual event handler without starting Office or the DOM.
 const main = fs.readFileSync(new URL("../addin/taskpane/main.ts", import.meta.url), "utf8").replace(/\r\n/g, "\n");
@@ -12,12 +12,13 @@ const handler = ts.transpileModule(main.slice(start, main.indexOf("\n}\n", start
 }).outputText;
 
 function setup() {
-  const data = new Map<string, string>();
-  const store = new SessionStore({
-    getItem: key => data.get(key) ?? null,
-    setItem: (key, value) => { data.set(key, value); },
-    removeItem: key => { data.delete(key); },
-  });
+  // Stands in for DurableHistory: a chat is kept once it has a user message, and a saved chat is returned as a copy.
+  const saved = new Map<string, StoredSession>();
+  const store = {
+    save: (chat: StoredSession) => { if (chat.messages.some(m => m.kind === "user")) saved.set(chat.id, structuredClone(chat)); },
+    get: (id: string) => saved.get(id) ?? null,
+    flush: async () => {},
+  };
   const session = newSession("claude");
   session.messages.push({ kind: "user", text: "Keep this conversation" });
   const context = vm.createContext({

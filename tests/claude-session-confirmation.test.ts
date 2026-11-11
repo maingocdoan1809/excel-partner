@@ -2,6 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { EventEmitter } from "node:events";
 import { PassThrough } from "node:stream";
 import { createInterface } from "node:readline";
+import fs from "node:fs";
+import path from "node:path";
 import type { ProviderEvent } from "../protocol/src/index.js";
 import type { StartSessionContext } from "../providers/src/types.js";
 
@@ -67,6 +69,32 @@ async function turn(providerSessionId: string, signal = new AbortController().si
 }
 
 describe("Claude persistent sessions", () => {
+  it("R11 carries a large Unicode Office system prompt in a private file with bounded launch arguments", async () => {
+    const originalSpawn = cli.spawn.getMockImplementation()!;
+    cli.spawn.mockImplementation((command, args, options) => {
+      if (args.join(" ").length > 28_000) throw new Error("spawn ENAMETOOLONG");
+      return originalSpawn(command, args, options);
+    });
+    const prompt = "Office client instructions — tiếng Việt\n".repeat(5_000) + "  exact trailing whitespace\n";
+    const id = await start(undefined, { systemPrompt: prompt });
+    const args = cli.spawn.mock.calls[0]![1] as string[];
+    expect(args.join(" ").length).toBeLessThan(4_000);
+    expect(args).not.toContain("--system-prompt");
+    const file = args[args.indexOf("--system-prompt-file") + 1]!;
+    expect(fs.readFileSync(file, "utf8")).toBe(prompt);
+    if (process.platform !== "win32") expect(fs.statSync(file).mode & 0o777).toBe(0o600);
+    expect((await turn(id)).at(-1)).toMatchObject({ reason: "completed" });
+    await adapter.closeSession(id); expect(fs.existsSync(path.dirname(file))).toBe(false);
+    const resumedPrompt = "Updated Office instructions\n" + prompt;
+    const resumed = await start("confirmed-session", { systemPrompt: resumedPrompt });
+    const resumedArgs = cli.spawn.mock.calls[1]![1] as string[];
+    const resumedFile = resumedArgs[resumedArgs.indexOf("--system-prompt-file") + 1]!;
+    expect(resumedArgs[resumedArgs.indexOf("--resume") + 1]).toBe("confirmed-session");
+    expect(resumedFile).not.toBe(file); expect(fs.readFileSync(resumedFile, "utf8")).toBe(resumedPrompt);
+    expect((await turn(resumed)).at(-1)).toMatchObject({ reason: "completed" });
+    await adapter.closeSession(resumed); expect(fs.existsSync(resumedFile)).toBe(false);
+  });
+
   it.each([false, true])("exposes native web tools only when Web search is enabled (%j)", async enabled => {
     await start(undefined, { mcp: { command: process.execPath, args: [], env: enabled ? { EXCEL_WEB_SEARCH: "1" } : {}, bridgeUrl: "", sessionId: "", token: "" } });
     const args = cli.spawn.mock.calls[0]![1] as string[];
@@ -79,7 +107,7 @@ describe("Claude persistent sessions", () => {
     await start(undefined, { systemPrompt });
     const args = cli.spawn.mock.calls[0]![1] as string[];
     expect(args[args.indexOf("--system-prompt-snapshot") + 1]).toBe("off");
-    if (systemPrompt?.trim()) expect(args[args.indexOf("--system-prompt") + 1]).toBe(systemPrompt);
+    if (systemPrompt?.trim()) expect(fs.readFileSync(args[args.indexOf("--system-prompt-file") + 1]!, "utf8")).toBe(systemPrompt);
     else expect(args).not.toContain("--system-prompt");
   });
 
@@ -100,8 +128,10 @@ describe("Claude persistent sessions", () => {
 
   it("closes a process whose initialization fails", async () => {
     cli.failInit = true;
-    await expect(start()).rejects.toThrow("initialization failed");
+    await expect(start(undefined, { systemPrompt: "Custom Office instructions" })).rejects.toThrow("initialization failed");
     expect(cli.children[0].kill).toHaveBeenCalled();
+    const args = cli.spawn.mock.calls[0]![1] as string[];
+    expect(fs.existsSync(path.dirname(args[args.indexOf("--system-prompt-file") + 1]!))).toBe(false);
   });
 
   it("reuses one process and keeps request IDs and usage separate across turns", async () => {

@@ -23,6 +23,7 @@ import { ProviderRoutes } from "./routes/providers.js";
 import { SkillRoutes } from "./routes/skills.js";
 import { TestingRoutes } from "./routes/testing.js";
 import { WorkspaceRoutes } from "./routes/workspaces.js";
+import { HistoryRoutes } from "./routes/history.js";
 import { SystemRoutes } from "./routes/system.js";
 import { SavedReferences } from "./saved-references.js";
 import { SessionManager } from "./session-manager.js";
@@ -81,6 +82,7 @@ export class Bridge {
   private reaper: NodeJS.Timeout | null = null;
   private readonly startedAt = Date.now();
   private maintenance = false;
+  private readonly history: HistoryRoutes;
   private readonly onShutdown?: () => void;
   private readonly skills: SkillStore;
   private readonly logins = new ProviderLoginManager();
@@ -115,6 +117,7 @@ export class Bridge {
       ? options.references ? null : (process.env.BRIDGE_CONFIG ?? path.join(PROJECT_ROOT, "excel-partner.config.json"))
       : options.workspaceConfigPath;
     const dataDir = path.dirname(config.configFile);
+    this.history = new HistoryRoutes(this.sessions, path.join(dataDir, "history.db"), this.logger.child("history"));
     const testSessions = new TestSessions(path.join(dataDir, "sessions"));
     const siteKnowledge = new SiteKnowledge(path.join(dataDir, "knowledge"));
     const testScripts = new TestScripts(path.join(dataDir, "scripts"));
@@ -264,6 +267,7 @@ export class Bridge {
     const method = req.method;
     const { files, mcp, providers, skills, testing, workspaces } = this.routes;
     if (this.maintenance && url.pathname.startsWith("/session/") && method !== "GET") return sendJson(res, 503, { error: "Office Partner is switching releases. Retry after it reconnects." });
+    if (url.pathname === "/session/history") return this.history.handle(req, res, url);
     if (url.pathname === "/session/system") return this.routes.system.handle(req, res, url);
 
     if (method === "POST" && ["/admin/maintenance", "/admin/resume", "/admin/shutdown"].includes(url.pathname)) {
@@ -465,6 +469,7 @@ export class Bridge {
 
   async close(): Promise<void> {
     this.logins.dispose();
+    this.history.close();
     if (this.heartbeat) clearInterval(this.heartbeat);
     if (this.reaper) clearInterval(this.reaper);
     this.panes.closeSockets();

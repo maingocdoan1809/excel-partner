@@ -33,6 +33,9 @@ import { setupTheme } from "./ui/theme.js";
 import { setupSavedReferences } from "./ui/saved-references.js";
 import { setupUserSkills } from "./ui/user-skills.js";
 import { showUserInput } from "./ui/user-input.js";
+import { createHistoryScheduler } from "./ui/history-scheduler.js";
+import { DurableHistory } from "./ui/durable-history.js";
+import { setupHistoryStorage } from "./ui/history-storage.js";
 import { setupSettings } from "./ui/settings.js";
 import { setupSystemPanel } from "./ui/system-panel.js";
 import { renderToolCard, paintTool, formatToolValue, toolChevron } from "./ui/tool-view.js";
@@ -40,7 +43,6 @@ import { ThoughtView } from "./ui/thought.js";
 import { mentionsFile, mentionsSheet } from "./ui/cell-links.js";
 import { exposedToolNamesForHost, sameWorkbookName } from "../../protocol/src/index.js";
 import {
-  SessionStore,
   buildContextPreface,
   bindProviderSession,
   newSession,
@@ -122,7 +124,14 @@ const NARROW_BELOW = 330;
 /** After the pane reloaded itself, a chat younger than this is reopened automatically. */
 const RESTORE_WITHIN_MS = 12 * 3_600_000;
 
-const store = new SessionStore(localStorage, undefined, () => activeHost().id);
+const historyNotice = (text: string) => {
+  const status = document.getElementById("history-save-status");
+  if (status) { status.textContent = text; status.hidden = text === "History saved on this computer."; }
+  const settingsStatus = document.getElementById("history-storage-status");
+  if (settingsStatus) settingsStatus.textContent = text;
+};
+const store = new DurableHistory(() => client, () => activeHost().id, localStorage, historyNotice);
+let restoreChatId: string | null = null;
 const journal = new UndoJournal((tool) => activeHost().writeTools.has(tool), async () => client.saveBackup((await currentWorkbookName()) || activeHost().noun, await activeHost().readFile()));
 // Handle for end-to-end checks against a live workbook; it grants nothing execute_office_js does not already have.
 (globalThis as { __undoJournal?: UndoJournal }).__undoJournal = journal;
@@ -190,7 +199,11 @@ const CONNECTED_FILE_TOOLS: ReadonlySet<string> = new Set(["list_connected_files
 let sheetNames: string[] = [];
 const cellLinkOptions = (text: string, aboutOtherFiles = false) => ({ plain: !aboutOtherFiles && !mentionsFile(text, otherFiles) && !mentionsSheet(text, sheetNames) });
 const pendingAttachments: Array<{ reference: UploadedAttachment; name: string }> = [];
-let persistTimer: number | undefined;
+const historyScheduler = createHistoryScheduler(() => {
+  session.updatedAt = Date.now();
+  store.save(session);
+  try { sessionStorage.setItem("excelPartner.activeChatId", session.id); } catch {}
+});
 let permissionPicker: ReturnType<typeof setupComposerMenu> | undefined;
 let selectedSlashToken: string | null = null;
 
@@ -228,15 +241,17 @@ const toolSettings = setupToolSettings(() => provider);
 const settings = setupSettings({
   loadInstructions: () => client.systemPrompt(),
   saveInstructions: (content, revision) => client.saveSystemPrompt(content, revision),
-  historyCount: () => store.list().length,
+  historyCount: () => store.total || store.list().length,
   clearHistory: () => els.historyClear.click(), historyClearButton: els.historyClear,
 });
+const historyStorage = setupHistoryStorage(() => client, store, () => session.id, records => { const recovered = records.find(r => r.originalId === session.id); if (recovered && !currentRequestId) loadSession(recovered.session); }, () => currentRequestId !== null);
 const systemPanel = setupSystemPanel(() => client, () => currentRequestId !== null);
 
 const { showPanel, openPanel, backFromPanel, openFloating, closeFloating, openMenu, closeMenu } = setupPanels({
   getProvider: () => provider, elements: els, loginPanel,
   renderHistory: () => renderHistory(), renderChanges: () => renderChanges(), renderProviderMenu: () => renderProviderMenu(),
   openSettings: returning => {
+    void historyStorage.refresh();
     void systemPanel.refresh();
     void mcpSettings.refresh();
     persistNow();
@@ -322,6 +337,12 @@ Office.onReady((info) => {
     },
     onState: renderState,
     onHello: ({ addinBuildId }) => {
+      void store.connect().then(async () => {
+        if (restoreChatId && !currentRequestId) {
+          const id = restoreChatId; restoreChatId = null;
+          const restored = await store.loadActive(id); if (restored && !currentRequestId) loadSession(restored);
+        }
+      }).catch(error => historyNotice(`History is unavailable: ${error.message}. Trying again automatically.`));
       void mcpSettings.restore();
       void publishWorkbookName();
       void refreshSheetNames();
@@ -585,12 +606,15 @@ Office.onReady((info) => {
     const focused = document.activeElement;
     if (focused !== els.input && !els.mentionMenu.contains(focused)) els.mentionMenu.hidden = true;
   }, 120));
-  window.addEventListener("pagehide", persistNow);
+  window.addEventListener("pagehide", () => { persistNow(); void store.flush(true).catch(() => {}); });
+  document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") { persistNow(); void store.flush().catch(() => {}); } });
 
   // Bring the last chat back only after the pane reloaded itself (a new build or a finished update). A pane that was
   // closed and opened again starts a new chat; the old one is in the history list.
-  const previous = takeChatRestore() ? store.latest(RESTORE_WITHIN_MS) : null;
-  if (previous) loadSession(previous);
+  const restoring = takeChatRestore();
+  try { restoreChatId = restoring ? sessionStorage.getItem("excelPartner.activeChatId") : null; } catch {}
+  const previous = restoring ? (restoreChatId ? store.getActive(restoreChatId) : store.latest(RESTORE_WITHIN_MS)) : null;
+  if (previous) { restoreChatId ??= previous.id; loadSession(previous); }
   else renderWelcome();
   renderProviderMenu();
   renderModelPicker();
@@ -1078,6 +1102,9 @@ function handleEvent(event: ProviderEvent): void {
     case "session_starting":
       setThinkingLabel("Starting session…");
       return;
+    case "provider_progress":
+      if (event.requestId === currentRequestId) setThinkingLabel(event.message);
+      return;
     case "turn_started":
       if (event.requestId !== currentRequestId) return;
       void refreshSheetNames();
@@ -1163,6 +1190,7 @@ function handleEvent(event: ProviderEvent): void {
       if (event.reason === "cancelled") append({ kind: "note", text: "Stopped." });
       if (event.reason !== "completed") holdPendingPrompts();
       persistNow();
+      void store.flush().catch(() => {});
       sendNextPending();
       updater.reloadIfIdle();
       return;
@@ -1217,16 +1245,8 @@ function startLive(kind: "assistant", text: string): { element: HTMLElement; mes
 /* Chats: new, restore, persist                                                */
 /* -------------------------------------------------------------------------- */
 
-function schedulePersist(): void {
-  window.clearTimeout(persistTimer);
-  persistTimer = window.setTimeout(persistNow, 500);
-}
-
-function persistNow(): void {
-  window.clearTimeout(persistTimer);
-  session.updatedAt = Date.now();
-  store.save(session);
-}
+function schedulePersist(): void { historyScheduler.schedule(); }
+function persistNow(): void { historyScheduler.flush(); }
 
 function startNewChat(keepPanel = false): void {
   slash.reload();
@@ -1271,6 +1291,7 @@ function loadSession(stored: StoredSession): void {
     void refreshModelCatalog(provider);
   }
   session = stored;
+  try { sessionStorage.setItem("excelPartner.activeChatId", session.id); } catch {}
   browserView.reset();
   activeModel = undefined;
   needsContext = true;

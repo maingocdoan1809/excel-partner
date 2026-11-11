@@ -72,6 +72,30 @@ The core reads the product name from package.json and also supports the
 `excel-partner` package on main without importing Office host implementations.
 Neither command requires a pane to be open.
 
+## Services that do not start after Windows restarts
+
+The bridge and the gateway start when you sign in to Windows (Run entries that
+call the recovery launcher with `start --at-logon`). The pane itself is served by
+the bridge, so while the bridge is down the pane cannot show a button; use one of
+these instead:
+
+- **Start > Office Partner - Fix connection** (created by `office-partner setup`).
+  It starts the bridge, and the gateway if it is set up. A bridge that is running
+  but not answering is replaced. The window reports the result and stays open.
+  The same repair is `office-partner fix`.
+- `startup.log` in the application data folder has one line per start attempt
+  made at sign-in or by Fix connection: time, service, attempt, outcome and a
+  reason code (`NOT_ANSWERING`, `PORT_IN_USE`, `START_FAILED`, `NOT_SET_UP`,
+  `RELEASE_DAMAGED`, `CERTIFICATE_PROBLEM`). A start at sign-in is tried up to
+  three times, 15 seconds apart.
+- `office-partner doctor` shows the latest outcome (`*.startup_last`) and checks
+  that the Node.js and launcher files named by the sign-in entry still exist
+  (`*.startup_target`; run `office-partner setup` again if one was moved).
+
+A saved process number is never trusted on its own: Windows reuses numbers after a
+restart, so a leftover record whose number now belongs to another program is
+discarded and the service is started.
+
 ## JSON reports and exit codes
 
 Reports contain `schemaVersion`, `diagnosticId`, timestamp, product/environment,
@@ -123,7 +147,7 @@ It verifies the adapter's initialization path, which can differ by provider;
 it does not prove model access or successful model-driven Office tool execution.
 
 Full distributions are installed under `%LOCALAPPDATA%\Excel Partner\runtimes`.
-Adapter code and dependencies are retained with the app release. Private CLIs
+Adapter code and dependencies live in the app release. Private CLIs
 use absolute paths and child-only update suppression, with no global npm install
 or PATH registration. Their configuration/history directories live separately
 under `provider-data`, per provider version and platform. No tokens are copied
@@ -150,7 +174,7 @@ captured legacy CLI. Missing saved runtimes produce a repair error, never a
 silent replacement chat. There is no automatic conversion of old provider history.
 
 Fallback is limited to a new session's initial transport/protocol startup, or a
-missing/modified active entrypoint. It selects a retained matching profile.
+missing/modified active entrypoint. It selects another verified profile of the same provider.
 Authentication, policy and model failures are reported. Once a prompt has been
 sent, no runtime switch or automatic replay occurs.
 
@@ -163,13 +187,12 @@ Provider controls are documented by [GitHub](https://docs.github.com/en/copilot/
 [OpenCode](https://opencode.ai/docs/cli/). They supplement exact private installs;
 they do not freeze provider services, models or organization policy.
 
-## Update, rollback and repair
+## Update, going back and repair
 
 ```powershell
 office-partner update
 office-partner update --from office-partner@0.1.22
 office-partner update --from C:\packages\office-partner-release.tgz
-office-partner rollback
 office-partner rollback 0.1.22
 office-partner repair
 office-partner debug on
@@ -187,27 +210,37 @@ none are redirected to the Office Partner pane.
 
 The activation journal records the prior app/runtime selection. Startup failure
 restores it, and a dead updater's interrupted switch is recovered on next start.
-Startup entrypoint integrity failure can select a verified retained release.
+A damaged active release is not replaced from disk: no older release is kept.
+Starting reports `RELEASE_DAMAGED`, and `repair` (or Start > Office Partner - Fix
+connection) installs the same version again from npm.
 If the original release is already damaged and a recovery target cannot start,
 recovery reports the failure and keeps the verified target selected. It cannot
 claim to have restarted a damaged copy successfully.
 
-Rollback uses complete cached artifacts and requires no package download. It
-checks integrity and restores the release's recorded provider selection while
-keeping saved chat mappings. The `held` flag records a recovery/rollback;
-updates always require an explicit user action. Cached releases and profiles
-remain until full uninstall, including profiles needed by saved chats. There
-is currently no automatic disk-space reclamation of retained versions.
+Only the running release is kept. The previous one stays on disk while an update
+is switching, so a failed start or an interrupted update can be undone
+automatically; once the new release is running (or the old one is restored) the
+unneeded one and the runtimes made for it are deleted. Going back to an older
+version is `office-partner rollback <version>`, which installs that version from
+npm like `update --from office-partner@<version>`; it needs a network connection.
+The `held` flag records a recovery. Updates always require an explicit user action.
+
+Saved chats: a runtime profile made by a retired release is dropped when it
+duplicates the current CLI (same version and data folder) and its chats move to the
+current profile. A profile for an older CLI version that chats were created with is
+kept, together with its CLI folder and data, and is served by the current release's
+adapter; it goes away only when those chats no longer need it. Folders left behind by
+an earlier cleanup that could not delete them are removed at the next update.
 
 Repair validates the active release and managed CLI inventories, including
 inactive profiles needed by old chats. It replaces damaged CLI distributions
 while services are stopped; downloading replacements needs npm/network access.
-A damaged app can roll back to a verified cached release. Missing backups or
-unrecoverable historical adapter files require reinstallation of that release;
-diagnostics does not manufacture a compatible conversation runtime.
+A damaged app is installed again from npm. Missing backups or unrecoverable
+historical adapter files require reinstalling that release; diagnostics does not
+manufacture a compatible conversation runtime.
 
 Settings > App & storage > System & recovery offers provider selection, system
-and host-specific MCP checks, JSON export, repair, cached-version rollback and
+and host-specific MCP checks, JSON export, repair and
 debug logging. Destructive document actions are not part of these controls.
 Debug expires after 15 minutes. Bridge event logs rotate at approximately 5 MiB
 with three retained files. Raw local logs can contain provider error details;
@@ -222,7 +255,7 @@ With Node.js still installed, run in PowerShell:
 $recovery = Join-Path $env:LOCALAPPDATA 'Excel Partner\recovery\recovery.mjs'
 node $recovery versions
 node $recovery repair
-node $recovery rollback
+node $recovery fix
 node $recovery start all
 node $recovery diagnostics export partner-recovery.json
 ```
@@ -239,7 +272,7 @@ history, credentials, external CLIs and provider-data are retained deliberately.
 Default automated checks use mock installers/providers and local MCP schema discovery.
 They cover version isolation, pending login, dependency corruption, initial-only
 fallback, saved native resume, busy services, failed activation, interrupted
-updates, offline rollback and owner-aware uninstall. Separate opt-in Windows
+updates, rollback by reinstalling and owner-aware uninstall. Separate opt-in Windows
 checks installed real private CLIs and verified Copilot native registration,
 real model-driven MCP execution in Chrome, continuation and History resume.
 OpenCode's compatible pin was updated after live initialization checks. Private
@@ -248,3 +281,7 @@ No Excel/Word/PowerPoint document write was performed. Before a broad rollout,
 validate each signed-in profile on disposable Office documents. See the
 [validation report](managed-runtime-validation.md) for exact coverage and limits.
 The originally reported Copilot failure has not been reproduced from its error trace.
+
+## Chat history storage
+
+Chat history uses the bridge-owned SQLite database, with explicit pending-save errors and storage controls. See [durable history](history-storage.md) for migration, recovery and the supported Windows Node/driver pair.

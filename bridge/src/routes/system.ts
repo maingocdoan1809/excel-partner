@@ -1,4 +1,5 @@
 import type http from "node:http";
+import fs from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { createRequire } from "node:module";
@@ -12,7 +13,7 @@ import type { ProviderRegistry } from "../../../providers/src/registry.js";
 
 const root = providerPackageRoot();
 const store = createRequire(import.meta.url)(path.join(root, "bin", "runtime-store.cjs"));
-const action = z.object({ action: z.enum(["install", "remove", "rollback", "repair", "debug-on", "debug-off"]), provider: ProviderIdSchema.optional(), version: z.string().regex(/^\d+\.\d+\.\d+(?:-[\w.-]+)?$/).optional() });
+const action = z.object({ action: z.enum(["install", "remove", "repair", "debug-on", "debug-off"]), provider: ProviderIdSchema.optional() });
 export class SystemRoutes {
   constructor(private readonly sessions: SessionManager, private readonly providers: ProviderRegistry, private readonly updater: UpdateService | null,
     private readonly loginBusy = () => false) {}
@@ -31,17 +32,18 @@ export class SystemRoutes {
             probe: url.searchParams.get("probe") === "1", mcp: url.searchParams.get("mcp") === "1", host: session.host }));
         }
         const deployment = store.currentDeployment(dataDir);
-        return sendJson(res, 200, { version: deployment.releases[deployment.active]?.version ?? null,
-          previous: deployment.releases[deployment.previous]?.version ?? null, held: deployment.held ?? false,
-          cached: Object.values(deployment.releases).filter((release: any) => !release.failed && release.id !== deployment.active).map((release: any) => release.version),
+        let debug = false;
+        try { debug = JSON.parse(fs.readFileSync(path.join(dataDir, "debug.json"), "utf8")).expires > Date.now(); } catch { /* No debug window is open. */ }
+        return sendJson(res, 200, { debug, version: deployment.releases[deployment.active]?.version ?? null,
+          held: deployment.held ?? false,
           phase: deployment.journal?.phase ?? null, providers: manager.runtimeInventory(dataDir) });
       }
       if (req.method !== "POST") return sendJson(res, 405, { error: "method_not_allowed" });
       const input = action.parse(JSON.parse(await readBody(req)));
       if (this.loginBusy() || this.sessions.list().some(item => item.isBusy)) return sendJson(res, 409, { error: "Wait for the current response or sign-in to finish." });
-      if (input.action === "rollback" || input.action === "repair") {
+      if (input.action === "repair") {
         if (!this.updater) return sendJson(res, 503, { error: "Recovery controls are unavailable in this installation." });
-        return sendJson(res, 202, { status: this.updater.start({ busy: false, action: input.action, version: input.version }) });
+        return sendJson(res, 202, { status: this.updater.start({ busy: false, action: "repair" }) });
       }
       if (input.action.startsWith("debug-")) {
         store.atomic(path.join(dataDir, "debug.json"), { expires: input.action === "debug-on" ? Date.now() + 15 * 60000 : 0 });

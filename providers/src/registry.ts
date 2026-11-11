@@ -9,10 +9,11 @@ import { ProfiledAdapter } from "./profiled.js";
 export class ProviderRegistry {
   private readonly adapters = new Map<ProviderId, ProviderAdapter>();
   private readonly modelCatalogs = new Map<ProviderId, { at: number; value: ProviderModelCatalog; revision?: string }>();
+  private readonly modelLoading = new Map<ProviderId, { revision?: string; adapter: ProviderAdapter; promise: Promise<ProviderModelCatalog> }>();
 
   register(adapter: ProviderAdapter): this {
     this.adapters.set(adapter.id, adapter);
-    this.modelCatalogs.delete(adapter.id);
+    this.invalidateModels(adapter.id);
     return this;
   }
 
@@ -31,16 +32,23 @@ export class ProviderRegistry {
   }
 
   async listModels(id: ProviderId): Promise<ProviderModelCatalog> {
-    const revision = this.require(id).runtimeRevision?.();
+    const adapter = this.require(id), revision = adapter.runtimeRevision?.();
     const cached = this.modelCatalogs.get(id);
     if (cached && cached.revision === revision && Date.now() - cached.at < 5 * 60_000) return cached.value;
-    const value = await this.require(id).listModels?.() ?? { models: [], defaultModelId: null };
-    this.modelCatalogs.set(id, { at: Date.now(), value, revision });
-    return value;
+    const pending = this.modelLoading.get(id);
+    if (pending && pending.revision === revision && pending.adapter === adapter) return pending.promise;
+    const loading = { revision, adapter, promise: undefined as unknown as Promise<ProviderModelCatalog> };
+    loading.promise = Promise.resolve().then(() => adapter.listModels?.() ?? { models: [], defaultModelId: null }).then(value => {
+      if (this.modelLoading.get(id) === loading && this.get(id) === adapter && adapter.runtimeRevision?.() === revision) this.modelCatalogs.set(id, { at: Date.now(), value, revision });
+      return value;
+    }).finally(() => { if (this.modelLoading.get(id) === loading) this.modelLoading.delete(id); });
+    this.modelLoading.set(id, loading);
+    return loading.promise;
   }
 
   invalidateModels(id: ProviderId): void {
     this.modelCatalogs.delete(id);
+    this.modelLoading.delete(id);
   }
 
   async detectAll() {
@@ -50,6 +58,7 @@ export class ProviderRegistry {
   async disposeAll(): Promise<void> {
     await Promise.all([...this.adapters.values()].map((adapter) => adapter.dispose()));
     this.adapters.clear();
+    this.modelCatalogs.clear(); this.modelLoading.clear();
   }
 }
 

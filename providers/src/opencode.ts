@@ -20,6 +20,7 @@ import { ensureWorkspaceDir } from "./workspace.js";
 import { nativeTitle, validNativeId } from "./session-metadata.js";
 import { parseOpencodeExport } from "./opencode-usage.js";
 import { reserveOpencodePort, watchOpencodeQuestions } from "./opencode-questions.js";
+import { watchOpencodeStatus, type OpencodeStatus } from "./opencode-status.js";
 import { cachedCommands, normalizeCommands } from "./commands.js";
 import { discoverAcpCommands } from "./command-discovery.js";
 import type { ProviderCommand } from "../../protocol/src/commands.js";
@@ -56,6 +57,10 @@ interface OpencodeSession {
   diagnostic?: StartSessionContext["onDiagnostic"];
 }
 
+/** How long OpenCode may retry a failing model call, and how long a healthy model may stay silent, before the first output. */
+const FIRST_RESPONSE_RETRY_LIMIT_MS = 120_000;
+const FIRST_RESPONSE_LIMIT_MS = 600_000;
+
 interface ActiveTurn {
   queue: AsyncQueue<ProviderEvent>;
   requestId: string;
@@ -63,6 +68,10 @@ interface ActiveTurn {
   text: string;
   tools: Map<string, string>;
   finishedTools: Set<string>;
+  receivedOutput?: boolean;
+  /** OpenCode reports that the model call failed and is being retried. */
+  retrying?: boolean;
+  stopWaiting?: () => void;
 }
 
 /**
@@ -230,7 +239,10 @@ export class OpencodeAdapter extends BaseCliAdapter {
       versionField: true,
       onStderr: (line) => log.debug(`opencode stderr: ${line}`),
       onNotification: (method, params) => session && this.onNotification(session, method, params),
-      onRequest: (method, params) => this.onServerRequest(method, params, ctx.authorizeTool),
+      onRequest: (method, params) => {
+        if (session?.active) session.active.stopWaiting?.();
+        return this.onServerRequest(method, params, ctx.authorizeTool);
+      },
     });
 
     try {
@@ -263,7 +275,7 @@ export class OpencodeAdapter extends BaseCliAdapter {
         peer,
         acpSessionId: created.sessionId,
         configOptions: created.configOptions ?? [],
-        model: null,
+        model: parseOpencodeModels(created.configOptions).defaultModelId,
         primed: Boolean(ctx.resumeSessionId),
         active: null,
         configDir,
@@ -288,6 +300,7 @@ export class OpencodeAdapter extends BaseCliAdapter {
       if (ctx.model) await this.selectModel(session, ctx.model);
       return providerSessionId;
     } catch (error) {
+      this.sessions.delete(providerSessionId);
       await peer.close();
       fs.rmSync(configDir, { recursive: true, force: true });
       throw error;
@@ -321,6 +334,10 @@ export class OpencodeAdapter extends BaseCliAdapter {
     const queue = new AsyncQueue<ProviderEvent>();
     const questionController = new AbortController();
     if (session.questionApi) {
+      void watchOpencodeStatus({ ...session.questionApi, sessionId: session.acpSessionId,
+        signal: AbortSignal.any([input.signal, questionController.signal]),
+        onStatus: status => { if (session.active) this.reportProgress(session, status); },
+      });
       void watchOpencodeQuestions({ ...session.questionApi, sessionId: session.acpSessionId,
         signal: AbortSignal.any([input.signal, questionController.signal]) }).catch(error => {
         if (input.signal.aborted || questionController.signal.aborted) return;
@@ -333,17 +350,28 @@ export class OpencodeAdapter extends BaseCliAdapter {
     yield { type: "session_info", requestId, provider: this.id, providerSessionId: session.acpSessionId,
       title: session.title };
     yield { type: "turn_started", requestId };
+    this.reportProgress(session, { state: "waiting" });
+    let finished = false;
+    let responseTimer: ReturnType<typeof setTimeout> | undefined;
+    active.stopWaiting = () => { clearTimeout(responseTimer); responseTimer = undefined; };
 
     const cancel = () => session.peer.notify("session/cancel", { sessionId: session.acpSessionId });
-    input.signal.addEventListener("abort", cancel, { once: true });
+    const abort = () => {
+      if (finished) return;
+      finished = true;
+      active.stopWaiting?.();
+      cancel();
+      queue.push({ type: "turn_finished", requestId, reason: "cancelled" });
+      queue.end();
+      void this.closeSession(input.providerSessionId);
+    };
+    input.signal.addEventListener("abort", abort, { once: true });
 
     // ACP has no system-prompt field, so the instructions travel with the first prompt.
     const userText = buildTurnPrompt(input.prompt, input.selection);
     const systemPrompt = input.systemPrompt ?? SYSTEM_PROMPT;
     const text = input.command ? `/${input.command.name}${input.command.args ? ` ${input.command.args}` : ""}`
       : session.primed || !systemPrompt.trim() ? userText : `${systemPrompt}\n\n---\n\n${userText}`;
-    if (!input.command) session.primed = true;
-
     const run = async () => {
       if (input.model && input.model !== session.model) await this.selectModel(session, input.model);
       // OpenCode only offers an effort option for models that have variants.
@@ -356,6 +384,26 @@ export class OpencodeAdapter extends BaseCliAdapter {
         );
         if (result?.configOptions) session.configOptions = result.configOptions;
       }
+      if (input.signal.aborted) throw new Error("OpenCode request cancelled");
+      // A CLI can retry silently for thirty minutes. Bound the initial wait;
+      // streaming output and interactive permissions are allowed to continue.
+      if (!input.command) session.primed = true;
+      // Silent retries are what the short limit is for. A model that is simply thinking for a long time is given longer.
+      const waitForResponse = (delay: number, waited: number) => {
+        responseTimer = setTimeout(() => {
+          if (finished) return;
+          waited += delay;
+          if (!active.retrying && waited < FIRST_RESPONSE_LIMIT_MS) return waitForResponse(FIRST_RESPONSE_LIMIT_MS - waited, waited);
+          finished = true;
+          queue.push({ type: "error", requestId, code: "provider_timeout",
+            message: `OpenCode received no model response within ${Math.round(waited / 1000)} seconds (${session.model ?? "default model"}). The service may be overloaded. Try again or select another model.` });
+          queue.push({ type: "turn_finished", requestId, reason: "error" });
+          queue.end();
+          cancel();
+          void this.closeSession(input.providerSessionId);
+        }, delay);
+      };
+      waitForResponse(FIRST_RESPONSE_RETRY_LIMIT_MS, 0);
       return session.peer.request<{
         stopReason?: string;
         usage?: { inputTokens: number; outputTokens: number; totalTokens: number; cachedReadTokens?: number };
@@ -368,13 +416,20 @@ export class OpencodeAdapter extends BaseCliAdapter {
 
     run()
       .then(async (response) => {
+        if (finished) return;
+        finished = true;
+        active.stopWaiting?.();
         this.flushText(active);
         await this.reportUsage(session, active);
         const stop = response?.stopReason ?? "end_turn";
         if (stop === "cancelled") {
           queue.push({ type: "turn_finished", requestId, reason: "cancelled" });
         } else if (stop === "end_turn" || stop === "max_turn_requests") {
-          queue.push({ type: "turn_finished", requestId, reason: "completed" });
+          if (!active.receivedOutput && active.tools.size === 0) {
+            queue.push({ type: "error", requestId, code: "empty_response",
+              message: `OpenCode ended without a response (${session.model ?? "default model"}). The model service may be unavailable or overloaded. Try again or select another model.` });
+            queue.push({ type: "turn_finished", requestId, reason: "error" });
+          } else queue.push({ type: "turn_finished", requestId, reason: "completed" });
         } else {
           queue.push({
             type: "error",
@@ -387,6 +442,9 @@ export class OpencodeAdapter extends BaseCliAdapter {
         queue.end();
       })
       .catch(async (error) => {
+        if (finished) return;
+        finished = true;
+        active.stopWaiting?.();
         this.flushText(active);
         await this.reportUsage(session, active);
         if (input.signal.aborted) {
@@ -409,8 +467,9 @@ export class OpencodeAdapter extends BaseCliAdapter {
         if (event.type === "turn_finished") break;
       }
     } finally {
+      active.stopWaiting?.();
       questionController.abort();
-      input.signal.removeEventListener("abort", cancel);
+      input.signal.removeEventListener("abort", abort);
       if (session.active === active) session.active = null;
     }
   }
@@ -482,17 +541,24 @@ export class OpencodeAdapter extends BaseCliAdapter {
   }
 
   private async selectModel(session: OpencodeSession, model: string): Promise<void> {
-    try {
-      const result = await session.peer.request<{ configOptions?: OpencodeConfigOption[] }>(
-        "session/set_config_option",
-        { sessionId: session.acpSessionId, configId: "model", value: model },
-        10_000,
-      );
-      if (result?.configOptions) session.configOptions = result.configOptions;
-      session.model = model;
-    } catch (error) {
-      this.runtime.logger.warn("opencode could not select the model", { model, error: String(error) });
-    }
+    const result = await session.peer.request<{ configOptions?: OpencodeConfigOption[] }>(
+      "session/set_config_option",
+      { sessionId: session.acpSessionId, configId: "model", value: model },
+      10_000,
+    );
+    if (result?.configOptions) session.configOptions = result.configOptions;
+    session.model = model;
+  }
+
+  private reportProgress(session: OpencodeSession, status: OpencodeStatus): void {
+    const active = session.active;
+    if (!active) return;
+    active.retrying = status.state === "retrying";
+    active.queue.push({ type: "provider_progress", requestId: active.requestId, state: status.state,
+      message: status.state === "retrying"
+        ? `OpenCode: ${status.overloaded ? "model service overloaded; retrying" : "model request failed; retrying"}${status.attempt === undefined ? "" : ` (attempt ${status.attempt})`}…`
+        : `Waiting for OpenCode (${(session.model ?? "default model").slice(0, 150)})…`,
+    });
   }
 
   private flushText(active: ActiveTurn): void {
@@ -507,14 +573,15 @@ export class OpencodeAdapter extends BaseCliAdapter {
     const update = params.update;
     if (!update) return;
     // ACP exposes retry metadata separately from assistant text/tool events.
-    // Only API sessions opt in; no response bodies or error messages are logged.
-    if (session.diagnostic && session.active && params.sessionId === session.acpSessionId
+    // Forward safe retry state to the pane and optional API diagnostics.
+    if (session.active && params.sessionId === session.acpSessionId
       && update.sessionUpdate === "session_info_update" && update._meta && Object.hasOwn(update._meta, "opencode/retry")) {
       const retry = update._meta["opencode/retry"];
-      if (retry === null) session.diagnostic({ phase: "model_retry_started" });
+      if (retry === null) { this.reportProgress(session, { state: "waiting" }); session.diagnostic?.({ phase: "model_retry_started" }); }
       else if (retry && typeof retry === "object") {
         const error = retry.error;
-        session.diagnostic({ phase: "model_retry_scheduled",
+        this.reportProgress(session, { state: "retrying", attempt: Number.isSafeInteger(retry.attempt) && retry.attempt >= 0 ? retry.attempt : undefined, overloaded: error?.status === 429 || error?.status === 503 });
+        session.diagnostic?.({ phase: "model_retry_scheduled",
           ...(Number.isInteger(retry.attempt) && retry.attempt >= 0 ? { attempt: retry.attempt } : {}),
           ...(Number.isInteger(error?.status) && error.status >= 100 && error.status <= 599 ? { status: error.status } : {}),
           ...(typeof error?.type === "string" && /^[a-zA-Z0-9_.-]{1,100}$/.test(error.type) ? { errorType: error.type } : {}),
@@ -539,18 +606,21 @@ export class OpencodeAdapter extends BaseCliAdapter {
     switch (update.sessionUpdate) {
       case "agent_thought_chunk": {
         const text = update.content?.type === "text" ? String(update.content.text ?? "") : "";
-        if (text) queue.push({ type: "thinking_delta", requestId, text });
+        if (text) { active.stopWaiting?.(); queue.push({ type: "thinking_delta", requestId, text }); }
         break;
       }
       case "agent_message_chunk": {
         const text = update.content?.type === "text" ? String(update.content.text ?? "") : "";
         if (text) {
+          active.stopWaiting?.();
+          active.receivedOutput = true;
           active.text += text;
           queue.push({ type: "message_delta", requestId, text });
         }
         break;
       }
       case "tool_call": {
+        active.stopWaiting?.();
         this.flushText(active);
         const callId = String(update.toolCallId);
         const tool = toolNameOf(update);

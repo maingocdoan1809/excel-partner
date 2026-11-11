@@ -7,12 +7,14 @@ import { spawnSync } from "node:child_process";
 // @ts-expect-error The management tools are published as standalone JavaScript.
 import { installRuntime, runtimeInventory, verifyRuntime, repairRuntime } from "../bin/runtime-manager.mjs";
 // @ts-expect-error The management tools are published as standalone JavaScript.
-import { snapshotRelease, updateRelease, rollbackRelease, verifyRelease, recoverInterrupted } from "../bin/deployment.mjs";
+import { snapshotRelease, updateRelease, verifyRelease, recoverInterrupted, retireOldReleases } from "../bin/deployment.mjs";
 // @ts-expect-error The management tools are published as standalone JavaScript.
 import { ensureBaseline, releaseOwners, verifiedActiveRelease, managementMain, installRecovery } from "../bin/manage.mjs";
 // @ts-expect-error Standalone diagnostic tools.
 import { collectDoctor } from "../bin/doctor-checks.mjs";
 const store = createRequire(import.meta.url)(path.resolve("bin/runtime-store.cjs"));
+/** Folders in a data directory, ignoring the `.trash-*` ones that are being deleted in the background. */
+const folders = (directory: string) => fs.readdirSync(directory).filter(name => !name.startsWith(".trash-"));
 const dirs: string[] = [];
 afterEach(() => { for (const dir of dirs.splice(0)) fs.rmSync(dir, { recursive: true, force: true }); });
 function fixture() {
@@ -151,16 +153,50 @@ describe("managed runtime installation", () => {
 });
 
 describe("complete release update and rollback", () => {
-  it("restores the retained release's provider selection when startup detects corrupt active files", async () => {
+  it("R07 reports a damaged active release for repair instead of falling back to an older one", async () => {
     const w = fixture(), baseline = ensureBaseline(w.root, w.dataDir);
-    const original = await installRuntime(w.root, "copilot", { ...w, adapterRoot: baseline.root });
     const updated = await updateRelease(w.root, "office-partner@1.1.0", { ...w, ...w.controls });
-    store.bindConversation(w.dataDir, "copilot", "new-chat", store.readState(w.dataDir).active.copilot);
+    expect(Object.keys(store.currentDeployment(w.dataDir).releases)).toEqual([updated.id]);
+    expect(fs.existsSync(baseline.directory)).toBe(false);
     w.put(updated.root, "dist/bridge/src/index.js", "broken");
-    expect(verifiedActiveRelease(w.dataDir).id).toBe(baseline.id);
-    expect(store.readState(w.dataDir).active.copilot).toBe(original.id);
-    expect(store.readState(w.dataDir).conversations[store.conversationKey("copilot", "new-chat")]).toBeTruthy();
-    expect(store.currentDeployment(w.dataDir)).toMatchObject({ held: true, previous: null, journal: { phase: "integrity_fallback" } });
+    expect(() => verifiedActiveRelease(w.dataDir)).toThrow("ACTIVE_RELEASE_DAMAGED_USE_RECOVERY");
+    expect(store.currentDeployment(w.dataDir).active).toBe(updated.id);
+  });
+
+  it("R06 repairs a damaged release by installing the same version again, then keeps only the fresh one", async () => {
+    const w = fixture(); ensureBaseline(w.root, w.dataDir);
+    const updated = await updateRelease(w.root, "office-partner@1.1.0", { ...w, ...w.controls });
+    w.put(updated.root, "dist/bridge/src/index.js", "broken");
+    const installs = w.install.mock.calls.length;
+    await managementMain(["repair"], { root: w.root, dataDir: w.dataDir, lifecycle: w.controls, report: () => {}, deploy: { install: w.install, run: w.run, env: w.env, preflight: w.preflight } });
+    expect(w.install.mock.calls.slice(installs).map(call => call[1])).toEqual(["office-partner@1.1.0"]);
+    const deployment = store.currentDeployment(w.dataDir);
+    expect(Object.keys(deployment.releases)).toHaveLength(1);
+    expect(deployment.active).not.toBe(updated.id);
+    expect(fs.existsSync(updated.directory)).toBe(false);
+    expect(verifiedActiveRelease(w.dataDir)!.version).toBe("1.1.0");
+  });
+
+  it("R10 rollback means installing that version from npm, and needs a version", async () => {
+    const w = fixture(); ensureBaseline(w.root, w.dataDir);
+    await updateRelease(w.root, "office-partner@1.1.0", { ...w, ...w.controls });
+    await expect(managementMain(["rollback"], { root: w.root, dataDir: w.dataDir, lifecycle: w.controls })).rejects.toThrow("USE_ROLLBACK_WITH_A_VERSION");
+    await expect(managementMain(["rollback", "latest"], { root: w.root, dataDir: w.dataDir, lifecycle: w.controls })).rejects.toThrow("USE_ROLLBACK_WITH_A_VERSION");
+    const installs = w.install.mock.calls.length;
+    await managementMain(["rollback", "1.0.5"], { root: w.root, dataDir: w.dataDir, lifecycle: w.controls, report: () => {}, deploy: { install: w.install, run: w.run, env: w.env, preflight: w.preflight } });
+    expect(w.install.mock.calls.slice(installs).map(call => call[1])).toEqual(["office-partner@1.0.5"]);
+    const deployment = store.currentDeployment(w.dataDir);
+    expect(deployment.releases[deployment.active].version).toBe("1.0.5");
+    expect(Object.keys(deployment.releases)).toHaveLength(1);
+  });
+  it("R09 releases the final owner when gateway was uninstalled first and its config remains", async () => {
+    const w = fixture(), baseline = ensureBaseline(w.root, w.dataDir);
+    store.changeState(w.dataDir, (state: any) => { state.owners = { addin: true, gateway: true }; });
+    releaseOwners(w.dataDir, { addin: false, gateway: true, gatewayConfigured: true });
+    expect(fs.existsSync(baseline.root)).toBe(true);
+    releaseOwners(w.dataDir, { addin: true, gateway: false, gatewayConfigured: true });
+    expect(fs.existsSync(baseline.root)).toBe(false);
+    expect(store.currentDeployment(w.dataDir).active).toBeNull();
   });
 
   it("always exits maintenance if repair encounters a busy second service", async () => {
@@ -192,20 +228,73 @@ describe("complete release update and rollback", () => {
     expect(result.status, result.stderr).toBe(0);
     expect(JSON.parse(result.stdout)).toMatchObject({ active: "1.0.0", providers: expect.any(Array) });
   });
-  it("prepares release and runtimes before stopping, and rolls back from cached files offline", async () => {
+  it("prepares release and runtimes before stopping, then keeps only the new release and its CLI", async () => {
     const w = fixture(), baseline = ensureBaseline(w.root, w.dataDir);
     const original = await installRuntime(w.root, "copilot", { ...w, adapterRoot: baseline.root });
+    store.bindConversation(w.dataDir, "copilot", "old-chat", original.id);
     const updated = await updateRelease(w.root, "office-partner@1.1.0", { ...w, ...w.controls });
     expect(w.calls).toEqual(["drain", "stop:1.0.0", "start:1.1.0"]);
-    expect(store.currentDeployment(w.dataDir).active).toBe(updated.id);
-    expect(store.readState(w.dataDir).active.copilot).not.toBe(original.id);
+    const deployment = store.currentDeployment(w.dataDir), state = store.readState(w.dataDir);
+    expect(deployment).toMatchObject({ active: updated.id, previous: null, held: false, journal: { phase: "committed" } });
+    expect(Object.keys(deployment.releases)).toEqual([updated.id]);
+    expect(folders(path.join(w.dataDir, "releases"))).toEqual([updated.id]);
+    // Same CLI version: the old profile only duplicated the new one, so it and its folder are gone and the chat moved over.
+    expect(state.profiles[original.id]).toBeUndefined();
+    expect(fs.existsSync(path.join(w.dataDir, "runtimes", original.id))).toBe(false);
+    // The old folders were renamed at once and are deleted in the background.
+    await vi.waitFor(() => { expect(fs.readdirSync(path.join(w.dataDir, "releases"))).toEqual([updated.id]); expect(fs.readdirSync(path.join(w.dataDir, "runtimes")).filter(name => name.startsWith(".trash-"))).toEqual([]); });
+    expect(state.conversations[store.conversationKey("copilot", "old-chat")]).toBe(state.active.copilot);
+    expect(store.selectProfile(w.dataDir, "copilot", "old-chat").adapterRoot).toBe(updated.root);
+    expect(state.previous.copilot).toBeUndefined();
+  });
+
+  it("R11 keeps an older CLI that saved chats still resume with, served by the current release, and nothing else", async () => {
+    const w = fixture(), baseline = ensureBaseline(w.root, w.dataDir);
+    const original = await installRuntime(w.root, "copilot", { ...w, adapterRoot: baseline.root });
     store.bindConversation(w.dataDir, "copilot", "old-chat", original.id);
-    const before = w.install.mock.calls.length;
-    await rollbackRelease(undefined, { dataDir: w.dataDir, ...w.controls });
-    expect(w.install.mock.calls).toHaveLength(before);
-    expect(store.currentDeployment(w.dataDir)).toMatchObject({ active: baseline.id, held: true });
-    expect(store.readState(w.dataDir).active.copilot).toBe(original.id);
+    // The next release ships a different Copilot CLI.
+    const next = JSON.parse(fs.readFileSync("bin/runtime-manifest.json", "utf8")); next.providers.copilot.version = "9.9.9";
+    const install = async (prefix: string, spec: string) => { await w.install(prefix, spec); if (spec.startsWith("office-partner@")) w.put(path.join(prefix, "node_modules", "office-partner"), "bin/runtime-manifest.json", JSON.stringify(next)); };
+    const run = vi.fn(async (command: string) => ({ code: 0, stdout: JSON.parse(fs.readFileSync(command, "utf8")).version, stderr: "" }));
+    const updated = await updateRelease(w.root, "office-partner@1.1.0", { ...w, install, run, ...w.controls });
+    const state = store.readState(w.dataDir);
+    expect(state.profiles[original.id]).toMatchObject({ version: original.version, adapterRoot: updated.root });
+    expect(fs.existsSync(original.command)).toBe(true);
+    expect(state.profiles[state.active.copilot].version).toBe("9.9.9");
     expect(store.selectProfile(w.dataDir, "copilot", "old-chat").id).toBe(original.id);
+    expect(Object.keys(store.currentDeployment(w.dataDir).releases)).toEqual([updated.id]);
+    expect(folders(path.join(w.dataDir, "releases"))).toEqual([updated.id]);
+  });
+
+  it("R12 drops runtimes that nothing selects, uses or has chats on, and sweeps release folders left behind earlier", async () => {
+    const w = fixture(), baseline = ensureBaseline(w.root, w.dataDir);
+    const stray = await installRuntime(w.root, "copilot", { ...w, adapterRoot: baseline.root, activate: false, trackPending: false });
+    const updated = await updateRelease(w.root, "office-partner@1.1.0", { ...w, ...w.controls });
+    expect(store.readState(w.dataDir).profiles[stray.id]).toBeUndefined();
+    const orphan = path.join(w.dataDir, "releases", "a".repeat(64)); fs.mkdirSync(orphan, { recursive: true });
+    const staging = path.join(w.dataDir, "releases", ".install-in-progress"); fs.mkdirSync(staging, { recursive: true });
+    const swept = retireOldReleases(w.dataDir);
+    expect(swept.releases).toEqual([]);
+    await swept.pending;
+    expect(fs.existsSync(orphan)).toBe(false); expect(fs.existsSync(staging)).toBe(true);
+    expect(store.currentDeployment(w.dataDir).active).toBe(updated.id);
+  });
+
+  it("R13 never fails because an old folder cannot be renamed or deleted, and the next update finishes the job", async () => {
+    const w = fixture(), baseline = ensureBaseline(w.root, w.dataDir);
+    const realRename = fs.renameSync.bind(fs);
+    const rename = vi.spyOn(fs, "renameSync").mockImplementation((from, to) => {
+      if (String(to).includes(".trash-")) throw Object.assign(new Error("EBUSY"), { code: "EBUSY" });
+      return realRename(from, to);
+    });
+    const remove = vi.spyOn(fs.promises, "rm").mockRejectedValue(Object.assign(new Error("EBUSY"), { code: "EBUSY" }));
+    try {
+      const updated = await updateRelease(w.root, "office-partner@1.1.0", { ...w, ...w.controls });
+      expect(store.currentDeployment(w.dataDir)).toMatchObject({ active: updated.id, journal: { phase: "committed" } });
+    } finally { rename.mockRestore(); remove.mockRestore(); }
+    expect(fs.existsSync(baseline.directory)).toBe(true);
+    await retireOldReleases(w.dataDir).pending;
+    expect(fs.existsSync(baseline.directory)).toBe(false);
   });
 
   it("keeps the current release running if package installation fails or the service is busy", async () => {
@@ -225,9 +314,13 @@ describe("complete release update and rollback", () => {
     expect(w.calls).toEqual(["drain", "stop:1.0.0", "start:1.1.0", "stop:1.1.0", "start:1.0.0"]);
     expect(store.currentDeployment(w.dataDir).active).toBe(baseline.id);
     expect(store.readState(w.dataDir).active.copilot).toBe(original.id);
+    // The release that failed to start is not kept either, nor the runtime installed for it.
+    expect(Object.keys(store.currentDeployment(w.dataDir).releases)).toEqual([baseline.id]);
+    expect(folders(path.join(w.dataDir, "releases"))).toEqual([baseline.id]);
+    expect(Object.keys(store.readState(w.dataDir).profiles)).toEqual([original.id]);
   });
 
-  it("rejects corrupted cached release assets and recovers an interrupted activation", () => {
+  it("rejects corrupted release assets and recovers an interrupted activation", () => {
     const w = fixture(), baseline = ensureBaseline(w.root, w.dataDir);
     const other = snapshotRelease(w.root, w.dataDir);
     const deployment = store.currentDeployment(w.dataDir);
@@ -235,13 +328,16 @@ describe("complete release update and rollback", () => {
     store.atomic(path.join(w.dataDir, "deployment.json"), deployment);
     recoverInterrupted(w.dataDir);
     expect(store.currentDeployment(w.dataDir)).toMatchObject({ active: baseline.id, held: true, journal: { phase: "recovered" } });
-    w.put(other.root, "dist/bridge/src/index.js", "corrupted");
-    expect(() => verifyRelease(other)).toThrow("RELEASE_INTEGRITY_FAILED");
+    // The release the interrupted switch was heading for is dropped.
+    expect(Object.keys(store.currentDeployment(w.dataDir).releases)).toEqual([baseline.id]);
+    w.put(baseline.root, "dist/bridge/src/index.js", "corrupted");
+    expect(() => verifyRelease(baseline)).toThrow("RELEASE_INTEGRITY_FAILED");
   });
 
   it("uninstall removes only owned artifacts when all owners are gone, preserving user data and external CLIs", async () => {
     const w = fixture(), baseline = ensureBaseline(w.root, w.dataDir);
     const profile = await installRuntime(w.root, "copilot", { ...w, adapterRoot: baseline.root });
+    const database = w.put(w.dataDir, "history.db", "preserve user database");
     const history = w.put(w.dataDir, "usage.jsonl", "keep"), external = w.put(w.directory, "user-cli.exe", "keep");
     store.changeState(w.dataDir, (state: any) => { state.owners = { addin: true, gateway: true }; });
     releaseOwners(w.dataDir, { addin: true, gateway: false });
@@ -249,6 +345,7 @@ describe("complete release update and rollback", () => {
     releaseOwners(w.dataDir, { addin: false, gateway: true });
     expect(fs.existsSync(profile.command)).toBe(false);
     expect(fs.existsSync(baseline.root)).toBe(false);
+    expect(fs.readFileSync(database, "utf8")).toBe("preserve user database");
     expect(fs.readFileSync(history, "utf8")).toBe("keep"); expect(fs.readFileSync(external, "utf8")).toBe("keep");
   });
 });

@@ -7,6 +7,7 @@ import path from "node:path";
 import https from "node:https";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { ConfigSchema, dataDir, loadConfig } from "../dist/config.mjs";
+import { decideRecorded, processOwner } from "./process-record.mjs";
 
 const dir = dataDir();
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -14,6 +15,13 @@ const cert = path.join(dir, "localhost.crt"), key = path.join(dir, "localhost.ke
 const tokenFile = path.join(dir, "token.txt"), configFile = path.join(dir, "config.json"), pidFile = path.join(dir, "server.json");
 const entry = path.join(root, "dist", "server.mjs");
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
+async function waitForGateway(ms) {
+  for (let waited = 0; waited < ms; waited += 200) {
+    if (await health()) return true;
+    await delay(200);
+  }
+  return false;
+}
 function token() { return fs.readFileSync(tokenFile, "utf8").trim(); }
 function request(method, route, auth = false) {
   return new Promise((resolve, reject) => {
@@ -125,7 +133,7 @@ const runKey = "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run", runNam
 function autostart(enable) {
   if (process.platform !== "win32") { console.log("Automatic startup is only managed on Windows."); return; }
   const startup = process.env.OFFICE_PARTNER_RECOVERY_ENTRY
-    ? `"${process.execPath}" "${process.env.OFFICE_PARTNER_RECOVERY_ENTRY}" start gateway`
+    ? `"${process.execPath}" "${process.env.OFFICE_PARTNER_RECOVERY_ENTRY}" start gateway --at-logon`
     : `"${process.execPath}" "${fileURLToPath(import.meta.url)}" start`;
   const args = enable ? ["add", runKey, "/v", runName, "/t", "REG_SZ", "/d", startup, "/f"]
     : ["delete", runKey, "/v", runName, "/f"];
@@ -137,7 +145,7 @@ function info(copyToken = false) {
   console.log(`Gateway URL: https://localhost:${loadConfig(dir).port}\nToken: ${token()}\nConfiguration: ${configFile}`);
   if (copyToken) console.log(copy(token()) ? "Token copied to the clipboard." : "Could not copy the token; select it above.");
 }
-async function start() {
+async function start(repair = false) {
   if (!fs.existsSync(cert) || !fs.existsSync(key) || !fs.existsSync(tokenFile)) throw new Error("Run agent-gateway setup first");
   const existing = await health();
   if (existing) {
@@ -145,9 +153,20 @@ async function start() {
     console.log(`Gateway already running at https://localhost:${loadConfig(dir).port}`); return;
   }
   if (fs.existsSync(pidFile)) {
-    const previous = JSON.parse(fs.readFileSync(pidFile, "utf8"));
-    let alive = false; try { process.kill(previous.pid, 0); alive = true; } catch {}
-    if (alive) throw new Error("Recorded gateway is still alive but unhealthy; inspect its logs before restarting");
+    let previous = null; try { previous = JSON.parse(fs.readFileSync(pidFile, "utf8")); } catch { /* A damaged record is just stale. */ }
+    let alive = false; try { if (previous) { process.kill(previous.pid, 0); alive = true; } } catch {}
+    if (alive) {
+      // A process number alone proves nothing: after a restart Windows gives the same number to another program.
+      const owner = processOwner(previous.pid, line => typeof previous.entry === "string" && previous.entry ? line.toLowerCase().includes(previous.entry.toLowerCase()) : /server\.mjs/i.test(line));
+      const action = await decideRecorded(owner, { repair, waitHealthy: () => waitForGateway(30_000) });
+      if (action === "ready") { console.log(`Gateway already running at https://localhost:${loadConfig(dir).port}`); return; }
+      if (action === "fail") throw new Error('Recorded gateway is still alive but unhealthy. Open Start > "Office Partner - Fix connection", or inspect its logs before restarting');
+      if (action === "kill") {
+        process.kill(previous.pid);
+        for (let i = 0; i < 25; i++) { try { process.kill(previous.pid, 0); } catch { break; } await delay(200); }
+      }
+    }
+    fs.rmSync(pidFile, { force: true });
   }
   const instance = randomBytes(24).toString("hex");
   const out = fs.openSync(path.join(dir, "gateway.log"), "a"), err = fs.openSync(path.join(dir, "gateway.err.log"), "a");
@@ -181,7 +200,8 @@ async function stop() {
 async function main() {
   const argv = process.argv.slice(2);
   const copyToken = argv.includes("--copy");
-  const [command = "status", a, b, c, d] = argv.filter(arg => arg !== "--copy");
+  const repair = argv.includes("--repair");
+  const [command = "status", a, b, c, d] = argv.filter(arg => arg !== "--copy" && arg !== "--repair");
   if (process.env.OFFICE_PARTNER_GATEWAY_MANAGED !== "1") {
     const packageRoot = path.dirname(root);
     if (["setup", "uninstall"].includes(command)) {
@@ -192,9 +212,9 @@ async function main() {
     if (dispatchActive(packageRoot, ["gateway", ...argv])) return;
   }
   if (command === "setup") await setup();
-  else if (command === "start") await start();
+  else if (command === "start") await start(repair);
   else if (command === "stop") await stop();
-  else if (command === "restart") { await stop(); await start(); }
+  else if (command === "restart") { await stop(); await start(repair); }
   else if (command === "status") {
     if (!fs.existsSync(tokenFile)) { console.log("Gateway is not set up. Run: office-partner setup gateway"); return; }
     const h = await health(); console.log(h ? `Gateway running at https://localhost:${loadConfig(dir).port} (${h.sessions} active sessions)` : "Gateway stopped or unhealthy. Run: office-partner doctor gateway");

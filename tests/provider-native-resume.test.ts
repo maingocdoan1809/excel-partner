@@ -286,3 +286,95 @@ describe("each provider resumes its native session independently", () => {
     expect(rpc.calls.some(c => c.method === "session/new" || c.method === "thread/start")).toBe(false);
   });
 });
+
+it("O03 rejects a failed model selection instead of silently using the default", async () => {
+  rpc.reply = async method => { if (method === "session/set_config_option") throw Error("Unknown model"); return { sessionId: nativeId }; };
+  const adapter = new OpencodeAdapter(runtime);
+  try { await expect(adapter.startSession({ ...context(), resumeSessionId: undefined, model: "provider/missing" })).rejects.toThrow("Unknown model"); }
+  finally { await adapter.dispose(); }
+});
+
+it("O04 reports an empty OpenCode response as an error", async () => {
+  rpc.reply = async method => method === "session/prompt" ? { stopReason: "end_turn" } : { sessionId: nativeId };
+  vi.spyOn(base, "execCli").mockResolvedValue({ code: 1, stdout: "", stderr: "" });
+  const adapter = new OpencodeAdapter(runtime);
+  try {
+    const id = await adapter.startSession(context());
+    const events = await turn(adapter, id);
+    expect(events).toContainEqual(expect.objectContaining({ type: "error", code: "empty_response" }));
+    expect(events.at(-1)).toMatchObject({ type: "turn_finished", reason: "error" });
+  } finally { await adapter.dispose(); }
+});
+
+it("O05 gives a silent but healthy OpenCode request ten minutes before releasing the pane", async () => {
+  vi.useFakeTimers();
+  rpc.reply = async method => method === "session/prompt" ? new Promise(() => {}) : { sessionId: nativeId };
+  vi.spyOn(base, "execCli").mockResolvedValue({ code: 1, stdout: "", stderr: "" });
+  const adapter = new OpencodeAdapter(runtime);
+  try {
+    const id = await adapter.startSession({ ...context(), resumeSessionId: undefined });
+    let done = false;
+    const result = turn(adapter, id).then(events => { done = true; return events; });
+    await vi.advanceTimersByTimeAsync(120_001);
+    expect(done).toBe(false);
+    await vi.advanceTimersByTimeAsync(480_000);
+    const events = await result;
+    expect(events).toContainEqual(expect.objectContaining({ type: "error", code: "provider_timeout", message: expect.stringContaining("600 seconds") }));
+    expect(events.at(-1)).toMatchObject({ type: "turn_finished", reason: "error" });
+  } finally { vi.useRealTimers(); await adapter.dispose(); }
+});
+
+it("O05 stops a request that OpenCode keeps retrying after two minutes", async () => {
+  vi.useFakeTimers();
+  rpc.reply = async (method, _params, options) => {
+    if (method !== "session/prompt") return { sessionId: nativeId };
+    options.onNotification("session/update", { sessionId: nativeId, update: { sessionUpdate: "session_info_update", _meta: { "opencode/retry": { attempt: 2, error: { status: 503 } } } } });
+    return new Promise(() => {});
+  };
+  vi.spyOn(base, "execCli").mockResolvedValue({ code: 1, stdout: "", stderr: "" });
+  const adapter = new OpencodeAdapter(runtime);
+  try {
+    const id = await adapter.startSession({ ...context(), resumeSessionId: undefined });
+    const result = turn(adapter, id);
+    await vi.advanceTimersByTimeAsync(120_001);
+    const events = await result;
+    expect(events).toContainEqual(expect.objectContaining({ type: "provider_progress", state: "retrying" }));
+    expect(events).toContainEqual(expect.objectContaining({ type: "error", code: "provider_timeout", message: expect.stringContaining("120 seconds") }));
+    expect(events.at(-1)).toMatchObject({ type: "turn_finished", reason: "error" });
+  } finally { vi.useRealTimers(); await adapter.dispose(); }
+});
+
+it("O05 keeps streaming work running after the initial-response deadline", async () => {
+  vi.useFakeTimers();
+  let finish!: (value: unknown) => void;
+  rpc.reply = async (method, _params, options) => {
+    if (method !== "session/prompt") return { sessionId: nativeId };
+    options.onNotification("session/update", { sessionId: nativeId, update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "Answer" } } });
+    return new Promise(resolve => { finish = resolve; });
+  };
+  vi.spyOn(base, "execCli").mockResolvedValue({ code: 1, stdout: "", stderr: "" });
+  const adapter = new OpencodeAdapter(runtime);
+  try {
+    const id = await adapter.startSession({ ...context(), resumeSessionId: undefined });
+    const result = turn(adapter, id);
+    await vi.advanceTimersByTimeAsync(120_001);
+    finish({ stopReason: "end_turn" });
+    const events = await result;
+    expect(events.some(event => event.type === "error")).toBe(false);
+    expect(events.at(-1)).toMatchObject({ type: "turn_finished", reason: "completed" });
+  } finally { vi.useRealTimers(); await adapter.dispose(); }
+});
+
+it("O05 cancels a silent request without waiting for the CLI prompt response", async () => {
+  rpc.reply = async method => method === "session/prompt" ? new Promise(() => {}) : { sessionId: nativeId };
+  const adapter = new OpencodeAdapter(runtime), controller = new AbortController();
+  try {
+    const id = await adapter.startSession({ ...context(), resumeSessionId: undefined });
+    const events: ProviderEvent[] = [];
+    const running = (async () => { for await (const event of adapter.sendTurn({ providerSessionId: id, requestId: "r", prompt: "Hello", selection: null, signal: controller.signal })) {
+      events.push(event); if (event.type === "provider_progress") controller.abort();
+    } })();
+    await running;
+    expect(events.at(-1)).toMatchObject({ type: "turn_finished", reason: "cancelled" });
+  } finally { await adapter.dispose(); }
+});

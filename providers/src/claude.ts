@@ -206,6 +206,10 @@ export class ClaudeAdapter extends BaseCliAdapter {
       const conversationId = ctx.resumeSessionId ?? randomUUID();
       const model = ctx.model ?? this.env.CLAUDE_MODEL;
       const systemPrompt = ctx.systemPrompt ?? SYSTEM_PROMPT;
+      const systemPromptFile = systemPrompt.trim() ? path.join(dir, "system-prompt.txt") : undefined;
+      // Official Office clients can supply prompts larger than Windows' command
+      // line limit. Keep their exact instructions out of argv on every platform.
+      if (systemPromptFile) fs.writeFileSync(systemPromptFile, systemPrompt, { encoding: "utf8", mode: 0o600 });
       const webTools = ctx.mcp.env.EXCEL_WEB_SEARCH === "1" ? ["WebSearch", "WebFetch"] : [];
       let session: ClaudeSession | undefined;
       transport = new ClaudeProcess({
@@ -221,7 +225,7 @@ export class ClaudeAdapter extends BaseCliAdapter {
           "--tools", [...(ctx.mcp.toolNames ? [] : ["AskUserQuestion"]), ...webTools].join(","),
           "--allowedTools", `mcp__${MCP_SERVER_NAME}`, ...webTools,
           "--permission-mode", "default",
-          ...(systemPrompt.trim() ? ["--system-prompt", systemPrompt] : []),
+          ...(systemPromptFile ? ["--system-prompt-file", systemPromptFile] : []),
           // Preserve the existing restriction to the empty scratch workspace.
           "--setting-sources", "project",
           ...(model ? ["--model", model] : []), "--effort", ctx.effort ?? "medium",

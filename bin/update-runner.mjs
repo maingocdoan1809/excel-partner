@@ -33,11 +33,11 @@ try {
   status({ state: "running", step: "preparing", message: "Getting ready", pid: process.pid, error: null, to: null, finishedAt: null });
   // Give the bridge time to answer the request that started this, and the pane time to show "Updating".
   await sleep(1500);
-  const action = ["update", "rollback", "repair"].includes(process.env.EP_ACTION) ? process.env.EP_ACTION : "update";
-  const argv = action === "update" ? ["update", "--from", spec] : action === "rollback" ? ["rollback", ...(process.env.EP_TARGET_VERSION ? [process.env.EP_TARGET_VERSION] : [])] : ["repair"];
+  const action = process.env.EP_ACTION === "repair" ? "repair" : "update";
+  const argv = action === "update" ? ["update", "--from", spec] : ["repair"];
   const result = await managementMain(argv, { root, dataDir,
     report: step => status({ state: "running", step, message: STEP_TEXT[step] ?? step }) });
-  status({ state: "done", step: "done", message: action === "update" ? "Updated" : action === "rollback" ? "Rolled back" : "Repaired", to: result?.version ?? null, finishedAt: new Date().toISOString() });
+  status({ state: "done", step: "done", message: action === "update" ? "Updated" : "Repaired", to: result?.version ?? null, finishedAt: new Date().toISOString() });
   removeOwnFolder();
 } catch (error) {
   console.error(error instanceof Error ? error.message : String(error));

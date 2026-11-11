@@ -1,3 +1,4 @@
+import type { HistoryAck, HistoryPage, HistorySave, HistoryStats, HistoryTranscript, StoredSession } from "../../protocol/src/history.js";
 import {
   PROTOCOL_VERSION,
   MAX_SKILL_UPLOAD_BYTES,
@@ -318,6 +319,20 @@ export class BridgeClient {
   async providerLogin(method: "GET" | "POST" | "DELETE" = "GET"): Promise<ProviderLoginStatus> {
     return this.sessionFetch("/session/provider-login", { method });
   }
+
+  historyList(offset = 0, limit = 40): Promise<HistoryPage> { return this.sessionFetch(`/session/history?offset=${offset}&limit=${limit}`); }
+  historyPage(id: string, offset = 0, limit = 100): Promise<HistoryTranscript> { return this.sessionFetch(`/session/history?view=chat&id=${encodeURIComponent(id)}&offset=${offset}&limit=${limit}`); }
+  historyStats(): Promise<HistoryStats> { return this.sessionFetch("/session/history?view=stats"); }
+  historySave(input: HistorySave, keepalive = false): Promise<HistoryAck> {
+    const body = JSON.stringify({ action: "save", ...input });
+    // Browsers cap keepalive requests at 64 KiB (at most 3 bytes per character here). A longer chat is not lost when the pane
+    // closes: its copy waits in the outbox and is sent the next time the pane opens.
+    return this.sessionFetch("/session/history", { method: "POST", body, keepalive: keepalive && body.length <= 20_000 });
+  }
+  historyImport(sessions: StoredSession[]): Promise<{ imported: number }> { return this.sessionFetch("/session/history", { method: "POST", body: JSON.stringify({ action: "import", sessions }) }); }
+  historyDelete(id?: string): Promise<HistoryStats> { return this.sessionFetch(`/session/history${id ? `?id=${encodeURIComponent(id)}` : ""}`, { method: "DELETE" }); }
+  historyExport(): Promise<{ sessions: StoredSession[] }> { return this.sessionFetch("/session/history?view=export"); }
+  historyCleanup(before: number, protectedIds: string[]): Promise<{ removed: number }> { return this.sessionFetch("/session/history", { method: "POST", body: JSON.stringify({ action: "cleanup", before, protectedIds }) }); }
 
   async systemInfo(): Promise<import("./ui/system-panel.js").SystemInfo> { return this.sessionFetch("/session/system"); }
   async systemAction(action: string, provider?: ProviderId, version?: string): Promise<void> {

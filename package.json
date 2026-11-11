@@ -38,10 +38,11 @@
     "dist/providers/src/",
     "scripts/package-windows.ps1",
     "scripts/workspace-windows.ps1",
+    "docs/history-storage.md",
     "!**/*.map"
   ],
   "engines": {
-    "node": "^20.19.0 || >=22.12.0"
+    "node": "^20.19.0 || >=22.12.0 <26.0.0"
   },
   "scripts": {
     "update:codex-commands": "node scripts/update-codex-commands.mjs",
@@ -59,13 +60,13 @@
     "dev:bridge": "tsx watch bridge/src/index.ts",
     "dev:gateway": "node scripts/dev-gateway.mjs",
     "pack:release": "node scripts/pack-release.mjs",
-    "cert": "bash scripts/gen-cert.sh",
     "smoke": "tsx scripts/live-smoke.ts",
     "test:live": "vitest run tests/providers.live.test.ts"
   },
   "dependencies": {
     "@github/copilot-sdk": "1.0.18",
     "@modelcontextprotocol/sdk": "^1.32.1",
+    "better-sqlite3": "12.9.0",
     "cross-spawn": "^7.0.6",
     "dompurify": "^3.4.17",
     "fast-xml-parser": "^5.11.2",
@@ -78,6 +79,7 @@
     "zod-to-json-schema": "^3.25.1"
   },
   "devDependencies": {
+    "@types/better-sqlite3": "9.6.0",
     "@types/cross-spawn": "^6.0.6",
     "@types/jsdom": "^30.0.0",
     "@types/node": "^22.10.0",

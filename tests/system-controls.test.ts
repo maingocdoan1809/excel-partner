@@ -1,4 +1,6 @@
 import fs from "node:fs";
+import { createRequire } from "node:module";
+import { ProfiledAdapter } from "../providers/src/profiled.js";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -11,13 +13,22 @@ import { PaneClient, getFreePort } from "./helpers.js";
 let bridge: Bridge | undefined, pane: PaneClient | undefined, directory: string | undefined;
 afterEach(async () => { await pane?.close(); await bridge?.close(); pane = undefined; bridge = undefined;
   vi.unstubAllEnvs(); if (directory) fs.rmSync(directory, { recursive: true, force: true }); directory = undefined; });
-async function fixture() {
+async function fixture(profiled = false) {
   directory = fs.mkdtempSync(path.join(os.tmpdir(), "system-controls-"));
   vi.stubEnv("OFFICE_PARTNER_DATA_DIR", directory); vi.stubEnv("OFFICE_PARTNER_CONTROL_TOKEN", "test-control-token");
   const port = await getFreePort(), shutdown = vi.fn();
   const config = loadConfig({ host: "127.0.0.1", port, tls: null, publicBaseUrl: `http://127.0.0.1:${port}`, configFile: path.join(directory, "config.json"), logLevel: "error" });
+  let adapter = new MockAdapter({ id: "copilot", delayMs: 10 });
+  const runtimeStore = createRequire(import.meta.url)(path.resolve("bin/runtime-store.cjs"));
+  if (profiled) {
+    const command = path.join(directory, "fake-cli.js"); fs.writeFileSync(command, "fixture");
+    const id = runtimeStore.digest("fixture");
+    runtimeStore.changeState(directory, (state: any) => { state.profiles[id] = { id, provider: "copilot", mode: "external", command, adapterRoot: path.resolve(".") }; state.active.copilot = id; });
+    runtimeStore.bindConversation(directory, "copilot", "saved", id);
+  }
+  const registered = profiled ? new ProfiledAdapter("copilot", { env: { ...process.env }, bridgeUrl: "", mcp: { command: "", args: [] }, logger: { debug() {}, warn() {} } }, () => adapter) : new MockAdapter({ id: "copilot", delayMs: 1000 });
   bridge = new Bridge(config, { usageFile: null, systemPromptFile: null, savedReferencesFile: null, updater: null, onShutdown: shutdown,
-    registry: new ProviderRegistry().register(new MockAdapter({ id: "copilot", delayMs: 1000 })) });
+    registry: new ProviderRegistry().register(registered) });
   const { url } = await bridge.listen();
   pane = await PaneClient.connect(`${url.replace("http", "ws")}/ws`);
   pane.send({ type: "hello", protocolVersion: 1, workbookConnectionId: "0123456789abcdef" });
@@ -29,12 +40,24 @@ async function fixture() {
   return { url, headers, action, control, shutdown };
 }
 describe("authenticated recovery service controls", () => {
+  it("R08 disabled providers allow current/saved chats while refusing a new chat", async () => {
+    const w = await fixture(true);
+    pane!.send({ type: "set_provider", provider: "copilot" }); await pane!.waitFor(m => m.type === "provider_status");
+    const turn = async (id: string, extra = {}) => { pane!.send({ type: "prompt", requestId: id, prompt: "hello", selection: null, chatSessionId: "chat", ...extra }); return pane!.waitFor(m => m.type === "turn_finished" && m.requestId === id); };
+    expect(await turn("before")).toMatchObject({ reason: "completed" });
+    expect((await w.action("remove")).status).toBe(200);
+    expect(await turn("current")).toMatchObject({ reason: "completed" });
+    expect(await turn("new", { chatSessionId: "other" })).toMatchObject({ reason: "error" });
+    expect(await turn("saved", { resumeSessionId: "saved" })).toMatchObject({ reason: "completed" });
+  });
+
   it("requires a connected pane token for system metadata and actions", async () => {
     const w = await fixture();
     expect((await fetch(`${w.url}/session/system`)).status).toBe(401);
     expect((await fetch(`${w.url}/session/system`, { method: "POST", body: '{"action":"debug-on"}' })).status).toBe(401);
     const metadata = await (await fetch(`${w.url}/session/system`, { headers: w.headers })).json();
-    expect(metadata).toMatchObject({ providers: expect.any(Array), cached: [] });
+    expect(metadata).toMatchObject({ providers: expect.any(Array) });
+    expect(metadata).not.toHaveProperty("cached"); expect(metadata).not.toHaveProperty("previous");
     expect(JSON.stringify(metadata)).not.toContain(directory!);
     expect((await w.action("debug-on")).status).toBe(200);
     expect(JSON.parse(fs.readFileSync(path.join(directory!, "debug.json"), "utf8")).expires).toBeGreaterThan(Date.now());

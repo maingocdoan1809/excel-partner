@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { createHash, randomUUID, X509Certificate } from "node:crypto";
 import { createRequire } from "node:module";
-import { runCommand, requestHealth, probeMcp, readJson } from "./doctor-probes.mjs";
+import { runCommand, requestHealth, probeMcp, readJson, readLastStartup } from "./doctor-probes.mjs";
 
 export const PROVIDERS = ["claude", "copilot", "codex", "opencode"];
 const version = text => /\b(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)\b/.exec(String(text))?.[1] ?? null;
@@ -75,7 +75,7 @@ export async function collectDoctor(options) {
       if (active) root = active.root;
       runtimeState = runtimeStore.readState(dataDir);
       add("deployment.state", "pass", "DEPLOYMENT_STATE_OK", "Deployment and runtime selection metadata parsed.", undefined,
-        { active: active?.version ?? null, previous: deployment.releases[deployment.previous]?.version ?? null, phase: deployment.journal?.phase ?? null, held: deployment.held ?? false });
+        { active: active?.version ?? null, phase: deployment.journal?.phase ?? null, held: deployment.held ?? false });
     } catch { add("deployment.state", "fail", "DEPLOYMENT_STATE_INVALID", "Saved deployment metadata cannot be read safely.", "Use the recovery launcher to restore a retained release."); }
   }
   if (integrity && runtimeStore && runtimeState) {
@@ -101,8 +101,10 @@ export async function collectDoctor(options) {
   const packageName = ["excel-partner", "office-partner"].includes(pkg.name) ? pkg.name : "unknown";
   add("installation.package", packageName !== "unknown" && version(pkg.version) ? "pass" : "fail", packageName !== "unknown" && version(pkg.version) ? "PACKAGE_OK" : "PACKAGE_INVALID",
     packageName !== "unknown" ? "Product package identified." : "Product package metadata is missing or invalid.", `Reinstall the exact product release if package metadata is damaged.`);
-  add("installation.node", !older(nodeVersion, "20.0.0") ? "pass" : "fail", !older(nodeVersion, "20.0.0") ? "NODE_OK" : "NODE_UNSUPPORTED",
-    "Check Node.js against the product minimum.", "Install a supported Node.js release.", { version: version(nodeVersion), minimum: "20.0.0" });
+  const restricted = typeof pkg.engines?.node === "string" && pkg.engines.node.includes("<26.0.0");
+  const nodeSupported = restricted ? !older(nodeVersion, "20.19.0") && (Number(nodeVersion.split(".")[0]) === 20 || !older(nodeVersion, "22.12.0")) && older(nodeVersion, "26.0.0") : !older(nodeVersion, "20.0.0");
+  add("installation.node", nodeSupported ? "pass" : "fail", nodeSupported ? "NODE_OK" : "NODE_UNSUPPORTED",
+    "Check Node.js against the product and packaged SQLite driver requirements.", "Use a Node.js version supported by this release.", { version: version(nodeVersion), minimum: restricted ? "20.19.0" : "20.0.0", ...(restricted ? { supported: "20.19+ within major 20, or 22.12+ below 26" } : {}) });
 
   let sdk = {};
   sdk = installedPackage(root, "@github/copilot-sdk");
@@ -156,6 +158,17 @@ export async function collectDoctor(options) {
       catch { startup = { code: null }; }
       add(`${service.id}.startup`, startup.code === 0 ? "pass" : "warn", startup.code === 0 ? "STARTUP_OK" : "STARTUP_UNVERIFIED",
         startup.code === 0 ? "Windows sign-in startup entry is present." : "Windows sign-in startup entry was not verified.", service.cli);
+      // The entry stores the full path of Node and of the launcher. If either was moved or removed, nothing starts at sign-in.
+      const programs = startup.code === 0 && typeof startup.stdout === "string" ? [...startup.stdout.matchAll(/"([^"]+)"/g)].map(match => match[1]).slice(0, 2) : [];
+      if (programs.length === 2) {
+        const present = programs.every(program => file(program));
+        add(`${service.id}.startup_target`, present ? "pass" : "fail", present ? "STARTUP_TARGET_OK" : "STARTUP_TARGET_MISSING",
+          present ? "The sign-in startup entry points to files that exist." : "The sign-in startup entry points to Node.js or a launcher file that no longer exists.", present ? undefined : service.cli);
+      }
+      const attempt = readLastStartup(dataDir, service.id);
+      if (attempt) add(`${service.id}.startup_last`, attempt.ok ? "pass" : "warn", attempt.ok ? "STARTUP_LAST_OK" : "STARTUP_LAST_FAILED",
+        attempt.ok ? "The most recent start at sign-in or from Fix connection succeeded." : "The most recent start at sign-in or from Fix connection failed.",
+        attempt.ok ? undefined : 'Open Start > "Office Partner - Fix connection".', { at: String(attempt.at ?? ""), attempt: Number(attempt.attempt) || 1, ...(attempt.ok ? {} : { reason: String(attempt.code ?? "START_FAILED") }) });
     }
     let ca;
     if (!file(service.cert) || !file(service.key)) {
@@ -182,9 +195,17 @@ export async function collectDoctor(options) {
       : /CERT|TLS|SSL|VERIFY/.test(error) ? "SERVICE_TLS_ERROR" : "SERVICE_UNREACHABLE"
       : !result[service.id === "addin" ? "bridge" : "gateway"] ? "SERVICE_IDENTITY_MISMATCH"
         : service.id === "gateway" && !result.ready ? "SERVICE_NOT_READY" : "SERVICE_OK";
-    add(`${service.id}.health`, code === "SERVICE_OK" ? "pass" : "fail", code,
-      code === "SERVICE_OK" ? "Expected local service answered its health check." : "Local service is stopped, unhealthy, or a different service occupies the port.",
-      code === "SERVICE_IDENTITY_MISMATCH" ? "Check the port owner; do not terminate an unrelated process." : `${command} start ${service.id === "addin" ? "addin" : "gateway"}`,
+    const label = `${service.id === "addin" ? "Office Partner bridge" : "Gateway"} on port ${service.port}`;
+    const healthMessage = code === "SERVICE_OK" ? `${label} answered its health check and is ready.`
+      : code === "SERVICE_NOT_READY" ? `${label} is responding but still initializing its model catalog or warmup. Run the check again after startup finishes.`
+      : code === "SERVICE_STOPPED" ? `${label} is not running or is not listening on this port.`
+      : code === "SERVICE_IDENTITY_MISMATCH" ? `${label}: a different service answered on this port.`
+      : code === "SERVICE_TIMEOUT" ? `${label} did not answer within the health-check timeout.`
+      : code === "SERVICE_TLS_ERROR" ? `${label} could not be verified using its local HTTPS certificate.`
+      : `${label} could not be reached or returned an invalid health response.`;
+    add(`${service.id}.health`, code === "SERVICE_OK" ? "pass" : "fail", code, healthMessage,
+      code === "SERVICE_NOT_READY" ? "Wait for gateway initialization to finish, then run the check again."
+        : code === "SERVICE_IDENTITY_MISMATCH" ? "Check the port owner; do not terminate an unrelated process." : `${command} start ${service.id === "addin" ? "addin" : "gateway"}`,
       { port: service.port, ...(service.id === "addin" && !error ? { protocolVersion: result.protocolVersion } : {}) });
     if (service.id === "addin" && code === "SERVICE_OK") {
       const expected = expectedProtocol(root), actual = result.protocolVersion ?? null;

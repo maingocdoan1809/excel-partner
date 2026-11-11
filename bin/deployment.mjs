@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
 import store from "./runtime-store.cjs";
-import { installPackage, installRuntime } from "./runtime-manager.mjs";
+import { installPackage, installRuntime, verifyRuntime } from "./runtime-manager.mjs";
 import { runCommand } from "./doctor-probes.mjs";
 
 const fileHash = file => store.fileDigest(file);
@@ -99,11 +99,85 @@ export function restoreSelection(dataDir, before) {
     }
   });
 }
+/** The runtimes a new release will use must be intact and for this machine before anything is stopped. */
+function verifyProfiles(profiles, dataDir) {
+  for (const profile of Object.values(profiles)) {
+    if (!profile) throw new Error("RUNTIME_UNAVAILABLE");
+    if (profile.mode === "managed") {
+      if (profile.platform !== process.platform || profile.arch !== process.arch) throw new Error("RUNTIME_PLATFORM_MISMATCH");
+      verifyRuntime(profile, dataDir);
+    } else if (!fs.existsSync(profile.command) || profile.fingerprint && store.fileDigest(profile.command) !== profile.fingerprint) throw new Error("RUNTIME_UNAVAILABLE");
+  }
+}
+/**
+ * Keep only the running release on disk. Called once a switch has settled: committed, or rolled back to the old release.
+ * The old release existed to undo a failed switch; an older version is installed again from npm when someone wants it.
+ *
+ * Saved chats are looked after: a runtime profile that only exists because a retired release created it is dropped when it
+ * duplicates the current CLI (same version and data folder), and its chats move to the current profile. An older CLI that
+ * chats may still need to resume with is kept, now served by the current release's adapter.
+ *
+ * Deleting a release folder takes about half a minute on Windows (every file is scanned), so the update must not wait for it:
+ * each folder is renamed to `.trash-*` at once and removed in the background. `pending` settles when that is finished.
+ * Cleanup trouble (a file held open by antivirus, for example) never fails an update; the next call sweeps what is left.
+ */
+export function retireOldReleases(dataDir = store.home()) {
+  const result = { releases: [], profiles: [], pending: Promise.resolve() };
+  try {
+    const deployment = store.currentDeployment(dataDir), active = deployment.releases[deployment.active];
+    if (!active) return result;
+    const retired = Object.values(deployment.releases).filter(release => release.id !== active.id);
+    const pinned = root => typeof root === "string" && retired.some(release => store.inside(release.directory, root));
+    const dropped = [];
+    if (retired.length) store.changeState(dataDir, state => {
+      for (const [id, profile] of Object.entries(state.profiles)) {
+        if (!pinned(profile.adapterRoot)) continue;
+        const provider = profile.provider, current = state.profiles[state.active[provider]];
+        const inUse = state.active[provider] === id || state.legacy[provider] === id;
+        const bound = Object.entries(state.conversations).filter(([, profileId]) => profileId === id);
+        const wanted = inUse || bound.length > 0 || state.previous[provider] === id;
+        const duplicate = !inUse && current && current.id !== id && current.version === profile.version && current.stateHome === profile.stateHome;
+        if (state.pending?.[provider] === id || !wanted || duplicate) {
+          for (const [key] of bound) { if (duplicate) state.conversations[key] = current.id; else delete state.conversations[key]; }
+          if (state.previous[provider] === id) delete state.previous[provider];
+          if (state.pending?.[provider] === id) delete state.pending[provider];
+          delete state.profiles[id]; dropped.push(profile);
+        } else profile.adapterRoot = active.root; // an older CLI some chats still resume with
+      }
+    });
+    for (const release of retired) delete deployment.releases[release.id];
+    deployment.previous = null;
+    store.atomic(path.join(dataDir, "deployment.json"), deployment);
+    result.releases = retired.map(release => release.id); result.profiles = dropped.map(profile => profile.id);
+
+    const releases = path.join(dataDir, "releases"), runtimes = path.join(dataDir, "runtimes");
+    const doomed = retired.map(release => release.directory);
+    for (const profile of dropped) if (profile.mode === "managed") doomed.push(path.join(runtimes, profile.id));
+    // Folders that no longer have a record (an earlier cleanup could not delete them) and trash left by an interrupted cleanup.
+    for (const name of fs.existsSync(releases) ? fs.readdirSync(releases) : []) {
+      if (/^[a-f0-9]{64}$/.test(name) && !deployment.releases[name] || name.startsWith(".trash-")) doomed.push(path.join(releases, name));
+    }
+    for (const name of fs.existsSync(runtimes) ? fs.readdirSync(runtimes) : []) if (name.startsWith(".trash-")) doomed.push(path.join(runtimes, name));
+    const removals = [];
+    for (const directory of new Set(doomed)) {
+      if (!fs.existsSync(directory) || !store.inside(dataDir, directory)) continue;
+      let target = directory;
+      if (!path.basename(directory).startsWith(".trash-")) {
+        const trash = path.join(path.dirname(directory), ".trash-" + crypto.randomUUID());
+        try { fs.renameSync(directory, trash); target = trash; } catch { /* held open: delete in place, or sweep next time */ }
+      }
+      removals.push(fs.promises.rm(target, { recursive: true, force: true, maxRetries: 3, retryDelay: 200 }).catch(() => {}));
+    }
+    result.pending = Promise.all(removals).then(() => {});
+  } catch { /* A failed cleanup must not turn a good update into a failed one. */ }
+  return result;
+}
 export async function switchRelease(next, options) {
   const { dataDir = store.home(), stop, start, drain, undrain = async () => {}, report = () => {}, profiles = {} } = options;
   const state = store.currentDeployment(dataDir), previous = state.releases[state.active];
   if (!previous) throw new Error("BASELINE_SNAPSHOT_REQUIRED");
   verifyRelease(next, true);
+  verifyProfiles(profiles, dataDir);
   let previousValid = true;
   try { verifyRelease(previous); } catch (error) { if (!options.allowDamagedCurrent) throw error; previousValid = false; }
   journal(dataDir, { phase: "prepared", from: previous.id, to: next.id, previous: state.previous, runtimeBefore: store.readState(dataDir) });
@@ -112,12 +186,7 @@ export async function switchRelease(next, options) {
     report("draining"); await drain();
     journal(dataDir, { phase: "stopping" }); stopped = true; await stop(previous);
     const deployment = store.currentDeployment(dataDir); deployment.active = next.id; deployment.previous = previous.id;
-    const before = store.readState(dataDir);
-    deployment.releases[previous.id].runtimeProfiles = { ...before.active };
-    deployment.releases[previous.id].runtimeSelection = Object.fromEntries(["active", "previous", "selected", "disabled"].map(field => [field, before[field] ?? (field === "disabled" ? [] : undefined)]));
-    deployment.releases[next.id].runtimeProfiles = options.selection?.active ?? { ...before.active, ...Object.fromEntries(Object.entries(profiles).map(([id, profile]) => [id, profile.id])) };
-    deployment.held = options.hold === true; deployment.journal.phase = "activating"; store.atomic(path.join(dataDir, "deployment.json"), deployment);
-    if (options.selection) restoreSelection(dataDir, options.selection);
+    deployment.held = false; deployment.journal.phase = "activating"; store.atomic(path.join(dataDir, "deployment.json"), deployment);
     store.changeState(dataDir, runtimes => {
       for (const [provider, profile] of Object.entries(profiles)) {
         if (runtimes.active[provider] !== profile.id) runtimes.previous[provider] = runtimes.active[provider] ?? runtimes.legacy[provider];
@@ -127,6 +196,9 @@ export async function switchRelease(next, options) {
     });
     report("starting"); await start(next);
     journal(dataDir, { phase: "committed", runtimeBefore: null });
+    // The new release is running. The old one was only kept to undo a failed switch; going back to an older version is
+    // done by installing it again from npm, so nothing is stored for that.
+    retireOldReleases(dataDir);
     return next;
   } catch (error) {
     report("recovering");
@@ -144,7 +216,7 @@ export async function switchRelease(next, options) {
     deployment.active = previous.id; deployment.previous = deployment.journal?.previous ?? null; deployment.held = true;
     deployment.releases[next.id].failed = true; store.atomic(path.join(dataDir, "deployment.json"), deployment);
     restoreSelection(dataDir, before);
-    try { await start(previous); journal(dataDir, { phase: "rolled_back", runtimeBefore: null }); }
+    try { await start(previous); journal(dataDir, { phase: "rolled_back", runtimeBefore: null }); retireOldReleases(dataDir); }
     catch { journal(dataDir, { phase: "recovery_failed" }); throw new Error("ROLLBACK_START_FAILED_USE_RECOVERY"); }
     throw new Error("ACTIVATION_FAILED_PREVIOUS_RELEASE_RESTORED");
   }
@@ -164,21 +236,6 @@ export async function updateRelease(root, spec, options) {
     return switchRelease(next, { ...options, dataDir, profiles });
   });
 }
-export async function rollbackRelease(version, options) {
-  const dataDir = options.dataDir ?? store.home();
-  return store.lock(dataDir, "deployment", async () => {
-    const deployment = store.currentDeployment(dataDir);
-    const next = version ? Object.values(deployment.releases).filter(release => release.version === version && !release.failed && release.id !== deployment.active).sort((a, b) => b.created.localeCompare(a.created))[0]
-      : deployment.releases[deployment.previous];
-    if (!next || next.id === deployment.active) throw new Error("ROLLBACK_RELEASE_UNAVAILABLE");
-    const profiles = {};
-    for (const [provider, id] of Object.entries(next.runtimeProfiles ?? {})) {
-      const profile = store.readState(dataDir).profiles[id];
-      if (profile) profiles[provider] = profile; else throw new Error("ROLLBACK_RUNTIME_UNAVAILABLE");
-    }
-    return switchRelease(next, { ...options, dataDir, profiles, selection: next.runtimeSelection, hold: true });
-  });
-}
 export function recoverInterrupted(dataDir = store.home()) {
   const deployment = store.currentDeployment(dataDir), operation = deployment.journal;
   if (!operation || !["stopping", "activating", "recovery_failed"].includes(operation.phase)) return;
@@ -188,4 +245,5 @@ export function recoverInterrupted(dataDir = store.home()) {
   restoreSelection(dataDir, operation.runtimeBefore);
   deployment.journal = { ...operation, phase: "recovered", runtimeBefore: null };
   store.atomic(path.join(dataDir, "deployment.json"), deployment);
+  retireOldReleases(dataDir);
 }

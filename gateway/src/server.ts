@@ -155,6 +155,9 @@ export class GatewayServer {
     if (req.method !== "POST" || route !== "/v1/messages") throw new ApiError(404, "not_found_error", "Unknown gateway endpoint");
     const request = parseRequest(await this.body(req));
     await this.engine.prepareRequest(request);
+    // Upload/discovery can yield while maintenance is admitted. No await may
+    // separate this final gate from registering the turn with the engine.
+    if (this.maintenance || this.stopping) throw new ApiError(503, "api_error", "Gateway is switching releases; retry after it restarts");
     const isProbe = request.max_tokens === 1 && !request.stream && !request.system && !request.tools?.length
       && request.messages.length === 1 && request.messages[0]?.role === "user" && request.messages[0]?.content === "x";
     const target = routeModel(request.model, this.options.config, isProbe);

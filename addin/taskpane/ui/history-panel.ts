@@ -1,12 +1,13 @@
+import type { ChatHistoryStore } from "./durable-history.js";
 import type { ProviderId } from "../../../protocol/src/index.js";
 import type { BridgeClient } from "../bridge-client.js";
-import { formatWhen, type SessionStore, type StoredMessage, type StoredSession } from "./sessions.js";
+import { formatWhen, type StoredMessage, type StoredSession } from "./sessions.js";
 
 export interface HistoryPanelDeps {
   getClient(): BridgeClient;
   getSession(): StoredSession;
   getRequestId(): string | null;
-  store: SessionStore;
+  store: ChatHistoryStore;
   providerNames: Record<ProviderId, string>;
   persistNow(): void;
   abandonRequest(): void;
@@ -32,9 +33,15 @@ export function setupHistoryPanel(deps: HistoryPanelDeps) {
   const store = deps.store;
   const PROVIDER_NAMES = deps.providerNames;
   let viewing: StoredSession | null = null;
+  let transcriptOffset = 0, transcriptRevision = 0;
+  const currentId = () => store.savedId?.(deps.getSession().id) ?? deps.getSession().id;
 
-  function renderHistory(refreshTitles = true): void {
+  async function renderHistory(refreshTitles = true, more = false): Promise<void> {
     deps.persistNow(); // so the current chat is listed too
+    let pendingWarning = "";
+    try { await store.flush?.(); } catch { pendingWarning = "Some chats are not saved yet. They are kept and saved again automatically; use Settings to export or recover them."; }
+    try { await store.refresh?.(more); }
+    catch (error) { els.historyList.textContent = `History is unavailable: ${error instanceof Error ? error.message : String(error)}. Trying again automatically. Unsaved chats are retained.`; return; }
     if (refreshTitles) void refreshHistoryTitles();
     const items = store.list();
     els.historyClear.hidden = items.length === 0;
@@ -49,14 +56,14 @@ export function setupHistoryPanel(deps: HistoryPanelDeps) {
         const open = document.createElement("button");
         open.type = "button";
         open.className = "history-item";
-        open.dataset.current = String(item.id === deps.getSession().id);
+        open.dataset.current = String(item.id === currentId());
         const title = document.createElement("span");
         title.className = "history-title";
         title.textContent = item.title;
         const meta = document.createElement("span");
         meta.className = "history-meta";
         meta.textContent = [
-          item.id === deps.getSession().id ? "Current" : null,
+          item.id === currentId() ? "Current" : null,
           PROVIDER_NAMES[item.provider as ProviderId] ?? item.provider,
           item.providerSessionId ? null : "Legacy chat",
           formatWhen(item.updatedAt),
@@ -78,6 +85,11 @@ export function setupHistoryPanel(deps: HistoryPanelDeps) {
         return row;
       }),
     );
+    if (pendingWarning) { const warning = document.createElement("p"); warning.className = "settings-description"; warning.textContent = pendingWarning; els.historyList.prepend(warning); }
+    if ((store.total ?? items.length) > items.length) {
+      const moreButton = document.createElement("button"); moreButton.type = "button"; moreButton.className = "secondary"; moreButton.textContent = "Load older chats";
+      moreButton.addEventListener("click", () => void renderHistory(false, true)); els.historyList.append(moreButton);
+    }
   }
 
   async function refreshHistoryTitles(): Promise<void> {
@@ -86,7 +98,7 @@ export function setupHistoryPanel(deps: HistoryPanelDeps) {
       const summaries = await deps.getClient().usageSummaries();
       let changed = false;
       for (const summary of summaries) {
-        if (!summary.title) continue;
+        if (!summary.title || !store.list().some(s => s.id === summary.sessionId)) continue;
         const stored = summary.sessionId === deps.getSession().id ? deps.getSession() : store.get(summary.sessionId);
         if (!stored || stored.providerTitle === summary.title) continue;
         stored.providerTitle = summary.title;
@@ -98,27 +110,58 @@ export function setupHistoryPanel(deps: HistoryPanelDeps) {
     } catch { /* The local history remains usable while disconnected. */ }
   }
 
-  function openSession(id: string): void {
+  async function openSession(id: string): Promise<void> {
+    try {
     deps.persistNow();
-    const stored = store.get(id);
+    try { await store.flush?.(); } catch { /* Pending copies remain available from Settings; saved history can still be read. */ }
+    const first = store.loadPage ? await store.loadPage(id, 0, 100) : null;
+    transcriptOffset = first ? Math.max(0, first.totalMessages - 100) : 0;
+    const page = first && transcriptOffset ? await store.loadPage!(id, transcriptOffset, 100) : first;
+    if (first && page && first.revision !== page.revision) throw new Error("History changed in another window. Open it again.");
+    const stored = page?.session ?? store.get(id);
     if (!stored) return renderHistory();
+    transcriptRevision = page?.revision ?? 0;
     viewing = stored;
     els.sessionTitle.textContent = stored.title;
     els.sessionMeta.textContent = `${PROVIDER_NAMES[stored.provider as ProviderId] ?? stored.provider} · ${new Date(stored.startedAt).toLocaleString()}`;
-    els.sessionTranscript.replaceChildren();
-    for (const message of stored.messages) deps.renderMessage(els.sessionTranscript, message);
-    els.sessionContinue.textContent = stored.id === deps.getSession().id ? "Back to chat" : "Continue this chat";
+    renderTranscript();
+    els.sessionContinue.textContent = stored.id === currentId() ? "Back to chat" : "Continue this chat";
     deps.showPanel("session");
     els.sessionTranscript.scrollTop = 0;
+    } catch (error) { els.historyList.textContent = `Could not open history: ${error instanceof Error ? error.message : String(error)}`; }
   }
 
-  function continueViewedSession(): void {
+  function renderTranscript() {
+    els.sessionTranscript.replaceChildren();
     if (!viewing) return;
-    if (viewing.id !== deps.getSession().id) {
+    if (transcriptOffset > 0 && store.loadPage) {
+      const older = document.createElement("button"); older.type = "button"; older.className = "secondary"; older.textContent = "Load earlier messages";
+      older.addEventListener("click", () => {
+        const current = viewing; older.disabled = true;
+        void (async () => {
+          const offset = Math.max(0, transcriptOffset - 100);
+          const page = await store.loadPage!(current!.id, offset, transcriptOffset - offset);
+          if (viewing !== current) return;
+          if (page.revision !== transcriptRevision) throw new Error("History changed. Open this chat again.");
+          viewing!.messages.unshift(...page.session.messages); transcriptOffset = offset; renderTranscript();
+        })().catch(error => { older.disabled = false; older.textContent = `Could not load messages: ${error.message}`; });
+      });
+      els.sessionTranscript.append(older);
+    }
+    for (const message of viewing.messages) deps.renderMessage(els.sessionTranscript, message);
+  }
+
+  async function continueViewedSession(): Promise<void> {
+    if (!viewing) return;
+    if (viewing.id !== currentId()) {
       const requestId = deps.getRequestId();
       if (requestId) deps.getClient().cancel(requestId);
       deps.persistNow();
-      deps.loadSession(viewing);
+      try {
+        const complete = store.load ? await store.load(viewing.id) : viewing;
+        if (!complete) throw new Error("Chat is unavailable.");
+        deps.loadSession(complete);
+      } catch (error) { els.sessionMeta.textContent = `Could not continue chat: ${error instanceof Error ? error.message : String(error)}`; return; }
     }
     viewing = null;
     deps.showPanel(null);
@@ -129,9 +172,10 @@ export function setupHistoryPanel(deps: HistoryPanelDeps) {
     if (viewing) deleteSession(viewing.id);
   }
 
-  function deleteSession(id: string): void {
-    store.delete(id);
-    if (id === deps.getSession().id) {
+  async function deleteSession(id: string): Promise<void> {
+    const deletingCurrent = id === currentId();
+    try { await store.delete(id); } catch (error) { els.historyList.textContent = `Could not delete chat: ${error instanceof Error ? error.message : String(error)}`; return; }
+    if (deletingCurrent) {
       deps.abandonRequest();
       // The open chat was removed: carry on in an empty one.
       deps.resetChat();
@@ -139,10 +183,11 @@ export function setupHistoryPanel(deps: HistoryPanelDeps) {
     }
     viewing = null;
     deps.showPanel("history");
+    void renderHistory();
   }
 
   let confirmClearTimer: number | undefined;
-  function clearHistory(): void {
+  async function clearHistory(): Promise<void> {
     // Two clicks instead of a dialog (dialogs are unreliable inside task panes).
     if (els.historyClear.dataset.confirm !== "1") {
       els.historyClear.dataset.confirm = "1";
@@ -152,7 +197,7 @@ export function setupHistoryPanel(deps: HistoryPanelDeps) {
     }
     window.clearTimeout(confirmClearTimer);
     resetClearButton();
-    store.clear();
+    try { await store.clear(); } catch (error) { els.historyList.textContent = `Could not clear history: ${error instanceof Error ? error.message : String(error)}`; return; }
     deps.abandonRequest();
     deps.resetChat();
     renderHistory();

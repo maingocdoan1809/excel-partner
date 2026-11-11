@@ -204,7 +204,7 @@ export class UpdateService {
   }
 
   /** Start the update in a separate process; it outlives this bridge, which it stops. */
-  start(options: { busy: boolean; action?: "update" | "rollback" | "repair"; version?: string }): UpdateStatus {
+  start(options: { busy: boolean; action?: "update" | "repair" }): UpdateStatus {
     const reason = this.unsupportedReason();
     if (reason) throw new UpdateError("unsupported", reason);
     if (this.status().state === "running") throw new UpdateError("running", "An update is already running.");
@@ -225,7 +225,6 @@ export class UpdateService {
       EP_FROM: this.version,
       EP_GATEWAY: gatewaySetUp ? "1" : "0",
       EP_ACTION: options.action ?? "update",
-      EP_TARGET_VERSION: options.version,
     };
     const started: UpdateStatus = {
       state: "running", step: "preparing", message: "Getting ready", from: this.version, to: null, error: null,

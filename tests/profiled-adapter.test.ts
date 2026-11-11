@@ -46,6 +46,15 @@ function fixture() {
 async function collect(events: AsyncIterable<ProviderEvent>) { const result = []; for await (const event of events) result.push(event); return result; }
 
 describe("provider worker version isolation", () => {
+  it("R04 isolates a failed startup's close callback from the successful fallback", async () => {
+    const w = fixture(); await w.adapter.startSession(w.context); w.activateNext(); await w.adapter.detect();
+    const closed = vi.fn();
+    w.workers[1]!.start.mockImplementationOnce(async ctx => { ctx.onRuntimeClosed?.(); throw new Error("unknown option --broken"); });
+    expect(await w.adapter.startSession({ ...w.context, onRuntimeClosed: closed })).toBe("worker-0");
+    expect(closed).not.toHaveBeenCalled();
+    await w.adapter.dispose();
+  });
+
   it("keeps running and saved chats on the recorded CLI while new chats select the next version", async () => {
     const w = fixture(), oldId = await w.adapter.startSession(w.context);
     await collect(w.adapter.sendTurn(w.input(oldId, "original")));

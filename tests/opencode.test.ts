@@ -102,7 +102,8 @@ describe("OpenCode ACP retry diagnostics", () => {
   it("reports retry status without exposing the upstream body or message", () => {
     const adapter = new OpencodeAdapter({ bridgeUrl: "", mcp: { command: "", args: [] }, logger: { debug() {}, warn() {} } });
     const diagnostic = vi.fn();
-    const session = { acpSessionId: "native", active: {}, diagnostic };
+    const progress = vi.fn();
+    const session = { acpSessionId: "native", active: { requestId: "r", queue: { push: progress } }, diagnostic };
     const notify = (adapter as any).onNotification.bind(adapter);
     const update = { sessionUpdate: "session_info_update", _meta: { "opencode/retry": {
       attempt: 1, nextRetryAt: "2026-10-24T08:00:00Z",
@@ -115,6 +116,7 @@ describe("OpenCode ACP retry diagnostics", () => {
       errorType: "provider.rate-limit", nextRetryAt: "2026-10-24T08:00:00.000Z" });
     notify(session, "session/update", { sessionId: "native", update: { sessionUpdate: "session_info_update", _meta: { "opencode/retry": null } } });
     expect(diagnostic).toHaveBeenLastCalledWith({ phase: "model_retry_started" });
-    expect(JSON.stringify(diagnostic.mock.calls)).not.toContain("PRIVATE");
+    expect(progress).toHaveBeenCalledWith(expect.objectContaining({ type: "provider_progress", state: "retrying" }));
+    expect(JSON.stringify([diagnostic.mock.calls, progress.mock.calls])).not.toContain("PRIVATE");
   });
 });

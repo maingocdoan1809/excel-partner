@@ -1,8 +1,7 @@
 /**
  * Call an Excel tool on a LIVE task pane through the bridge, exactly like an MCP
- * client would. Needs the bridge started with BRIDGE_DEV=1.
+ * client would. Needs the bridge started with BRIDGE_DEV=1 (set it, then run `office-partner restart`).
  *
- *   BRIDGE_DEV=1 bash scripts/start.sh
  *   npx tsx scripts/tool-call.ts get_selection
  *   npx tsx scripts/tool-call.ts add_shape '{"type":"FlowChartProcess","anchor":"M10:M11","name":"a"}'
  */

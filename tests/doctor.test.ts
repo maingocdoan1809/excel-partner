@@ -6,6 +6,8 @@ import http from "node:http";
 import selfsigned from "selfsigned";
 import { spawnSync } from "node:child_process";
 // @ts-expect-error Standalone diagnostics ships as JavaScript, without the TS build.
+import { recordStartup } from "../bin/startup-log.mjs";
+// @ts-expect-error Standalone diagnostics ships as JavaScript, without the TS build.
 import { collectDoctor, resolveCommands } from "../bin/doctor-checks.mjs";
 // @ts-expect-error Standalone diagnostics ships as JavaScript, without the TS build.
 import { doctorMain, parseDoctorArgs } from "../bin/doctor.mjs";
@@ -31,6 +33,44 @@ function world(name = "office-partner") {
 }
 
 describe("portable provider doctor", () => {
+  describe("sign-in startup", () => {
+    const registry = (node: string, launcher: string) => `\r\nHKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Run\r\n    Agent Gateway    REG_SZ    "${node}" "${launcher}" start gateway --at-logon\r\n`;
+    const startupWorld = (launcherExists = true) => {
+      const w = world();
+      const node = w.put("tools/node.exe", ""), launcher = launcherExists ? w.put("Excel Partner/recovery/recovery.mjs", "") : path.join(w.root, "Excel Partner", "recovery", "recovery.mjs");
+      const run = vi.fn(async (command: string) => command === "reg.exe" ? { code: 0, stdout: registry(node, launcher), stderr: "" } : { code: 0, stdout: "1.0.95", stderr: "" });
+      return { ...w, dataDir: path.join(w.root, "Excel Partner"), options: { ...w.options, platform: "win32", run } };
+    };
+    const find = (report: { checks: Array<{ id: string }> }, id: string) => report.checks.find(check => check.id === id) as Record<string, any> | undefined;
+
+    it("D5 passes when the entry still points to files that exist", async () => {
+      const w = startupWorld();
+      expect(find(await collectDoctor(w.options), "gateway.startup_target")).toMatchObject({ status: "pass", code: "STARTUP_TARGET_OK" });
+    });
+
+    it("D5 fails when Node.js or the launcher named by the entry has been moved or removed", async () => {
+      const w = startupWorld(false);
+      expect(find(await collectDoctor(w.options), "gateway.startup_target")).toMatchObject({ status: "fail", code: "STARTUP_TARGET_MISSING" });
+    });
+
+    it("D3 reports the last start at sign-in, with a reason code and no text from the machine", async () => {
+      const w = startupWorld();
+      expect(find(await collectDoctor(w.options), "gateway.startup_last")).toBeUndefined();
+      recordStartup(w.dataDir, { service: "gateway", attempt: 3, ok: false, code: "NOT_ANSWERING", message: `Recorded gateway at ${w.root} is not answering` });
+      const report = await collectDoctor(w.options);
+      expect(find(report, "gateway.startup_last")).toMatchObject({ status: "warn", code: "STARTUP_LAST_FAILED", details: { attempt: 3, reason: "NOT_ANSWERING" }, action: expect.stringContaining("Fix connection") });
+      expect(JSON.stringify(report)).not.toContain(w.root);
+      recordStartup(w.dataDir, { service: "gateway", attempt: 1, ok: true });
+      expect(find(await collectDoctor(w.options), "gateway.startup_last")).toMatchObject({ status: "pass", code: "STARTUP_LAST_OK" });
+    });
+  });
+
+  it("H25 reports Node versions outside the pinned SQLite release's prebuilt range", async () => {
+    const w = world(); w.put("package.json", JSON.stringify({ name: "office-partner", version: "0.1.22", engines: { node: "^20.19.0 || >=22.12.0 <26.0.0" } }));
+    const report = await collectDoctor({ ...w.options, nodeVersion: "26.0.0" });
+    expect(report.checks).toContainEqual(expect.objectContaining({ id: "installation.node", code: "NODE_UNSUPPORTED", status: "fail" }));
+  });
+
   it("reports missing setup and unknown probes without starting providers", async () => {
     const w = world(); const report = await collectDoctor(w.options);
     expect(w.run).not.toHaveBeenCalled();
@@ -89,6 +129,16 @@ describe("portable provider doctor", () => {
     expect(JSON.stringify(stopped)).not.toContain("sensitive-fixture-token");
     const ready = await collectDoctor({ ...w.options, health: async () => ({ gateway: true, ready: true }) });
     expect(ready.status).toBe("pass");
+  });
+
+  it("D01 identifies the responding gateway and distinguishes initialization from a stopped service", async () => {
+    const w = world(); const cert = await selfsigned.generate([{ name: "commonName", value: "localhost" }], { keySize: 2048 });
+    w.put("gateway-data/localhost.crt", cert.cert); w.put("gateway-data/localhost.key", "key-presence-only");
+    const report = await collectDoctor({ ...w.options, health: async () => ({ gateway: true, ready: false }) });
+    const check = report.checks.find((c: { id: string }) => c.id === "gateway.health");
+    expect(check).toMatchObject({ status: "fail", code: "SERVICE_NOT_READY", details: { port: 8766 } });
+    expect(check.message).toContain("Gateway on port 8766"); expect(check.message).toContain("initializing");
+    expect(check.message).not.toContain("stopped");
   });
 
   it("detects protocol mismatch and invalid add-in configuration without exposing contents", async () => {

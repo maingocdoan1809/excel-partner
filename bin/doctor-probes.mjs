@@ -134,3 +134,13 @@ export function readJson(file) {
   if (fs.statSync(file).size > 1024 * 1024) throw new Error("FILE_LIMIT");
   return JSON.parse(fs.readFileSync(file, "utf8"));
 }
+
+/** The newest start attempt recorded in startup.log (written by startup-log.mjs) for "addin" or "gateway", or null. */
+export function readLastStartup(dataDir, service) {
+  let lines;
+  try { lines = fs.readFileSync(path.join(dataDir, "startup.log"), "utf8").split("\n").filter(Boolean); } catch { return null; }
+  for (let i = lines.length - 1; i >= 0; i--) {
+    try { const entry = JSON.parse(lines[i]); if (entry && entry.service === service) return entry; } catch { /* Skip a damaged line. */ }
+  }
+  return null;
+}

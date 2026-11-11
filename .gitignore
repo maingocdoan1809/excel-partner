@@ -26,3 +26,11 @@ excel-partner.config.json
 # Local external MCP server configuration
 /mcp-servers.json
 /mcp-servers.json.tmp
+
+# Durable local history and its recovery copies
+/history.db
+/history.db-*
+
+# Local working files that are not part of the add-in
+/.archify/
+/Excel Partner.pptx

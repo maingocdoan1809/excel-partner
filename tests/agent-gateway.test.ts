@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { GatewayEngine } from "../gateway/src/engine.js";
 import { GatewayServer } from "../gateway/src/server.js";
 import { ConfigSchema, routeModel } from "../gateway/src/config.js";
 import { parseRequest, type ApiMessage, type ChatMessage, type ContentBlock } from "../gateway/src/protocol.js";
@@ -7,6 +8,7 @@ import { ProviderRegistry } from "../providers/src/registry.js";
 import type { SendTurnInput, StartSessionContext } from "../providers/src/types.js";
 import type { ProviderEvent } from "../protocol/src/index.js";
 import { gatewayProbeImage } from "./support/gateway-probe-image.js";
+import http from "node:http";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -79,6 +81,31 @@ function results(message: ApiMessage, value = "SENTINEL"): ChatMessage[] {
     .map(b => ({ type: "tool_result", tool_use_id: b.id, content: value })) }];
 }
 describe("Anthropic-compatible CLI gateway", () => {
+  it("R02 rejects a request whose discovery finishes after maintenance", async () => {
+    const w = await start(); let entered!: () => void, release!: () => void;
+    const enteredDiscovery = new Promise<void>(resolve => { entered = resolve; });
+    const discovering = new Promise<void>(resolve => { release = resolve; });
+    const spy = vi.spyOn(GatewayEngine.prototype, "prepareRequest").mockImplementationOnce(async () => { entered(); await discovering; });
+    try {
+      const response = w.post(); await enteredDiscovery;
+      expect((await fetch(`${w.url}/gateway/maintenance`, { method: "POST", headers: { "x-api-key": token } })).status).toBe(200);
+      release(); expect((await response).status).toBe(503); expect(w.adapter.turns).toHaveLength(0);
+    } finally { release(); spy.mockRestore(); }
+  });
+
+  it("R01 rejects a body completed after maintenance without starting a provider turn", async () => {
+    const w = await start();
+    const body = JSON.stringify({ model: "copilot/default", max_tokens: 100, messages: w.messages, tools });
+    const request = http.request(`${w.url}/v1/messages`, { method: "POST", headers: { "x-api-key": token, "content-type": "application/json", "content-length": Buffer.byteLength(body) } });
+    const response = new Promise<number>(resolve => request.once("response", res => { res.resume(); res.once("end", () => resolve(res.statusCode!)); }));
+    request.flushHeaders();
+    await new Promise(resolve => setTimeout(resolve, 30));
+    expect((await fetch(`${w.url}/gateway/maintenance`, { method: "POST", headers: { "x-api-key": token } })).status).toBe(200);
+    request.end(body);
+    expect(await response).toBe(503);
+    expect(w.adapter.turns).toHaveLength(0);
+  });
+
   it("authenticates maintenance, gates new requests, and refuses to drain pending official-client tool results", async () => {
     const w = await start();
     const control = (action: string, key = token) => fetch(`${w.url}/gateway/${action}`, { method: "POST", headers: { "x-api-key": key } });
