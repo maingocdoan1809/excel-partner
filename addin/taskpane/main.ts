@@ -1,3 +1,4 @@
+import { showToast } from "./ui/toast.js";
 import { watchShapeSelectionEvents } from "./executor/selection-events.js";
 import { getSelectionLabel } from "./executor/read.js";
 import { monitorSelection } from "./ui/selection.js";
@@ -328,7 +329,7 @@ Office.onReady((info) => {
       renderProviderMenu();
       renderAuthNotice();
       if (id === provider && detection.status === "error") {
-        append({ kind: "error", text: detection.hint ?? `${PROVIDER_NAMES[id]} is ${detection.status}.` });
+        showToast(detection.hint ?? `${PROVIDER_NAMES[id]} is ${detection.status}.`);
       }
     },
     onProviderEvent: handleEvent,
@@ -353,7 +354,7 @@ Office.onReady((info) => {
       }
       void submit(undefined, { delegationId: request.delegationId, from: request.from.name, text: request.text });
     },
-    onError: (message) => append({ kind: "error", text: message }),
+    onError: (message) => showToast(message),
     onToolExecuted: (tool, args, result, context) => {
       if (tool === "create_artifact") {
         // The card is the visible result; a second raw tool entry would only repeat the file contents.
@@ -789,7 +790,7 @@ async function submit(queued?: PendingPrompt, delegated?: { delegationId: string
   const prompt = delegated ? delegatedPrompt(delegated.from, delegated.text)
     : queued?.prompt ?? (els.input.value.trim() || (pendingAttachments.length ? "Please inspect the attached files." : ""));
   if (!prompt || !client.connected) { decline("That file is not connected right now."); return; }
-  if (prompt.length > 32_000) { decline("The request is too long for that file."); append({ kind: "error", text: "Messages must be 32,000 characters or fewer." }); return; }
+  if (prompt.length > 32_000) { decline("The request is too long for that file."); showToast("Messages must be 32,000 characters or fewer."); return; }
   let nativeCommand = false;
   if (parseNativeCommand(prompt)) {
     if (resolvingCommand) return;
@@ -807,19 +808,19 @@ async function submit(queued?: PendingPrompt, delegated?: { delegationId: string
       nativeCommand = item.kind === "provider";
       if (nativeCommand && currentRequestId) throw new Error("Wait for the current response to finish before running a provider command.");
       if (nativeCommand && pendingAttachments.length) throw new Error("Send attached files separately from a provider command.");
-    } catch (error) { append({ kind: "error", text: error instanceof Error ? error.message : String(error) }); return; }
+    } catch (error) { showToast(error instanceof Error ? error.message : String(error)); return; }
     finally { resolvingCommand = false; }
   }
   const turnAttachments = delegated ? [] as typeof pendingAttachments : queued?.attachments ?? pendingAttachments.slice();
   if (!delegated && !turnAttachments.length && /(?:^|\s)@[^\n]*\.(?:xlsx|xlsm|xltx|xltm|png|jpe?g|gif|webp|md|txt|json|csv|ya?ml|zip)(?=\s|$)/i.test(prompt)) {
-    append({ kind: "error", text: "The @ file is only text. Choose it from a workspace or the local file picker so I can read it." });
+    showToast("The @ file is only text. Choose it from a workspace or the local file picker so I can read it.");
     updateMentionMenu();
     return;
   }
   if (currentRequestId) {
     if (delegated) { decline("That file is busy with its own request."); return; }
     if (queued || cancelRequested) return;
-    if (pendingPrompts.size >= 20) { append({ kind: "error", text: "Wait for pending messages to be sent before adding more." }); return; }
+    if (pendingPrompts.size >= 20) { showToast("Wait for pending messages to be sent before adding more."); return; }
     const id = randomId();
     const attachments = pendingAttachments.slice();
     const message: StoredMessage = { kind: "user", text: prompt, delivery: "pending", queueId: id, attachments: attachments.map(item => ({ name: item.name })) };
@@ -833,12 +834,12 @@ async function submit(queued?: PendingPrompt, delegated?: { delegationId: string
       els.input.value = "";
       clearAttachment();
       persistNow();
-    } catch (error) { pendingPrompts.delete(id); append({ kind: "error", text: error instanceof Error ? error.message : String(error) }); }
+    } catch (error) { pendingPrompts.delete(id); showToast(error instanceof Error ? error.message : String(error)); }
     return;
   }
   if (!session.identityVersion && !session.providerSessionId && session.messages.some(message => message.kind === "user")) {
     decline("The chat open in that file is an older chat that cannot take requests. Ask the user to start a new chat in that window.");
-    append({ kind: "error", text: "This legacy chat has no saved CLI session ID, so it cannot be resumed reliably. Its history is preserved. Start a new chat to create a native session." });
+    showToast("This legacy chat has no saved CLI session ID, so it cannot be resumed reliably. Its history is preserved. Start a new chat to create a native session.");
     return;
   }
   const model = els.modelSelect.value || null;
@@ -902,7 +903,7 @@ async function submit(queued?: PendingPrompt, delegated?: { delegationId: string
     if (queued) { queued.state = "held"; pendingPrompts.set(queued.id, queued); updateDelivery(queued); }
     else if (!delegated) els.input.value = prompt;
     renderComposerPreview();
-    append({ kind: "error", text: error instanceof Error ? error.message : String(error) });
+    showToast(error instanceof Error ? error.message : String(error));
   }
 }
 
@@ -1238,7 +1239,7 @@ function setupFileDrop(): void {
     reset();
     if (!composerVisible()) return;
     const { files, folders } = filesFromDrop(event.dataTransfer);
-    if (folders) append({ kind: "error", text: "Folders cannot be attached. Drop the files inside the folder instead." });
+    if (folders) showToast("Folders cannot be attached. Drop the files inside the folder instead.");
     if (files.length) void chooseLocalFiles(files);
   });
 }
@@ -1246,7 +1247,7 @@ function setupFileDrop(): void {
 async function chooseLocalFiles(files: File[]): Promise<void> {
   if (localPickerLoading) return;
   if (pendingAttachments.length + files.length > 10) {
-    append({ kind: "error", text: "Choose at most 10 files per message." });
+    showToast("Choose at most 10 files per message.");
     return;
   }
   localPickerLoading = true;
@@ -1254,7 +1255,7 @@ async function chooseLocalFiles(files: File[]): Promise<void> {
   try {
     for (const file of files) selectWorkspaceAttachment(await client.uploadAttachment(file));
   } catch (error) {
-    append({ kind: "error", text: error instanceof Error ? error.message : String(error) });
+    showToast(error instanceof Error ? error.message : String(error));
   } finally {
     localPickerLoading = false;
   }
@@ -1262,7 +1263,7 @@ async function chooseLocalFiles(files: File[]): Promise<void> {
 
 function addAttachment(item: { reference: UploadedAttachment; name: string }): void {
   if (pendingAttachments.length >= 10) {
-    append({ kind: "error", text: "Choose at most 10 files per message." });
+    showToast("Choose at most 10 files per message.");
     return;
   }
   els.mentionMenu.hidden = true;
@@ -1357,7 +1358,7 @@ function handleEvent(event: ProviderEvent): void {
         item.state = event.state === "rejected" ? "held" : event.state;
         if (!currentRequestId && !autoQueueAllowed) item.state = "held";
         updateDelivery(item);
-        if (event.message) append({ kind: "error", text: event.message });
+        if (event.message) showToast(event.message);
         if (event.state === "next_turn" && autoQueueAllowed) sendNextPending();
       }
       return;
@@ -1498,7 +1499,7 @@ function handleEvent(event: ProviderEvent): void {
         providerStatuses.set(provider, "login_required");
         renderAuthNotice();
       }
-      append({ kind: "error", text: event.message });
+      showToast(event.message);
       return;
     default:
       return;
@@ -1581,7 +1582,7 @@ async function exportUsage(): Promise<void> {
     link.remove();
     window.setTimeout(() => URL.revokeObjectURL(url), 1000);
   } catch (error) {
-    append({ kind: "error", text: `Could not export usage: ${error instanceof Error ? error.message : String(error)}` });
+    showToast(`Could not export usage: ${error instanceof Error ? error.message : String(error)}`);
   } finally {
     els.usageExport.disabled = false;
   }
@@ -2045,7 +2046,7 @@ async function goTo(target: { sheet?: string; address: string }): Promise<void> 
     await selectRange(target);
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
-    append({ kind: "error", text: `Cannot go to ${target.sheet ? `${target.sheet}!` : ""}${target.address}: ${reason}` });
+    showToast(`Cannot go to ${target.sheet ? `${target.sheet}!` : ""}${target.address}: ${reason}`);
   }
 }
 
@@ -2058,7 +2059,7 @@ async function goToLink(target: { file?: string; sheet?: string; address: string
     await client.goToFile({ file: target.file, ...(target.sheet ? { sheet: target.sheet } : {}), address: target.address });
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
-    append({ kind: "error", text: `Cannot go to ${placeLabel(target)}: ${reason}` });
+    showToast(`Cannot go to ${placeLabel(target)}: ${reason}`);
   }
 }
 
@@ -2296,7 +2297,7 @@ function renderState(state: string): void {
     currentRequestId = null;
     live = null;
     setBusy(false);
-    append({ kind: "error", text: "Connection to the bridge was lost; the running request was stopped. Reconnecting…" });
+    showToast("Connection to the bridge was lost; the running request was stopped. Reconnecting…");
   }
 }
 

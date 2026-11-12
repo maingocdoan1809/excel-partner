@@ -749,3 +749,5 @@ button.ghost { background: none; color: var(--muted); border: 0; }
 .files-tag { flex: none; font-size: 10px; color: var(--muted); border: 1px solid var(--border); border-radius: 999px; padding: 0 6px; }
 .files-hint { margin: 0; padding: 4px 14px 2px; font-size: 11px; color: var(--muted); line-height: 1.4; }
 .brand { flex: 1; }
+
+.toast { position: fixed; left: 12px; right: 12px; bottom: 96px; z-index: 50; max-width: 420px; margin: 0 auto; padding: 10px 14px; border-radius: 12px; font-size: 13px; line-height: 1.4; background: var(--error-soft); color: var(--error); border: 1px solid color-mix(in srgb, var(--error) 45%, transparent); box-shadow: var(--pop-shadow); cursor: pointer; overflow-wrap: anywhere; }
