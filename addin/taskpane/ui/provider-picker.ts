@@ -80,7 +80,7 @@ export function setupProviderPicker(deps: ProviderPickerDeps) {
     const status = providerStatuses.get(deps.getProvider());
     byId("auth-notice").hidden = status !== "login_required" && status !== "not_installed";
     byId("auth-notice-title").textContent = status === "not_installed" ? `Set up ${PROVIDER_NAMES[deps.getProvider()]}` : `Sign in to ${PROVIDER_NAMES[deps.getProvider()]}`;
-    byId("auth-notice-detail").textContent = status === "not_installed" ? "Install the CLI on the bridge machine." : "Connect your account to start chatting.";
+    byId("auth-notice-detail").textContent = status === "not_installed" ? "Install it to start chatting." : "Connect your account to start chatting.";
     byId("provider-login-button").textContent = status === "not_installed" ? "Set up ↗" : "Sign in ↗";
     renderAccount();
   }

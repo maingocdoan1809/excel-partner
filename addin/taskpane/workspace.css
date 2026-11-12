@@ -106,6 +106,9 @@ body.settings-active .panel-head { min-height: 48px; padding-block: 8px; border-
 body.settings-active .panel:not(.settings-panel) > .panel-head,
 body.settings-active .panel:not(.settings-panel) > .panel-body,
 body.settings-active .panel:not(.settings-panel) > .template-help { width: 100%; max-width: 672px; margin-inline: auto; }
+/* The same reading width as Settings for the full-page screens opened from the chat or History instead of from Settings. */
+body:not(.settings-active) :is(#panel-login, #panel-session) > :is(.panel-head, .panel-body, .session-meta, .session-actions) { width: 100%; max-width: 672px; margin-inline: auto; }
+.login-card input { display: block; width: 100%; box-sizing: border-box; }
 body.settings-active .panel:not(.settings-panel) > .panel-body { padding-bottom: 28px; scrollbar-width: thin; overscroll-behavior: contain; }
 body.settings-active .settings-panel { padding: 0; }
 .settings-panel .panel-head { width: 100%; max-width: 720px; margin-inline: auto; padding: 8px 24px; gap: 10px; align-items: center; }

@@ -27,6 +27,7 @@ import { setupUpdatePanel } from "./ui/update-panel.js";
 import { reloadKeepingChat, takeChatRestore } from "./ui/chat-restore.js";
 import { createSelfUpdater } from "./ui/self-update.js";
 import { setupProviderLogin } from "./ui/provider-login.js";
+import { setupProviderInstall } from "./ui/provider-install.js";
 import { setupMcp } from "./ui/mcp.js";
 import { setupToolSettings } from "./ui/tool-settings.js";
 import { setupComposerMenu } from "./ui/composer-menu.js";
@@ -224,6 +225,19 @@ const loginPanel = setupProviderLogin({
     showPanel(null);
   },
 });
+const loginInstall = setupProviderInstall({
+  client: () => client,
+  provider: () => provider,
+  isBusy: () => currentRequestId !== null,
+  onInstalled: (installed, needsSignIn) => {
+    if (installed !== provider) return;
+    client.setProvider(installed);
+    providerPicker.invalidateCatalog(installed);
+    if (needsSignIn) providerPicker.requireLogin(installed);
+    void refreshModelCatalog(installed);
+    showPanel(needsSignIn ? "login" : null);
+  },
+});
 const slash = createSlashMenu({
   input: els.input,
   menu: els.slashMenu,
@@ -250,7 +264,7 @@ const historyStorage = setupHistoryStorage(() => client, store, records => { con
 const systemPanel = setupSystemPanel(() => client, () => currentRequestId !== null);
 
 const { showPanel, openPanel, backFromPanel, openFloating, closeFloating, openMenu, closeMenu } = setupPanels({
-  getProvider: () => provider, getProviderStatus: id => providerPicker.statusOf(id), elements: els, loginPanel,
+  getProvider: () => provider, getProviderStatus: id => providerPicker.statusOf(id), elements: els, loginPanel, loginInstall,
   renderHistory: () => renderHistory(), renderChanges: () => renderChanges(), renderProviderMenu: () => renderProviderMenu(),
   openSettings: returning => {
     void historyStorage.refresh();

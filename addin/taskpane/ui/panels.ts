@@ -13,13 +13,6 @@ const PROVIDER_LOGIN_COMMANDS: Record<ProviderId, string> = {
   codex: "office-partner providers login codex",
   opencode: "office-partner providers login opencode",
 };
-/** CLI command that installs the provider's pinned CLI when it is not on this computer. */
-const PROVIDER_INSTALL_COMMANDS: Record<ProviderId, string> = {
-  claude: "office-partner providers install claude",
-  copilot: "office-partner providers install copilot",
-  codex: "office-partner providers install codex",
-  opencode: "office-partner providers install opencode",
-};
 /** Hint shown under the manual login command. */
 const PROVIDER_LOGIN_HINTS: Record<ProviderId, string> = {
   claude: "",
@@ -41,6 +34,7 @@ export interface PanelsDeps {
   refreshTesting(): Promise<void>;
   loadTemplateSkills(): Promise<void>;
   loginPanel: { open(): void; close(): void };
+  loginInstall: { reset(): void };
   elements: {
     panels: Record<PanelName, HTMLElement>;
     menu: HTMLElement;
@@ -130,19 +124,25 @@ export function setupPanels(deps: PanelsDeps) {
     if (name === "login") {
       const provider = deps.getProvider();
       const name = PROVIDER_NAMES[provider];
-      // A CLI that is not on this computer cannot sign in: show how to install it instead of starting a login.
+      // A CLI that is not on this computer cannot sign in: offer to install it instead of starting a login.
       const notInstalled = deps.getProviderStatus(provider) === "not_installed";
       const inApp = APP_LOGIN_PROVIDERS.includes(provider) && !notInstalled;
       byId("login-heading").textContent = notInstalled ? `Set up ${name}` : `Sign in to ${name}`;
-      byId("login-description").textContent = notInstalled ? `${name} is not installed on this computer. Install it, then check again.`
+      byId("login-description").textContent = notInstalled ? `${name} is not installed on this computer.`
         : inApp ? `Finish signing in through your browser, then return to ${activeHost().app}.` : "Sign in through the CLI on the bridge machine, then check the connection again.";
       byId("login-card-title").textContent = name;
       byId("login-badge").textContent = provider === "claude" ? "BROWSER" : "DEVICE CODE";
       byId("login-device").hidden = !inApp;
       byId("login-manual").hidden = inApp;
-      byId("login-command").textContent = notInstalled ? PROVIDER_INSTALL_COMMANDS[provider] : PROVIDER_LOGIN_COMMANDS[provider];
-      byId("login-manual-hint").textContent = notInstalled ? `Open a terminal on this computer and run the command below, or install it from Settings > System & recovery. Then sign in.` : PROVIDER_LOGIN_HINTS[provider];
-      byId("login-recheck").textContent = notInstalled ? "Check again" : "Check sign-in status";
+      byId("login-command").textContent = PROVIDER_LOGIN_COMMANDS[provider];
+      byId("login-manual-hint").textContent = notInstalled ? `Installs a private copy of ${name} for Office Partner. This can take a few minutes.` : PROVIDER_LOGIN_HINTS[provider];
+      // Only the Install button is needed for a missing CLI: no command to copy and nothing to check.
+      byId("login-command").hidden = notInstalled;
+      byId("login-recheck").hidden = notInstalled;
+      const install = byId<HTMLButtonElement>("login-install");
+      install.hidden = !notInstalled;
+      install.textContent = `Install ${name}`;
+      deps.loginInstall.reset();
       if (inApp) deps.loginPanel.open();
       else deps.loginPanel.close();
     } else deps.loginPanel.close();
