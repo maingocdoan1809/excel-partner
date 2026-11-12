@@ -842,4 +842,15 @@ button.ghost { background: none; color: var(--muted); border: 0; }
 .header-actions #history-button svg * { stroke-width: inherit; }
 .header-actions #menu-button svg { stroke: none; }
 
-.toast { position: fixed; left: 12px; right: 12px; bottom: 96px; z-index: 50; max-width: 420px; margin: 0 auto; padding: 10px 14px; border-radius: 12px; font-size: 13px; line-height: 1.4; background: var(--error-soft); color: var(--error); border: 1px solid color-mix(in srgb, var(--error) 45%, transparent); box-shadow: var(--pop-shadow); cursor: pointer; overflow-wrap: anywhere; }
+.toast { position: fixed; top: 68px; left: 12px; right: 12px; z-index: 50; max-width: 420px; margin: 0 auto; display: grid; grid-template-columns: auto 1fr auto; gap: 10px; align-items: start; padding: 11px 10px 13px 14px; border-radius: 12px; font-size: 13px; line-height: 1.45; overflow: hidden; overflow-wrap: anywhere; background: var(--panel); color: var(--text); border: 1px solid color-mix(in srgb, var(--error) 40%, var(--border)); border-left: 4px solid var(--error); box-shadow: var(--pop-shadow); animation: toast-in .28s cubic-bezier(.2, .8, .2, 1) both; }
+.toast.leaving { animation: toast-out .22s ease-in both; }
+.toast-icon { display: flex; color: var(--error); padding-top: 1px; }
+.toast-icon svg { width: 18px; height: 18px; }
+.toast-close { all: unset; cursor: pointer; width: 22px; height: 22px; text-align: center; line-height: 21px; font-size: 18px; color: var(--muted); border-radius: 6px; }
+.toast-close:hover { background: var(--subtle-bg); color: var(--text); }
+.toast-close:focus-visible { outline: 2px solid var(--accent); }
+.toast-bar { position: absolute; left: 0; right: 0; bottom: 0; height: 3px; background: var(--error); opacity: .55; transform-origin: left; animation: toast-time var(--toast-time, 6s) linear both; }
+@keyframes toast-in { from { opacity: 0; transform: translateY(-14px) scale(.97); } to { opacity: 1; transform: none; } }
+@keyframes toast-out { to { opacity: 0; transform: translateY(-10px) scale(.97); } }
+@keyframes toast-time { to { transform: scaleX(0); } }
+@media (prefers-reduced-motion: reduce) { .toast, .toast.leaving { animation: none; } .toast-bar { animation: none; display: none; } }
