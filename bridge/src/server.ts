@@ -480,6 +480,7 @@ export class Bridge {
     await new Promise<void>((resolve) => {
       if (!this.server) return resolve();
       this.server.close(() => resolve());
+      this.server.closeAllConnections(); // keep-alive connections from panes would otherwise hold close() open
     });
   }
 }
