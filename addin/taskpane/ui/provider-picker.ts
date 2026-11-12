@@ -67,7 +67,13 @@ export function setupProviderPicker(deps: ProviderPickerDeps) {
       : status === "not_installed" ? `${name} is not installed on this computer`
       : status === "error" ? `${name} has a problem. See the hint above`
       : `Checking ${name}…`;
-    byId("menu-login").textContent = status === "ready" ? `Sign in with another ${name} account` : `Sign in to ${name}`;
+    byId("menu-login").textContent = status === "ready" ? `Sign in with another ${name} account`
+      : status === "not_installed" ? `Set up ${name}`
+      : `Sign in to ${name}`;
+  }
+
+  function statusOf(provider: ProviderId): ProviderConnectionStatus {
+    return providerStatuses.get(provider) ?? "unknown";
   }
 
   function renderAuthNotice(): void {
@@ -173,6 +179,6 @@ export function setupProviderPicker(deps: ProviderPickerDeps) {
     }
   }
 
-  return { renderProviderMenu, renderAuthNotice, selectProvider, renderModelPicker, refreshModelCatalog, saveModelChoice,
+  return { statusOf, renderProviderMenu, renderAuthNotice, selectProvider, renderModelPicker, refreshModelCatalog, saveModelChoice,
     setupModelPicker, requireLogin, signedIn, invalidateCatalog, onStatus };
 }

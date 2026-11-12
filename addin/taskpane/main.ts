@@ -250,7 +250,7 @@ const historyStorage = setupHistoryStorage(() => client, store, records => { con
 const systemPanel = setupSystemPanel(() => client, () => currentRequestId !== null);
 
 const { showPanel, openPanel, backFromPanel, openFloating, closeFloating, openMenu, closeMenu } = setupPanels({
-  getProvider: () => provider, elements: els, loginPanel,
+  getProvider: () => provider, getProviderStatus: id => providerPicker.statusOf(id), elements: els, loginPanel,
   renderHistory: () => renderHistory(), renderChanges: () => renderChanges(), renderProviderMenu: () => renderProviderMenu(),
   openSettings: returning => {
     void historyStorage.refresh();

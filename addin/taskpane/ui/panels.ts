@@ -1,4 +1,4 @@
-import type { ProviderId } from "../../../protocol/src/index.js";
+import type { ProviderConnectionStatus, ProviderId } from "../../../protocol/src/index.js";
 import { APP_LOGIN_PROVIDERS } from "../../../protocol/src/provider-login.js";
 import { activeHost } from "../host/index.js";
 import { byId } from "./dom.js";
@@ -13,6 +13,13 @@ const PROVIDER_LOGIN_COMMANDS: Record<ProviderId, string> = {
   codex: "office-partner providers login codex",
   opencode: "office-partner providers login opencode",
 };
+/** CLI command that installs the provider's pinned CLI when it is not on this computer. */
+const PROVIDER_INSTALL_COMMANDS: Record<ProviderId, string> = {
+  claude: "office-partner providers install claude",
+  copilot: "office-partner providers install copilot",
+  codex: "office-partner providers install codex",
+  opencode: "office-partner providers install opencode",
+};
 /** Hint shown under the manual login command. */
 const PROVIDER_LOGIN_HINTS: Record<ProviderId, string> = {
   claude: "",
@@ -23,6 +30,7 @@ const PROVIDER_LOGIN_HINTS: Record<ProviderId, string> = {
 
 export interface PanelsDeps {
   getProvider(): ProviderId;
+  getProviderStatus(provider: ProviderId): ProviderConnectionStatus;
   renderHistory(): void;
   renderChanges(): void;
   renderProviderMenu(): void;
@@ -121,15 +129,20 @@ export function setupPanels(deps: PanelsDeps) {
     document.body.classList.toggle("login-active", name === "login");
     if (name === "login") {
       const provider = deps.getProvider();
-      byId("login-heading").textContent = `Sign in to ${PROVIDER_NAMES[provider]}`;
-      const inApp = APP_LOGIN_PROVIDERS.includes(provider);
-      byId("login-description").textContent = inApp ? `Finish signing in through your browser, then return to ${activeHost().app}.` : "Sign in through the CLI on the bridge machine, then check the connection again.";
-      byId("login-card-title").textContent = PROVIDER_NAMES[provider];
+      const name = PROVIDER_NAMES[provider];
+      // A CLI that is not on this computer cannot sign in: show how to install it instead of starting a login.
+      const notInstalled = deps.getProviderStatus(provider) === "not_installed";
+      const inApp = APP_LOGIN_PROVIDERS.includes(provider) && !notInstalled;
+      byId("login-heading").textContent = notInstalled ? `Set up ${name}` : `Sign in to ${name}`;
+      byId("login-description").textContent = notInstalled ? `${name} is not installed on this computer. Install it, then check again.`
+        : inApp ? `Finish signing in through your browser, then return to ${activeHost().app}.` : "Sign in through the CLI on the bridge machine, then check the connection again.";
+      byId("login-card-title").textContent = name;
       byId("login-badge").textContent = provider === "claude" ? "BROWSER" : "DEVICE CODE";
       byId("login-device").hidden = !inApp;
       byId("login-manual").hidden = inApp;
-      byId("login-command").textContent = PROVIDER_LOGIN_COMMANDS[provider];
-      byId("login-manual-hint").textContent = PROVIDER_LOGIN_HINTS[provider];
+      byId("login-command").textContent = notInstalled ? PROVIDER_INSTALL_COMMANDS[provider] : PROVIDER_LOGIN_COMMANDS[provider];
+      byId("login-manual-hint").textContent = notInstalled ? `Open a terminal on this computer and run the command below, or install it from Settings > System & recovery. Then sign in.` : PROVIDER_LOGIN_HINTS[provider];
+      byId("login-recheck").textContent = notInstalled ? "Check again" : "Check sign-in status";
       if (inApp) deps.loginPanel.open();
       else deps.loginPanel.close();
     } else deps.loginPanel.close();
