@@ -309,7 +309,7 @@ Office.onReady((info) => {
   {
     // The manifest only asks for what every host has; what this host needs is checked here, so an old Office says so.
     const [set, version] = HOST_BASELINE[activeHost().id];
-    if (!isSupported([set, version])) window.setTimeout(() => append({ kind: "error", text: `Office Partner needs ${set} ${version} in ${activeHost().app}, which this version of Office does not have. Update Office to use it.` }), 0);
+    if (!isSupported([set, version])) window.setTimeout(() => showToast(`Office Partner needs ${set} ${version} in ${activeHost().app}, which this version of Office does not have. Update Office to use it.`), 0);
   }
 
   client = new BridgeClient({
@@ -382,7 +382,7 @@ Office.onReady((info) => {
       }
       void submit(undefined, { delegationId: request.delegationId, from: request.from.name, fromHost: request.from.host ?? "excel", text: request.text });
     },
-    onError: (message) => append({ kind: "error", text: message }),
+    onError: (message) => showToast(message),
     onToolExecuted: (tool, args, result, context) => {
       if (tool === "create_artifact") {
         // The card is the visible result; a second raw tool entry would only repeat the file contents.
@@ -835,7 +835,7 @@ async function submit(queued?: PendingPrompt, delegated?: { delegationId: string
   const prompt = delegated ? delegatedPrompt(delegated.from, delegated.text)
     : queued?.prompt ?? (els.input.value.trim() || (pendingAttachments.length ? "Please inspect the attached files." : ""));
   if (!prompt || !client.connected) { decline("That file is not connected right now."); return; }
-  if (prompt.length > 32_000) { decline("The request is too long for that file."); append({ kind: "error", text: "Messages must be 32,000 characters or fewer." }); return; }
+  if (prompt.length > 32_000) { decline("The request is too long for that file."); showToast("Messages must be 32,000 characters or fewer."); return; }
   let nativeCommand = false;
   if (parseNativeCommand(prompt)) {
     if (resolvingCommand) return;
@@ -853,19 +853,19 @@ async function submit(queued?: PendingPrompt, delegated?: { delegationId: string
       nativeCommand = item.kind === "provider";
       if (nativeCommand && currentRequestId) throw new Error("Wait for the current response to finish before running a provider command.");
       if (nativeCommand && pendingAttachments.length) throw new Error("Send attached files separately from a provider command.");
-    } catch (error) { append({ kind: "error", text: error instanceof Error ? error.message : String(error) }); return; }
+    } catch (error) { showToast(error instanceof Error ? error.message : String(error)); return; }
     finally { resolvingCommand = false; }
   }
   const turnAttachments = delegated ? [] as typeof pendingAttachments : queued?.attachments ?? pendingAttachments.slice();
   if (!delegated && !turnAttachments.length && /(?:^|\s)@[^\n]*\.(?:xlsx|xlsm|xltx|xltm|docx|docm|pptx|pptm|png|jpe?g|gif|webp|md|txt|json|csv|ya?ml|zip)(?=\s|$)/i.test(prompt)) {
-    append({ kind: "error", text: "The @ file is only text. Choose it from a workspace or the local file picker so I can read it." });
+    showToast("The @ file is only text. Choose it from a workspace or the local file picker so I can read it.");
     updateMentionMenu();
     return;
   }
   if (currentRequestId) {
     if (delegated) { decline("That file is busy with its own request."); return; }
     if (queued || cancelRequested) return;
-    if (pendingPrompts.size >= 20) { append({ kind: "error", text: "Wait for pending messages to be sent before adding more." }); return; }
+    if (pendingPrompts.size >= 20) { showToast("Wait for pending messages to be sent before adding more."); return; }
     const id = randomId();
     const attachments = pendingAttachments.slice();
     const message: StoredMessage = { kind: "user", text: prompt, delivery: "pending", queueId: id, attachments: attachments.map(item => ({ name: item.name })) };
@@ -879,12 +879,12 @@ async function submit(queued?: PendingPrompt, delegated?: { delegationId: string
       els.input.value = "";
       clearAttachment();
       persistNow();
-    } catch (error) { pendingPrompts.delete(id); append({ kind: "error", text: error instanceof Error ? error.message : String(error) }); }
+    } catch (error) { pendingPrompts.delete(id); showToast(error instanceof Error ? error.message : String(error)); }
     return;
   }
   if (!session.identityVersion && !session.providerSessionId && session.messages.some(message => message.kind === "user")) {
     decline("The chat open in that file is an older chat that cannot take requests. Ask the user to start a new chat in that window.");
-    append({ kind: "error", text: "This legacy chat has no saved CLI session ID, so it cannot be resumed reliably. Its history is preserved. Start a new chat to create a native session." });
+    showToast("This legacy chat has no saved CLI session ID, so it cannot be resumed reliably. Its history is preserved. Start a new chat to create a native session.");
     return;
   }
   const model = els.modelSelect.value || null;
@@ -949,7 +949,7 @@ async function submit(queued?: PendingPrompt, delegated?: { delegationId: string
     if (queued) { queued.state = "held"; pendingPrompts.set(queued.id, queued); updateDelivery(queued); }
     else if (!delegated) els.input.value = prompt;
     renderComposerPreview();
-    append({ kind: "error", text: error instanceof Error ? error.message : String(error) });
+    showToast(error instanceof Error ? error.message : String(error));
   }
 }
 
@@ -1072,7 +1072,7 @@ function handleEvent(event: ProviderEvent): void {
         item.state = event.state === "rejected" ? "held" : event.state;
         if (!currentRequestId && !autoQueueAllowed) item.state = "held";
         updateDelivery(item);
-        if (event.message) append({ kind: "error", text: event.message });
+        if (event.message) showToast(event.message);
         if (event.state === "next_turn" && autoQueueAllowed) sendNextPending();
       }
       return;
@@ -1200,7 +1200,7 @@ function handleEvent(event: ProviderEvent): void {
       if (event.code === "login_required") {
         providerPicker.requireLogin(provider);
       }
-      append({ kind: "error", text: event.message });
+      showToast(event.message);
       return;
     default:
       return;
@@ -1531,7 +1531,7 @@ function renderState(state: string): void {
     currentRequestId = null;
     live = null;
     setBusy(false);
-    append({ kind: "error", text: "Connection to the bridge was lost; the running request was stopped. Reconnecting…" });
+    showToast("Connection to the bridge was lost; the running request was stopped. Reconnecting…");
   }
 }
 
