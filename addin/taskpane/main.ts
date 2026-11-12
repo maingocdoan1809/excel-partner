@@ -11,7 +11,7 @@ import { activeHost, initHost } from "./host/index.js";
 import { HOST_BASELINE, isSupported } from "./host/requirements.js";
 import { monitorSelection } from "./ui/selection.js";
 import type { ProviderEvent, ProviderId } from "../../protocol/src/index.js";
-import { BridgeClient, type UploadedAttachment } from "./bridge-client.js";
+import { BridgeClient, randomId, type UploadedAttachment } from "./bridge-client.js";
 import type { PermissionMode } from "./permissions.js";
 import { UndoJournal } from "./executor/journal.js";
 import { setProposalReviewer } from "./executor/word/index.js";
@@ -41,7 +41,7 @@ import { setupSystemPanel } from "./ui/system-panel.js";
 import { renderToolCard, paintTool, formatToolValue, toolChevron } from "./ui/tool-view.js";
 import { ThoughtView } from "./ui/thought.js";
 import { mentionsFile, mentionsSheet } from "./ui/cell-links.js";
-import { exposedToolNamesForHost, sameWorkbookName } from "../../protocol/src/index.js";
+import { ProviderIdSchema, exposedToolNamesForHost, sameWorkbookName } from "../../protocol/src/index.js";
 import {
   buildContextPreface,
   bindProviderSession,
@@ -1281,8 +1281,9 @@ function loadSession(stored: StoredSession): void {
   slash.reload();
   abandonRequest();
   clearAttachment();
-  if (["claude", "copilot", "codex", "opencode"].includes(stored.provider) && stored.provider !== provider) {
-    provider = stored.provider as ProviderId;
+  const storedProvider = ProviderIdSchema.safeParse(stored.provider).data;
+  if (storedProvider && storedProvider !== provider) {
+    provider = storedProvider;
     localStorage.setItem(PROVIDER_KEY, provider);
     if (client?.connected) client.setProvider(provider);
     renderProviderMenu();
@@ -1585,8 +1586,3 @@ function summarize(value: unknown): string {
   }
 }
 
-function randomId(): string {
-  const bytes = new Uint8Array(12);
-  crypto.getRandomValues(bytes);
-  return [...bytes].map((b) => b.toString(16).padStart(2, "0")).join("");
-}

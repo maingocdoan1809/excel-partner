@@ -1,3 +1,4 @@
+import { errorText as sharedErrorText } from "./dom.js";
 import type { BridgeClient, SavedReference } from "../bridge-client.js";
 
 export function setupSavedReferences(client: () => BridgeClient): { refresh(): Promise<void> } {
@@ -16,7 +17,7 @@ export function setupSavedReferences(client: () => BridgeClient): { refresh(): P
   let originalPath = "";
   let busy = false;
   let request = 0;
-  const errorText = (error: unknown) => error instanceof Error ? error.message : "Could not update references.";
+  const errorText = (error: unknown) => sharedErrorText(error, "Could not update references.");
 
   function setBusy(value: boolean): void {
     busy = value;

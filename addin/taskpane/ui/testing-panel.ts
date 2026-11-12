@@ -1,3 +1,4 @@
+import { errorText as sharedErrorText } from "./dom.js";
 import type { BridgeClient, TestingOverview } from "../bridge-client.js";
 
 /** A saved login is a browser session, and sessions expire; past this age the list suggests signing in again. */
@@ -29,7 +30,7 @@ export function setupTestingPanel(client: () => BridgeClient): { refresh(): Prom
   const cancelButton = get<HTMLButtonElement>("testing-signin-cancel");
   let request = 0;
   let busy = false;
-  const errorText = (error: unknown) => error instanceof Error ? error.message : "Something went wrong.";
+  const errorText = (error: unknown) => sharedErrorText(error, "Something went wrong.");
 
   function button(label: string, onClick: () => void | Promise<void>, secondary = true): HTMLButtonElement {
     const element = document.createElement("button");

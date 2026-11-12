@@ -648,8 +648,8 @@ function defaultUrl(): string {
   return `${scheme}://${window.location.host}/ws`;
 }
 
-function randomId(): string {
-  const bytes = new Uint8Array(16);
+export function randomId(bytes_ = 16): string {
+  const bytes = new Uint8Array(bytes_);
   crypto.getRandomValues(bytes);
   return [...bytes].map((b) => b.toString(16).padStart(2, "0")).join("");
 }

@@ -1,4 +1,4 @@
-import { PPT_GEOMETRY, PPT_ZORDER, isSupported, normalizeText } from "./util.js";
+import { PPT_GEOMETRY, PPT_ZORDER, isSupported, normalizeText, round } from "./util.js";
 
 /** Shape types that carry a text frame. Pictures, lines, groups, tables and charts do not. */
 export const TEXT_TYPES: ReadonlySet<string> = new Set(["GeometricShape", "TextBox", "Placeholder", "Callout", "Freeform"]);
@@ -156,11 +156,7 @@ export function publicShape(slideId: string, info: ShapeInfo, extra: Record<stri
   if (info.placeholder) out.placeholder = info.placeholder;
   if (info.contained) out.contains = info.contained;
   if (info.left !== undefined) {
-    Object.assign(out, { left: round1(info.left), top: round1(info.top!), width: round1(info.width!), height: round1(info.height!) });
+    Object.assign(out, { left: round(info.left), top: round(info.top!), width: round(info.width!), height: round(info.height!) });
   }
   return Object.assign(out, extra);
-}
-
-function round1(value: number): number {
-  return Math.round(value * 10) / 10;
 }

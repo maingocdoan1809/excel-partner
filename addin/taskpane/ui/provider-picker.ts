@@ -1,4 +1,4 @@
-import type { ProviderConnectionStatus, ProviderDetection, ProviderId } from "../../../protocol/src/index.js";
+import { ProviderIdSchema, type ProviderConnectionStatus, type ProviderDetection, type ProviderId } from "../../../protocol/src/index.js";
 import type { BridgeClient, ModelCatalog } from "../bridge-client.js";
 import { setupComposerMenu } from "./composer-menu.js";
 import { byId } from "./dom.js";
@@ -15,14 +15,14 @@ function loadModels(): Partial<Record<ProviderId, string>> {
   try {
     const parsed = JSON.parse(localStorage.getItem(MODEL_KEY) ?? "{}") as Record<string, unknown>;
     return Object.fromEntries(Object.entries(parsed).filter(([key, value]) =>
-      (key === "claude" || key === "copilot" || key === "codex" || key === "opencode") && typeof value === "string" && MODEL_ID.test(value),
+      ProviderIdSchema.safeParse(key).success && typeof value === "string" && MODEL_ID.test(value),
     )) as Partial<Record<ProviderId, string>>;
   } catch { return {}; }
 }
 
 export function loadProvider(): ProviderId {
   const saved = localStorage.getItem(PROVIDER_KEY);
-  return saved === "claude" || saved === "copilot" || saved === "codex" || saved === "opencode" ? saved : "copilot";
+  return ProviderIdSchema.safeParse(saved).data ?? "copilot";
 }
 
 export interface ProviderPickerDeps {

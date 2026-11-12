@@ -1,3 +1,4 @@
+import { errorText as sharedErrorText } from "./dom.js";
 import type { SkillTextFile } from "../bridge-client.js";
 
 interface EditorOptions {
@@ -31,7 +32,7 @@ export function createTextEditor(): { open(options: EditorOptions): Promise<void
   let busy = false;
   let discard = false;
   const dirty = () => loaded !== null && text.value !== loaded.content;
-  const errorText = (error: unknown) => error instanceof Error ? error.message : "Could not update this file.";
+  const errorText = (error: unknown) => sharedErrorText(error, "Could not update this file.");
 
   function setBusy(value: boolean): void {
     busy = value;

@@ -1,4 +1,5 @@
 import type { ProviderId } from "../../../protocol/src/index.js";
+import { PROVIDER_NAMES } from "./provider-picker.js";
 import { confirmAction } from "./confirm-action.js";
 
 export interface SystemInfo {
@@ -41,7 +42,7 @@ export function setupSystemPanel(getClient: () => SystemClient, isBusy: () => bo
         const row = document.createElement("div"); row.className = "system-provider";
         const copy = document.createElement("div"); copy.className = "system-provider-copy";
         const name = document.createElement("strong");
-        name.textContent = { claude: "Claude Code", copilot: "GitHub Copilot", codex: "Codex", opencode: "OpenCode" }[provider.provider];
+        name.textContent = PROVIDER_NAMES[provider.provider];
         const text = document.createElement("p"); text.className = "settings-description";
         text.textContent = `${provider.disabled ? "Disabled" : provider.mode === "managed" ? `private CLI ${provider.version}${provider.available === false ? " (repair required)" : ""}` : "Using your installed CLI"}${provider.pendingVersion ? `; ${provider.pendingVersion} ${provider.pendingVerified ? "prepared for release switch" : "awaiting verification/sign-in"}` : ""}`;
         const button = document.createElement("button"); button.type = "button"; button.className = "secondary";
