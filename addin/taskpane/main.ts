@@ -1,4 +1,5 @@
 import { setupPanels } from "./ui/panels.js";
+import { showToast } from "./ui/toast.js";
 import { setupProviderPicker, loadProvider, PROVIDER_KEY, PROVIDER_NAMES } from "./ui/provider-picker.js";
 import { setupWorkspaceMenu } from "./ui/workspace-menu.js";
 import { byId } from "./ui/dom.js";
@@ -1393,7 +1394,7 @@ async function goTo(target: { sheet?: string; address: string }): Promise<void> 
     await selectRange(target);
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
-    append({ kind: "error", text: `Cannot go to ${target.sheet ? `${target.sheet}!` : ""}${target.address}: ${reason}` });
+    showToast(`Cannot go to ${target.sheet ? `${target.sheet}!` : ""}${target.address}: ${reason}`);
   }
 }
 
@@ -1406,7 +1407,7 @@ async function goToLink(target: { file?: string; sheet?: string; address: string
     await client.goToFile({ file: target.file, ...(target.sheet ? { sheet: target.sheet } : {}), address: target.address });
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
-    append({ kind: "error", text: `Cannot go to ${placeLabel(target)}: ${reason}` });
+    showToast(`Cannot go to ${placeLabel(target)}: ${reason}`);
   }
 }
 
