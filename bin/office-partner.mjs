@@ -47,11 +47,19 @@ function bridgeEnv() {
     BRIDGE_USAGE_FILE: process.env.BRIDGE_USAGE_FILE ?? path.join(dataDir, "usage.jsonl") };
 }
 function cryptoInstance() { return `${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}`; }
+/** True when the bridge answers and takes requests. One that answers but is in maintenance (stopping, or half closed by an interrupted stop) is not ready. */
 async function health() {
   return new Promise((resolve) => {
     if (!existsSync(cert)) return resolve(false);
     const req = https.get("https://127.0.0.1:8765/health", { ca: readFileSync(cert), timeout: 1000 }, (res) => {
-      res.resume(); resolve(res.statusCode === 200);
+      let body = "";
+      res.on("data", (chunk) => { if (body.length < 65536) body += chunk; });
+      res.on("end", () => {
+        let maintenance = false;
+        try { maintenance = JSON.parse(body).maintenance === true; } catch { /* an older bridge answers without it */ }
+        resolve(res.statusCode === 200 && !maintenance);
+      });
+      res.on("error", () => resolve(false));
     });
     req.on("error", () => resolve(false));
     req.on("timeout", () => { req.destroy(); resolve(false); });
@@ -95,16 +103,15 @@ async function ensureCertificate() {
   writeFileSync(cert, pems.cert, { mode: 0o600 });
   writeFileSync(key, pems.private, { mode: 0o600 });
 }
-async function start({ repair = false } = {}) {
+async function start() {
   if (!existsSync(cert) || !existsSync(key)) fail("Run 'office-partner setup' first.");
   if (await health()) { console.log("Bridge is already running at https://localhost:8765"); return; }
   const recorded = livePid();
   if (recorded) {
     // A process number alone proves nothing: after a restart Windows gives the same number to another program.
     const { processOwner, decideRecorded } = await recordTools();
-    const action = await decideRecorded(processOwner(recorded, line => BRIDGE_PROCESS.test(line)), { repair, waitHealthy: () => waitForHealth(30_000) });
+    const action = await decideRecorded(processOwner(recorded, line => BRIDGE_PROCESS.test(line)), { repair: true, waitHealthy: () => waitForHealth(30_000) }); // start always ends with a working bridge: our own stuck process is replaced
     if (action === "ready") { console.log("Bridge is already running at https://localhost:8765"); return; }
-    if (action === "fail") fail(`Bridge process ${recorded} is running but not answering. Open Start > "Office Partner - Fix connection", or run 'office-partner stop' and retry.`);
     if (action === "kill") {
       process.kill(recorded);
       for (let i = 0; i < 25 && livePid(); i++) await new Promise((resolve) => setTimeout(resolve, 200));
@@ -439,7 +446,7 @@ async function main() {
       if (wantGateway) add("Gateway", gatewayStep(["setup"]));
       break;
     case "start":
-      if (wantAddin) add("Add-in", addin(() => start({ repair: flags.includes("--repair") })));
+      if (wantAddin) add("Add-in", addin(() => start()));
       if (wantGateway) add("Gateway", gatewayStep(["start", ...flags.filter(flag => flag === "--repair")]));
       break;
     case "stop":
