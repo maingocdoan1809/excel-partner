@@ -86,19 +86,6 @@ export async function prepareRelease(spec, { dataDir = store.home(), install = i
     throw error;
   } finally { if (fs.existsSync(staging)) fs.rmSync(staging, { recursive: true, force: true }); }
 }
-function journal(dataDir, patch) {
-  const state = store.currentDeployment(dataDir); state.journal = { ...(state.journal ?? {}), ...patch, pid: process.pid, updated: new Date().toISOString() };
-  store.atomic(path.join(dataDir, "deployment.json"), state);
-}
-export function restoreSelection(dataDir, before) {
-  if (!before) return;
-  store.changeState(dataDir, current => {
-    for (const field of ["active", "previous", "selected", "disabled"]) {
-      if (before[field] !== undefined) current[field] = before[field];
-      else if (field === "disabled") delete current.disabled;
-    }
-  });
-}
 /** The runtimes a new release will use must be intact and for this machine before anything is stopped. */
 function verifyProfiles(profiles, dataDir) {
   for (const profile of Object.values(profiles)) {
@@ -146,7 +133,6 @@ export function retireOldReleases(dataDir = store.home()) {
       }
     });
     for (const release of retired) delete deployment.releases[release.id];
-    deployment.previous = null;
     store.atomic(path.join(dataDir, "deployment.json"), deployment);
     result.releases = retired.map(release => release.id); result.profiles = dropped.map(profile => profile.id);
 
@@ -172,21 +158,22 @@ export function retireOldReleases(dataDir = store.home()) {
   } catch { /* A failed cleanup must not turn a good update into a failed one. */ }
   return result;
 }
+/**
+ * Stop the services, make `next` the active release and start it. A failed start is reported as it is: nothing goes back to the
+ * older release by itself. To go back to an older version, run `office-partner rollback <version>`, which installs it from npm.
+ */
 export async function switchRelease(next, options) {
   const { dataDir = store.home(), stop, start, drain, undrain = async () => {}, report = () => {}, profiles = {} } = options;
   const state = store.currentDeployment(dataDir), previous = state.releases[state.active];
   if (!previous) throw new Error("BASELINE_SNAPSHOT_REQUIRED");
   verifyRelease(next, true);
   verifyProfiles(profiles, dataDir);
-  let previousValid = true;
-  try { verifyRelease(previous); } catch (error) { if (!options.allowDamagedCurrent) throw error; previousValid = false; }
-  journal(dataDir, { phase: "prepared", from: previous.id, to: next.id, previous: state.previous, runtimeBefore: store.readState(dataDir) });
   let stopped = false;
   try {
     report("draining"); await drain();
-    journal(dataDir, { phase: "stopping" }); stopped = true; await stop(previous);
-    const deployment = store.currentDeployment(dataDir); deployment.active = next.id; deployment.previous = previous.id;
-    deployment.held = false; deployment.journal.phase = "activating"; store.atomic(path.join(dataDir, "deployment.json"), deployment);
+    stopped = true; await stop(previous);
+    const deployment = store.currentDeployment(dataDir); deployment.active = next.id;
+    store.atomic(path.join(dataDir, "deployment.json"), deployment);
     store.changeState(dataDir, runtimes => {
       for (const [provider, profile] of Object.entries(profiles)) {
         if (runtimes.active[provider] !== profile.id) runtimes.previous[provider] = runtimes.active[provider] ?? runtimes.legacy[provider];
@@ -195,30 +182,13 @@ export async function switchRelease(next, options) {
       }
     });
     report("starting"); await start(next);
-    journal(dataDir, { phase: "committed", runtimeBefore: null });
-    // The new release is running. The old one was only kept to undo a failed switch; going back to an older version is
-    // done by installing it again from npm, so nothing is stored for that.
+    // The older release is no longer needed once the new one runs.
     retireOldReleases(dataDir);
     return next;
   } catch (error) {
-    report("recovering");
-    if (!stopped) { await undrain(); journal(dataDir, { phase: "aborted", runtimeBefore: null }); throw error; }
-    // Close partially started services before returning to the last complete installation.
-    await stop(next).catch(() => {});
-    const deployment = store.currentDeployment(dataDir), before = deployment.journal?.runtimeBefore;
-    if (!previousValid) {
-      // Keep the verified recovery target selected; the damaged source is not a rollback candidate.
-      deployment.active = next.id; deployment.previous = null; deployment.held = true;
-      deployment.journal = { ...deployment.journal, from: next.id, previous: null, runtimeBefore: store.readState(dataDir), phase: "recovery_failed" };
-      store.atomic(path.join(dataDir, "deployment.json"), deployment);
-      throw new Error("RECOVERY_RELEASE_START_FAILED_USE_RECOVERY");
-    }
-    deployment.active = previous.id; deployment.previous = deployment.journal?.previous ?? null; deployment.held = true;
-    deployment.releases[next.id].failed = true; store.atomic(path.join(dataDir, "deployment.json"), deployment);
-    restoreSelection(dataDir, before);
-    try { await start(previous); journal(dataDir, { phase: "rolled_back", runtimeBefore: null }); retireOldReleases(dataDir); }
-    catch { journal(dataDir, { phase: "recovery_failed" }); throw new Error("ROLLBACK_START_FAILED_USE_RECOVERY"); }
-    throw new Error("ACTIVATION_FAILED_PREVIOUS_RELEASE_RESTORED");
+    if (stopped) await stop(next).catch(() => {}); // close what only started halfway
+    await undrain();
+    throw error;
   }
 }
 export async function updateRelease(root, spec, options) {
@@ -235,15 +205,4 @@ export async function updateRelease(root, spec, options) {
     for (const provider of store.readState(dataDir).selected) profiles[provider] = await installRuntime(next.root, provider, { ...options, dataDir, adapterRoot: next.root, activate: false });
     return switchRelease(next, { ...options, dataDir, profiles });
   });
-}
-export function recoverInterrupted(dataDir = store.home()) {
-  const deployment = store.currentDeployment(dataDir), operation = deployment.journal;
-  if (!operation || !["stopping", "activating", "recovery_failed"].includes(operation.phase)) return;
-  if (Number.isInteger(operation.pid)) { try { process.kill(operation.pid, 0); return; } catch (error) { if (error.code !== "ESRCH") return; } }
-  const previous = deployment.releases[operation.from]; if (!previous) throw new Error("RECOVERY_BASELINE_MISSING");
-  verifyRelease(previous); deployment.active = previous.id; deployment.previous = operation.previous ?? null; deployment.held = true;
-  restoreSelection(dataDir, operation.runtimeBefore);
-  deployment.journal = { ...operation, phase: "recovered", runtimeBefore: null };
-  store.atomic(path.join(dataDir, "deployment.json"), deployment);
-  retireOldReleases(dataDir);
 }

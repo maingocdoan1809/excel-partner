@@ -75,7 +75,7 @@ export async function collectDoctor(options) {
       if (active) root = active.root;
       runtimeState = runtimeStore.readState(dataDir);
       add("deployment.state", "pass", "DEPLOYMENT_STATE_OK", "Deployment and runtime selection metadata parsed.", undefined,
-        { active: active?.version ?? null, phase: deployment.journal?.phase ?? null, held: deployment.held ?? false });
+        { active: active?.version ?? null });
     } catch { add("deployment.state", "fail", "DEPLOYMENT_STATE_INVALID", "Saved deployment metadata cannot be read safely.", "Use the recovery launcher to restore a retained release."); }
   }
   if (integrity && runtimeStore && runtimeState) {

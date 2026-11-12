@@ -9,7 +9,7 @@ afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); });
 function fixture(busy = false) {
   document.body.innerHTML = fs.readFileSync("addin/taskpane/index.html", "utf8").match(/<body[^>]*>([\s\S]*)<\/body>/)![1]!;
   el("panel-settings").hidden = false;
-  const info: SystemInfo = { version: "1.1.0", held: false, phase: "committed",
+  const info: SystemInfo = { version: "1.1.0",
     providers: [{ provider: "copilot", selected: true, mode: "managed", version: "1.0.95", pendingVersion: null, available: true },
       { provider: "codex", selected: false, mode: "external", version: null, pendingVersion: "0.162.1", available: null }] };
   const client = { systemInfo: vi.fn(async () => info), systemAction: vi.fn(async (_action: string, _provider?: string, _version?: string) => {}),

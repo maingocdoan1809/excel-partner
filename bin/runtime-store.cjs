@@ -135,7 +135,7 @@ function childEnvironment(env, profile) {
 }
 function currentDeployment(dataDir = home(), suffix = '') {
   const file = path.join(dataDir, 'deployment.json' + suffix);
-  if (!fs.existsSync(file)) return { schemaVersion: 1, active: null, previous: null, releases: {}, journal: null };
+  if (!fs.existsSync(file)) return { schemaVersion: 1, active: null, releases: {} };
   const data = readJson(file);
   if (data.schemaVersion !== 1 || !data.releases || typeof data.releases !== 'object') throw new Error('DEPLOYMENT_STATE_INVALID');
   for (const [id, release] of Object.entries(data.releases)) {

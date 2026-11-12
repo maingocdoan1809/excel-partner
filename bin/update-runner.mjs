@@ -25,7 +25,6 @@ const status = (patch) => writeUpdateStatus(dataDir, { from, spec, startedAt, ..
 const STEP_TEXT = {
   stopping: "Stopping the bridge",
   installing: "Installing the new version",
-  recovering: "The install failed; restarting the old version",
   starting: "Starting the new version",
 };
 

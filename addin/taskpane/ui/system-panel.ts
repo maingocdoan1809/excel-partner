@@ -3,7 +3,7 @@ import { PROVIDER_NAMES } from "./provider-picker.js";
 import { confirmAction } from "./confirm-action.js";
 
 export interface SystemInfo {
-  version: string | null; held: boolean; phase: string | null; debug?: boolean;
+  version: string | null; debug?: boolean;
   providers: Array<{ provider: ProviderId; selected: boolean; disabled?: boolean; mode: string; version: string | null; pendingVersion: string | null; pendingVerified?: boolean; available: boolean | null }>;
 }
 export interface DiagnosticReport { status: string; diagnosticId: string; checks: Array<{ status: string; id: string; code: string; message: string }> }
@@ -35,7 +35,7 @@ export function setupSystemPanel(getClient: () => SystemClient, isBusy: () => bo
   async function refresh() {
     try {
       const info = await getClient().systemInfo();
-      summary.textContent = `Installed: ${info.version ?? "current installation"}.${info.held ? " Automatic activation is held after recovery." : ""}`;
+      summary.textContent = `Installed: ${info.version ?? "current installation"}.`;
       debugOn = info.debug === true; debugButton.textContent = debugOn ? "Stop debug" : "Debug for 15 min";
       list.replaceChildren();
       for (const provider of info.providers) {

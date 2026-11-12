@@ -35,8 +35,7 @@ export class SystemRoutes {
         let debug = false;
         try { debug = JSON.parse(fs.readFileSync(path.join(dataDir, "debug.json"), "utf8")).expires > Date.now(); } catch { /* No debug window is open. */ }
         return sendJson(res, 200, { debug, version: deployment.releases[deployment.active]?.version ?? null,
-          held: deployment.held ?? false,
-          phase: deployment.journal?.phase ?? null, providers: manager.runtimeInventory(dataDir) });
+          providers: manager.runtimeInventory(dataDir) });
       }
       if (req.method !== "POST") return sendJson(res, 405, { error: "method_not_allowed" });
       const input = action.parse(JSON.parse(await readBody(req)));

@@ -313,7 +313,7 @@ const HELP = `Usage: office-partner <command> [addin|gateway|all]
              --host excel|word|powerpoint selects MCP host.
   providers  list | install <provider> | remove <provider> | login <provider>. CLI versions are pinned by this release.
   versions   Show retained releases and managed CLI versions.
-  rollback   Restore the previous complete release, or rollback <version>.
+  rollback   rollback <version> installs that older version from npm (only when you run it).
   repair     Verify the release and repair its managed runtimes while services are stopped.
   fix        Start the bridge and gateway again if the pane does not open (Start Menu: Office Partner - Fix connection).
   diagnostics export <new-file.json> saves diagnostic metadata for support.

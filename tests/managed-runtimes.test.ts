@@ -7,7 +7,7 @@ import { spawnSync } from "node:child_process";
 // @ts-expect-error The management tools are published as standalone JavaScript.
 import { installRuntime, runtimeInventory, verifyRuntime, repairRuntime } from "../bin/runtime-manager.mjs";
 // @ts-expect-error The management tools are published as standalone JavaScript.
-import { snapshotRelease, updateRelease, verifyRelease, recoverInterrupted, retireOldReleases } from "../bin/deployment.mjs";
+import { snapshotRelease, updateRelease, verifyRelease, retireOldReleases } from "../bin/deployment.mjs";
 // @ts-expect-error The management tools are published as standalone JavaScript.
 import { ensureBaseline, releaseOwners, verifiedActiveRelease, managementMain, installRecovery } from "../bin/manage.mjs";
 // @ts-expect-error Standalone diagnostic tools.
@@ -235,7 +235,7 @@ describe("complete release update and rollback", () => {
     const updated = await updateRelease(w.root, "office-partner@1.1.0", { ...w, ...w.controls });
     expect(w.calls).toEqual(["drain", "stop:1.0.0", "start:1.1.0"]);
     const deployment = store.currentDeployment(w.dataDir), state = store.readState(w.dataDir);
-    expect(deployment).toMatchObject({ active: updated.id, previous: null, held: false, journal: { phase: "committed" } });
+    expect(deployment).toMatchObject({ active: updated.id });
     expect(Object.keys(deployment.releases)).toEqual([updated.id]);
     expect(folders(path.join(w.dataDir, "releases"))).toEqual([updated.id]);
     // Same CLI version: the old profile only duplicated the new one, so it and its folder are gone and the chat moved over.
@@ -290,7 +290,7 @@ describe("complete release update and rollback", () => {
     const remove = vi.spyOn(fs.promises, "rm").mockRejectedValue(Object.assign(new Error("EBUSY"), { code: "EBUSY" }));
     try {
       const updated = await updateRelease(w.root, "office-partner@1.1.0", { ...w, ...w.controls });
-      expect(store.currentDeployment(w.dataDir)).toMatchObject({ active: updated.id, journal: { phase: "committed" } });
+      expect(store.currentDeployment(w.dataDir)).toMatchObject({ active: updated.id });
     } finally { rename.mockRestore(); remove.mockRestore(); }
     expect(fs.existsSync(baseline.directory)).toBe(true);
     await retireOldReleases(w.dataDir).pending;
@@ -306,30 +306,20 @@ describe("complete release update and rollback", () => {
     expect(store.currentDeployment(w.dataDir).active).toBe(baseline.id);
   });
 
-  it("restores both release and runtime selection after activation failure", async () => {
+  it("reports a failed activation and does not go back to the older release by itself", async () => {
     const w = fixture(), baseline = ensureBaseline(w.root, w.dataDir);
-    const original = await installRuntime(w.root, "copilot", { ...w, adapterRoot: baseline.root });
-    const start = vi.fn(async (release: { version: string }) => { w.calls.push("start:" + release.version); if (release.version === "1.1.0") throw new Error("startup failed"); });
-    await expect(updateRelease(w.root, "office-partner@1.1.0", { ...w, ...w.controls, start })).rejects.toThrow("ACTIVATION_FAILED_PREVIOUS_RELEASE_RESTORED");
-    expect(w.calls).toEqual(["drain", "stop:1.0.0", "start:1.1.0", "stop:1.1.0", "start:1.0.0"]);
-    expect(store.currentDeployment(w.dataDir).active).toBe(baseline.id);
-    expect(store.readState(w.dataDir).active.copilot).toBe(original.id);
-    // The release that failed to start is not kept either, nor the runtime installed for it.
-    expect(Object.keys(store.currentDeployment(w.dataDir).releases)).toEqual([baseline.id]);
-    expect(folders(path.join(w.dataDir, "releases"))).toEqual([baseline.id]);
-    expect(Object.keys(store.readState(w.dataDir).profiles)).toEqual([original.id]);
+    await installRuntime(w.root, "copilot", { ...w, adapterRoot: baseline.root });
+    const start = vi.fn(async (release: { version: string }) => { w.calls.push("start:" + release.version); throw new Error("startup failed"); });
+    await expect(updateRelease(w.root, "office-partner@1.1.0", { ...w, ...w.controls, start })).rejects.toThrow("startup failed");
+    // The half-started services are closed; the old release is not started again.
+    expect(w.calls).toEqual(["drain", "stop:1.0.0", "start:1.1.0", "stop:1.1.0", "undrain"]);
+    const deployment = store.currentDeployment(w.dataDir);
+    expect(deployment.active).not.toBe(baseline.id);
+    expect(deployment.releases[deployment.active].version).toBe("1.1.0");
   });
 
-  it("rejects corrupted release assets and recovers an interrupted activation", () => {
+  it("rejects corrupted release assets", () => {
     const w = fixture(), baseline = ensureBaseline(w.root, w.dataDir);
-    const other = snapshotRelease(w.root, w.dataDir);
-    const deployment = store.currentDeployment(w.dataDir);
-    deployment.active = other.id; deployment.journal = { phase: "activating", from: baseline.id, to: other.id, previous: null, runtimeBefore: store.readState(w.dataDir) };
-    store.atomic(path.join(w.dataDir, "deployment.json"), deployment);
-    recoverInterrupted(w.dataDir);
-    expect(store.currentDeployment(w.dataDir)).toMatchObject({ active: baseline.id, held: true, journal: { phase: "recovered" } });
-    // The release the interrupted switch was heading for is dropped.
-    expect(Object.keys(store.currentDeployment(w.dataDir).releases)).toEqual([baseline.id]);
     w.put(baseline.root, "dist/bridge/src/index.js", "corrupted");
     expect(() => verifyRelease(baseline)).toThrow("RELEASE_INTEGRITY_FAILED");
   });

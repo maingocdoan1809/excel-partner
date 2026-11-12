@@ -208,22 +208,17 @@ model probes and pending gateway tool results. Partial drain is undone on failur
 The gateway's official-client Office calls still execute in the official client;
 none are redirected to the Office Partner pane.
 
-The activation journal records the prior app/runtime selection. Startup failure
-restores it, and a dead updater's interrupted switch is recovered on next start.
+An update never goes back to the older release by itself. If the new release fails to
+start, the update reports the error, closes what started halfway and leaves the new
+release selected; run `office-partner update` again or `office-partner rollback <version>`.
 A damaged active release is not replaced from disk: no older release is kept.
 Starting reports `RELEASE_DAMAGED`, and `repair` (or Start > Office Partner - Fix
 connection) installs the same version again from npm.
-If the original release is already damaged and a recovery target cannot start,
-recovery reports the failure and keeps the verified target selected. It cannot
-claim to have restarted a damaged copy successfully.
-
-Only the running release is kept. The previous one stays on disk while an update
-is switching, so a failed start or an interrupted update can be undone
-automatically; once the new release is running (or the old one is restored) the
-unneeded one and the runtimes made for it are deleted. Going back to an older
-version is `office-partner rollback <version>`, which installs that version from
-npm like `update --from office-partner@<version>`; it needs a network connection.
-The `held` flag records a recovery. Updates always require an explicit user action.
+Only the running release is kept. Once a new release is running, the older one and the
+runtimes made only for it are deleted. Going back to an older version is
+`office-partner rollback <version>`, which installs that version from npm like
+`update --from office-partner@<version>`; it runs only when someone asks for it and needs
+a network connection.
 
 Saved chats: a runtime profile made by a retired release is dropped when it
 duplicates the current CLI (same version and data folder) and its chats move to the

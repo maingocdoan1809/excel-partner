@@ -8,7 +8,7 @@ import store from "./runtime-store.cjs";
 import { collectDoctor, resolveCommands } from "./doctor-checks.mjs";
 import { installRuntime, repairRuntime, runtimeInventory } from "./runtime-manager.mjs";
 import { recordStartup, startupCode } from "./startup-log.mjs";
-import { snapshotRelease, updateRelease, verifyRelease, recoverInterrupted } from "./deployment.mjs";
+import { snapshotRelease, updateRelease, verifyRelease } from "./deployment.mjs";
 
 export function controlRequest(dataDir, role, action, timeoutMs = 5000) {
   const directory = role === "addin" ? dataDir : process.env.AGENT_GATEWAY_HOME ?? path.join(process.env.LOCALAPPDATA || path.dirname(dataDir), "Agent Gateway");
@@ -64,7 +64,7 @@ export async function lifecycle(dataDir, { control = controlRequest, run = spawn
         const stopped = await control(dataDir, role, "shutdown");
         if (!stopped.ok) throw new Error(stopped.error ?? "SERVICE_STOP_FAILED");
         let gone = false;
-        for (let i = 0; i < 50; i++) { await new Promise(resolve => setTimeout(resolve, 100)); if ((await control(dataDir, role, "health")).absent) { gone = true; break; } }
+        for (let i = 0; i < 1800; i++) { await new Promise(resolve => setTimeout(resolve, 100)); if ((await control(dataDir, role, "health")).absent) { gone = true; break; } }
         if (!gone) throw new Error("SERVICE_STOP_TIMEOUT");
       }
     },
@@ -115,7 +115,7 @@ function cleanupOwners(dataDir, { addin, gateway, gatewayConfigured = false }) {
   const state = store.readState(dataDir);
   if (state.owners.addin || state.owners.gateway || !gateway && gatewayConfigured && state.owners.gateway !== false) return;
   const deployment = store.currentDeployment(dataDir);
-  deployment.active = null; deployment.previous = null; deployment.journal = null;
+  deployment.active = null;
   store.atomic(path.join(dataDir, "deployment.json"), deployment);
   for (const profile of Object.values(state.profiles)) {
     if (profile.mode !== "managed") continue;
@@ -133,7 +133,7 @@ function cleanupOwners(dataDir, { addin, gateway, gatewayConfigured = false }) {
     fs.rmSync(release.directory, { recursive: true, force: true });
   }
   store.atomic(path.join(dataDir, "runtime-state.json"), { schemaVersion: 1, selected: [], profiles: {}, active: {}, previous: {}, legacy: {}, conversations: {}, owners: {} });
-  store.atomic(path.join(dataDir, "deployment.json"), { schemaVersion: 1, active: null, previous: null, releases: {}, journal: null });
+  store.atomic(path.join(dataDir, "deployment.json"), { schemaVersion: 1, active: null, releases: {} });
 }
 export function verifiedActiveRelease(dataDir = store.home()) {
   const deployment = store.currentDeployment(dataDir), release = deployment.releases[deployment.active];
@@ -144,7 +144,6 @@ export function verifiedActiveRelease(dataDir = store.home()) {
 }
 export function dispatchActive(root, args, dataDir = store.home()) {
   if (process.env.OFFICE_PARTNER_DISPATCHED === "1") return false;
-  recoverInterrupted(dataDir);
   const release = verifiedActiveRelease(dataDir);
   if (!release || path.resolve(root) === path.resolve(release.root)) return false;
   const result = spawnSync(process.execPath, [path.join(release.root, "bin", "office-partner.mjs"), ...args], {
@@ -161,7 +160,6 @@ const START_PAUSE_MS = 15_000;
  */
 function tryStart(args, dataDir, options) {
   try {
-    recoverInterrupted(dataDir);
     verifiedActiveRelease(dataDir);
     const deployment = store.currentDeployment(dataDir);
     const root = deployment.releases[deployment.active]?.root ?? options.root;
@@ -226,7 +224,7 @@ export async function managementMain(args, options = {}) {
   const [command = "versions", action, value] = args;
   if (command === "start") return startServices(args, dataDir, options);
   if (command === "fix") return fixConnection(dataDir, options);
-  if (command === "restart") { recoverInterrupted(dataDir); verifiedActiveRelease(dataDir); }
+  if (command === "restart") verifiedActiveRelease(dataDir);
   if (command === "repair") {
     for (const [name, validate] of [["runtime-state.json", store.readState], ["deployment.json", store.currentDeployment]]) {
       try { validate(dataDir); }
@@ -235,13 +233,12 @@ export async function managementMain(args, options = {}) {
         const previous = validate(dataDir, ".previous"); store.atomic(path.join(dataDir, name), previous);
       }
     }
-    recoverInterrupted(dataDir);
   }
   const deployment = store.currentDeployment(dataDir);
   const active = deployment.releases[deployment.active];
   const root = active?.root ?? options.root;
   if (command === "versions") {
-    console.log(JSON.stringify({ active: active?.version ?? null, held: deployment.held ?? false, providers: runtimeInventory(dataDir) }, null, 2)); return;
+    console.log(JSON.stringify({ active: active?.version ?? null, providers: runtimeInventory(dataDir) }, null, 2)); return;
   }
   if (!root) throw new Error("INSTALLATION_NOT_INITIALIZED");
   if (command === "doctor") {
@@ -284,7 +281,7 @@ export async function managementMain(args, options = {}) {
   if (command === "diagnostics") {
     if (action !== "export" || !value) throw new Error("USE_DIAGNOSTICS_EXPORT_NEW_FILE_JSON");
     const report = await collectDoctor({ root, env: { ...process.env, OFFICE_PARTNER_DATA_DIR: dataDir } });
-    const details = { ...report, deployment: { active: active?.version ?? null, phase: deployment.journal?.phase ?? null, held: deployment.held ?? false }, providers: runtimeInventory(dataDir) };
+    const details = { ...report, deployment: { active: active?.version ?? null }, providers: runtimeInventory(dataDir) };
     fs.writeFileSync(value, JSON.stringify(details, null, 2) + "\n", { mode: 0o600, flag: "wx" });
     console.log("Saved diagnostic metadata. No raw logs, credentials or document contents were included."); return;
   }
@@ -304,7 +301,7 @@ export async function managementMain(args, options = {}) {
     try { verifyRelease(active, true); }
     catch {
       // No older release is kept, so a damaged one is replaced by installing the same version again from npm.
-      const reinstalled = await updateRelease(root, "office-partner@" + active.version, { dataDir, ...controls, report, ...options.deploy, allowDamagedCurrent: true });
+      const reinstalled = await updateRelease(root, "office-partner@" + active.version, { dataDir, ...controls, report, ...options.deploy });
       console.log("Damaged release replaced by a fresh install of the same version."); return reinstalled;
     }
     return store.lock(dataDir, "deployment", async () => {
