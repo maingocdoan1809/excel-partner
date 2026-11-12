@@ -201,10 +201,11 @@
           <h2 id="login-heading">Sign in to GitHub Copilot</h2>
           <p id="login-description">Finish signing in through your browser, then return to <span class="host-app">Excel</span>.</p>
           <div id="login-device" class="login-card">
-            <strong>GitHub Copilot <span class="badge">DEVICE CODE</span></strong>
+            <strong><span id="login-card-title">GitHub Copilot</span> <span id="login-badge" class="badge">DEVICE CODE</span></strong>
             <p id="login-status" role="status" aria-live="polite">Connect your GitHub Copilot account to get started.</p>
-            <div id="login-code-card" hidden><p>1. Copy the device code</p><code id="login-code" class="device-code"></code><button id="login-copy" type="button" class="secondary">Copy code</button><p>2. Open GitHub and enter the code, then return to <span class="host-app">Excel</span>.</p></div>
-            <a id="login-browser" class="login-primary" target="_blank" rel="noopener noreferrer" hidden>Open GitHub verification ↗</a>
+            <div id="login-code-card" hidden><p>1. Copy the device code</p><code id="login-code" class="device-code"></code><button id="login-copy" type="button" class="secondary">Copy code</button><p>2. Open the sign-in page and enter the code, then return to <span class="host-app">Excel</span>.</p></div>
+            <a id="login-browser" class="login-primary" target="_blank" rel="noopener noreferrer" hidden>Open sign-in page ↗</a>
+            <div id="login-paste-card" hidden><p>Paste the code shown on the sign-in page</p><input id="login-paste" type="text" autocomplete="off" spellcheck="false" aria-label="Sign-in code" /><button id="login-paste-submit" type="button">Submit code →</button></div>
             <p id="login-timer" class="login-timer"></p>
             <button id="login-start" type="button">Get device code →</button>
             <button id="login-cancel" type="button" class="secondary" hidden>Cancel sign-in</button>

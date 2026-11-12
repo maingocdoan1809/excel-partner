@@ -1,4 +1,5 @@
 import type { ProviderId } from "../../../protocol/src/index.js";
+import { APP_LOGIN_PROVIDERS } from "../../../protocol/src/provider-login.js";
 import { activeHost } from "../host/index.js";
 import { byId } from "./dom.js";
 import { PROVIDER_NAMES } from "./provider-picker.js";
@@ -14,9 +15,9 @@ const PROVIDER_LOGIN_COMMANDS: Record<ProviderId, string> = {
 };
 /** Hint shown under the manual login command. */
 const PROVIDER_LOGIN_HINTS: Record<ProviderId, string> = {
-  claude: "Open a terminal and run the command below. Office Partner selects the provider CLI for this installation.",
+  claude: "",
   copilot: "",
-  codex: "Open a terminal and run the command below. Install a private CLI from System & recovery if needed.",
+  codex: "",
   opencode: "Open a terminal and run the command below. Install a private CLI from System & recovery if needed.",
 };
 
@@ -121,12 +122,15 @@ export function setupPanels(deps: PanelsDeps) {
     if (name === "login") {
       const provider = deps.getProvider();
       byId("login-heading").textContent = `Sign in to ${PROVIDER_NAMES[provider]}`;
-      byId("login-description").textContent = provider === "copilot" ? `Finish signing in through your browser, then return to ${activeHost().app}.` : "Sign in through the CLI on the bridge machine, then check the connection again.";
-      byId("login-device").hidden = provider !== "copilot";
-      byId("login-manual").hidden = provider === "copilot";
+      const inApp = APP_LOGIN_PROVIDERS.includes(provider);
+      byId("login-description").textContent = inApp ? `Finish signing in through your browser, then return to ${activeHost().app}.` : "Sign in through the CLI on the bridge machine, then check the connection again.";
+      byId("login-card-title").textContent = PROVIDER_NAMES[provider];
+      byId("login-badge").textContent = provider === "claude" ? "BROWSER" : "DEVICE CODE";
+      byId("login-device").hidden = !inApp;
+      byId("login-manual").hidden = inApp;
       byId("login-command").textContent = PROVIDER_LOGIN_COMMANDS[provider];
       byId("login-manual-hint").textContent = PROVIDER_LOGIN_HINTS[provider];
-      if (provider === "copilot") deps.loginPanel.open();
+      if (inApp) deps.loginPanel.open();
       else deps.loginPanel.close();
     } else deps.loginPanel.close();
     byId("tab-chat").setAttribute("aria-pressed", String(name === null));

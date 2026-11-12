@@ -36,7 +36,7 @@ office-partner status
 
 `setup` trusts a localhost certificate for your user, registers the add-in, starts the bridge and adds it to Windows start-up. A healthy bridge prints `Bridge running at https://localhost:8765`.
 
-**2. Choose providers.** Interactive setup asks which private CLIs to install (`copilot`, `claude`, `codex`, `opencode`). Enter keeps existing system CLIs. For an unattended selection use `office-partner setup --providers copilot,codex`; `--providers none` keeps external CLIs. System CLI files and PATH are never changed. Sign in with `office-partner providers login copilot` (substitute the provider name); Copilot also supports sign-in in Settings. A private CLI that needs sign-in stays pending while the previous selection is retained.
+**2. Choose providers.** Interactive setup asks which private CLIs to install (`copilot`, `claude`, `codex`, `opencode`). Enter keeps existing system CLIs. For an unattended selection use `office-partner setup --providers copilot,codex`; `--providers none` keeps external CLIs. System CLI files and PATH are never changed. Sign in with `office-partner providers login copilot` (substitute the provider name); Copilot, Codex and Claude also sign in from the pane (Sign in button); OpenCode signs in from a terminal. A private CLI that needs sign-in stays pending while the previous selection is retained.
 
 **3. Use it:** reopen Excel, Word or PowerPoint, open a file, choose **Home > Office Partner**, pick a provider, select cells, text or a slide shape, type a request, press **Enter**. (**Ctrl+Enter** adds a new line.) Settings > App & storage > System & recovery also manages private providers. See [runtime management and recovery](docs/diagnostics.md).
 

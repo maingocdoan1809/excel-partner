@@ -316,8 +316,12 @@ export class BridgeClient {
     return (await this.sessionFetch<{ document: SkillTextFile }>("/session/skills", { method: "PUT", body: JSON.stringify({ name, ...document }) })).document;
   }
 
-  async providerLogin(method: "GET" | "POST" | "DELETE" = "GET"): Promise<ProviderLoginStatus> {
-    return this.sessionFetch("/session/provider-login", { method });
+  async providerLogin(method: "GET" | "POST" | "DELETE" = "GET", provider: ProviderId = "copilot"): Promise<ProviderLoginStatus> {
+    return this.sessionFetch(`/session/provider-login?provider=${encodeURIComponent(provider)}`, { method });
+  }
+
+  async submitProviderLoginCode(provider: ProviderId, code: string): Promise<ProviderLoginStatus> {
+    return this.sessionFetch(`/session/provider-login?provider=${encodeURIComponent(provider)}`, { method: "PUT", body: JSON.stringify({ code }) });
   }
 
   historyList(offset = 0, limit = 40): Promise<HistoryPage> { return this.sessionFetch(`/session/history?offset=${offset}&limit=${limit}`); }

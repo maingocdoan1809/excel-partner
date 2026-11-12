@@ -211,14 +211,15 @@ let selectedSlashToken: string | null = null;
 const updater = createSelfUpdater({ isBusy: () => currentRequestId !== null });
 const loginPanel = setupProviderLogin({
   client: () => client,
+  provider: () => provider,
   isBusy: () => currentRequestId !== null,
-  onSuccess: () => {
-    providerPicker.signedIn("copilot");
-    if (provider !== "copilot") selectProvider("copilot");
+  onSuccess: (signedIn) => {
+    providerPicker.signedIn(signedIn);
+    if (provider !== signedIn) selectProvider(signedIn);
     else {
-      client.setProvider("copilot");
-      providerPicker.invalidateCatalog("copilot");
-      void refreshModelCatalog("copilot");
+      client.setProvider(signedIn);
+      providerPicker.invalidateCatalog(signedIn);
+      void refreshModelCatalog(signedIn);
     }
     showPanel(null);
   },

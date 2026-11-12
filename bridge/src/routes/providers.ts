@@ -3,7 +3,7 @@ import { ProviderIdSchema, providerSessionKey } from "../../../protocol/src/inde
 import { cleanSessionTitle } from "../../../protocol/src/session-title.js";
 import { normalizeCommands } from "../../../providers/src/commands.js";
 import type { ProviderRegistry } from "../../../providers/src/registry.js";
-import { connectedSession, sendJson } from "../http-util.js";
+import { connectedSession, readBody, sendJson } from "../http-util.js";
 import type { Logger } from "../logger.js";
 import { ProviderLoginError, type ProviderLoginManager } from "../provider-login.js";
 import type { SessionManager } from "../session-manager.js";
@@ -26,18 +26,26 @@ export class ProviderRoutes {
     if (!session) return sendJson(res, 401, { error: "unauthorized" });
     res.setHeader("cache-control", "no-store");
     const { logins, providers } = this.deps;
+    const parsed = ProviderIdSchema.safeParse(new URL(req.url ?? "/", "http://localhost").searchParams.get("provider") ?? "copilot");
+    if (!parsed.success) return sendJson(res, 400, { error: "invalid_provider" });
+    const provider = parsed.data;
     if (req.method === "GET") {
-      const status = logins.status(session.id);
-      if (status.state === "success") providers.invalidateModels("copilot");
+      const status = logins.status(session.id, provider);
+      if (status.state === "success") providers.invalidateModels(provider);
       return sendJson(res, 200, status);
     }
     if (req.method === "DELETE") return sendJson(res, 200, logins.cancel(session.id));
-    if (req.method !== "POST") return sendJson(res, 405, { error: "method_not_allowed" });
+    if (req.method !== "POST" && req.method !== "PUT") return sendJson(res, 405, { error: "method_not_allowed" });
     if (session.isBusy) return sendJson(res, 409, { error: "Stop the current response before signing in." });
     try {
-      return sendJson(res, 200, logins.start(session.id));
+      if (req.method === "PUT") {
+        const body = JSON.parse(await readBody(req, 4096) || "{}") as { code?: unknown };
+        return sendJson(res, 200, logins.submitCode(session.id, typeof body.code === "string" ? body.code : ""));
+      }
+      return sendJson(res, 200, logins.start(session.id, provider));
     } catch (error) {
       if (error instanceof ProviderLoginError) return sendJson(res, 409, { error: error.message });
+      if (error instanceof SyntaxError) return sendJson(res, 400, { error: "invalid_json" });
       throw error;
     }
   }
