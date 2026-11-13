@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { describe, expect, it, vi } from "vitest";
 import { BridgeClient } from "../addin/taskpane/bridge-client.js";
+import { hostAdapterFor } from "../addin/taskpane/host/index.js";
 import { showUserInput } from "../addin/taskpane/ui/user-input.js";
 
 describe("pane native question lifecycle", () => {
@@ -30,8 +31,8 @@ describe("pane native question lifecycle", () => {
 });
 
 it.each(["stop", "finish", "disconnect"])("dismisses write approval on %s", async reason => {
-  const runTool = vi.fn(async () => ({ ok: true as const, data: {} }));
-  const client = new BridgeClient({ onState() {}, onHello() {}, onProviderStatus() {}, onProviderEvent() {}, onError() {}, runTool }, "ws://localhost");
+  const runTool = vi.spyOn(hostAdapterFor("excel"), "execute").mockResolvedValue({ ok: true, data: {} });
+  const client = new BridgeClient({ onState() {}, onHello() {}, onProviderStatus() {}, onProviderEvent() {}, onError() {} }, "ws://localhost");
   (client as any).ws = { readyState: WebSocket.OPEN, send: vi.fn(), close: vi.fn() };
   const pending = (client as any).onMessage(JSON.stringify({ type: "tool_request", tool: "execute_office_js", callId: "write", requestId: "turn", timeoutMs: 120000, args: { code: "return 1" } }));
   expect(document.querySelector(".permission-overlay")).not.toBeNull();
@@ -43,17 +44,36 @@ it.each(["stop", "finish", "disconnect"])("dismisses write approval on %s", asyn
   expect(runTool).not.toHaveBeenCalled();
 });
 
-it("refuses an approved write still queued when stopped", async () => {
+
+it("runs file changes one at a time and refuses a queued change once the request is stopped", async () => {
   let release!: () => void;
   const gate = new Promise<void>(resolve => { release = resolve; });
-  const runTool = vi.fn(async (_context, tool, args, execute) => { await gate; return execute(tool, args); });
-  const client = new BridgeClient({ onState() {}, onHello() {}, onProviderStatus() {}, onProviderEvent() {}, onError() {}, runTool }, "ws://localhost");
+  const order: string[] = [];
+  const host = hostAdapterFor("excel");
+  vi.spyOn(host, "execute").mockImplementation(async (tool: string) => {
+    order.push(`start ${tool}`);
+    if (tool === "write_range") await gate;
+    order.push(`end ${tool}`);
+    return { ok: true, data: {} };
+  });
+  const client = new BridgeClient({ onState() {}, onHello() {}, onProviderStatus() {}, onProviderEvent() {}, onError() {} }, "ws://localhost");
   const send = vi.fn();
   (client as any).ws = { readyState: WebSocket.OPEN, send, close: vi.fn() };
   client.setPermissionMode("auto");
-  const pending = (client as any).onMessage(JSON.stringify({ type: "tool_request", tool: "clear_range", callId: "write", requestId: "turn", timeoutMs: 120000, args: { address: "A1" } }));
+  const request = (tool: string, callId: string, requestId: string, args: unknown) => (client as any).onMessage(JSON.stringify({ type: "tool_request", tool, callId, requestId, timeoutMs: 120000, args }));
+  const first = request("write_range", "w1", "turn-a", { address: "A1", values: [[1]] });
+  const second = request("clear_range", "w2", "turn-b", { address: "A1" });
+  const third = request("clear_range", "w3", "turn", { address: "B1" });
+  const read = request("read_range", "r1", "turn-a", { address: "A1" });
+  await read;
+  expect(order).toContain("end read_range");
+  expect(order).not.toContain("start clear_range");
+  expect(order).not.toContain("end write_range");
   client.cancel("turn");
   release();
-  await pending;
-  expect(send.mock.calls.map(([raw]) => JSON.parse(raw))).toContainEqual({ type: "tool_result", callId: "write", result: { ok: false, error: { code: "cancelled", message: "The request ended before this change could run." } } });
+  await Promise.all([first, second, third]);
+  const starts = order.filter((entry) => entry.startsWith("start"));
+  expect([...starts].sort()).toEqual(["start read_range", "start write_range"]);
+  const results = send.mock.calls.map(([raw]) => JSON.parse(raw)).filter((m) => m.type === "tool_result");
+  for (const id of ["w2", "w3"]) expect(results.find((m) => m.callId === id).result).toMatchObject({ ok: false, error: { code: "cancelled" } });
 });

@@ -40,7 +40,7 @@ export interface StoredChange {
   ok: boolean;
   summary: string;
   target: { sheet: string; address: string } | null;
-  /** Ties the entry to the undo journal; the journal is memory-only, so older entries cannot be undone. */
+  /** Ties the entry to the tool call that made it. */
   callId?: string;
   requestId?: string;
 }

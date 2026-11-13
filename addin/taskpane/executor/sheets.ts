@@ -1,5 +1,5 @@
 import type { InsertSheetsFromFileInput, ManageSheetInput } from "../../../protocol/src/index.js";
-import { ToolFailure, resolveSheet, stripSheet } from "./common.js";
+import { ToolFailure, resolveSheet, stripSheet, runExcel } from "./common.js";
 
 async function assertNameFree(context: Excel.RequestContext, name: string): Promise<void> {
   const clash = context.workbook.worksheets.getItemOrNullObject(name);
@@ -9,7 +9,7 @@ async function assertNameFree(context: Excel.RequestContext, name: string): Prom
 }
 
 export async function manageSheet(input: ManageSheetInput): Promise<unknown> {
-  return Excel.run(async (context) => {
+  return runExcel(async (context) => {
     const sheets = context.workbook.worksheets;
 
     if (input.operation === "add") {
@@ -105,7 +105,7 @@ export async function insertSheetsFromFile(input: InsertSheetsFromFileInput & { 
     throw new ToolFailure("invalid_arguments", "position `after` needs afterSheet");
   }
 
-  return Excel.run(async (context) => {
+  return runExcel(async (context) => {
     const sheets = context.workbook.worksheets;
     sheets.load("items/name");
     await context.sync();

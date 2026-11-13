@@ -1,20 +1,18 @@
 import type http from "node:http";
 import { GO_TO_REQUEST, UNNAMED_WORKBOOK, sameWorkbookName } from "../../../protocol/src/index.js";
 import { AttachmentError, MAX_ATTACHMENT_BYTES, attachmentPath, createAttachment } from "../attachments.js";
-import { BackupError, type DocumentBackups, MAX_BACKUP_BYTES, backupExtensionFor } from "../document-backups.js";
 import { connectedSession, decodedHeader, readBinaryBody, readBody, sendJson } from "../http-util.js";
 import type { Logger } from "../logger.js";
 import type { SessionManager } from "../session-manager.js";
 
 export interface FileRouteDeps {
   sessions: SessionManager;
-  backups: DocumentBackups;
   logger: Logger;
   /** Brings a workbook's window to the front; Excel on Windows only (replaced in tests). */
   activateWorkbook: (workbookName: string) => Promise<unknown>;
 }
 
-/** Files that travel between the pane and the bridge: attachments, backups and links into other open files. */
+/** Files that travel between the pane and the bridge: attachments and links into other open files. */
 export class FileRoutes {
   constructor(private readonly deps: FileRouteDeps) {}
 
@@ -32,22 +30,6 @@ export class FileRoutes {
       return sendJson(res, 200, { id: attachment.id, name: attachment.name, kind: attachment.kind, path: attachmentPath(attachment.id) });
     } catch (error) {
       if (error instanceof AttachmentError) return sendJson(res, 400, { error: error.message });
-      throw error;
-    }
-  }
-
-  /** A copy of the open file (workbook, document or presentation), taken by the task pane before something the undo journal cannot reverse. */
-  async backup(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
-    const session = connectedSession(this.deps.sessions, req);
-    if (!session) return sendJson(res, 401, { error: "unauthorized" });
-    const name = decodedHeader(req, "x-file-name");
-    if (name === null) return sendJson(res, 400, { error: "invalid_file_name" });
-    try {
-      const bytes = await readBinaryBody(req, MAX_BACKUP_BYTES);
-      session.touch();
-      return sendJson(res, 200, { ...this.deps.backups.save(name, bytes, backupExtensionFor(session.host)), folder: this.deps.backups.dir });
-    } catch (error) {
-      if (error instanceof BackupError || error instanceof AttachmentError) return sendJson(res, 400, { error: error.message });
       throw error;
     }
   }

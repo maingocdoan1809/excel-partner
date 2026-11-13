@@ -6,7 +6,7 @@ import type {
   RuleOperator,
   ValidationRule,
 } from "../../../protocol/src/index.js";
-import { ToolFailure, resolveSheet, stripSheet } from "./common.js";
+import { ToolFailure, resolveSheet, stripSheet, runExcel } from "./common.js";
 
 const pascal = (text: string) => text.charAt(0).toUpperCase() + text.slice(1);
 
@@ -100,7 +100,7 @@ function addRule(range: Excel.Range, rule: CfRule): void {
 }
 
 export async function conditionalFormat(input: ConditionalFormatInput): Promise<unknown> {
-  return Excel.run(async (context) => {
+  return runExcel(async (context) => {
     const sheet = resolveSheet(context, input.sheet);
     sheet.load("name");
     const range = input.address ? sheet.getRange(input.address) : sheet.getRange();
@@ -159,7 +159,7 @@ export function buildValidationRule(rule: ValidationRule): Excel.DataValidationR
 }
 
 export async function dataValidation(input: DataValidationInput): Promise<unknown> {
-  return Excel.run(async (context) => {
+  return runExcel(async (context) => {
     const sheet = resolveSheet(context, input.sheet);
     sheet.load("name");
     const range = sheet.getRange(input.address);

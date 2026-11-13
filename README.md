@@ -66,7 +66,7 @@ Type `/` in the chat to browse commands and skills of the selected provider.
 - **Check:** `verify_slides` looks for overlaps, shapes off the slide, overflowing and tiny text; `verify_slide_visual` shows the rendered slide.
 - Not covered yet: speaker notes, pictures, charts, transitions, sections (use `execute_office_js` / `edit_slide_xml`).
 
-In Word and PowerPoint a copy of the file is saved before the assistant's first change in a reply (see *Safety and permissions*); there is no automatic undo there, so open the copy to go back. Connected files and the testing tools work between Excel workbooks only.
+There is no undo in Word and PowerPoint, so save the file first. Connected files and the testing tools work between Excel workbooks only.
 
 ## In a browser tab
 
@@ -90,7 +90,7 @@ Ask for it in plain words, for example *"Compare the totals in this sheet with t
 
 What to expect when something is done in the other file:
 
-- The request appears in the other file's chat as a message *From <app> · <file name>*, and its changes are listed in that file's **Changes** like any other edit. There is no undo, so save that file first.
+- The request appears in the other file's chat as a message *From <app> · <file name>*, and its changes are listed in that file's **Changes** like any other edit. Save that file first.
 - That file's own Ask/Auto setting applies. In *Ask* mode its change prompts appear **in that window**, so switch to it to approve them; the asker waits up to 10 minutes.
 - If the other file fails or you stop it there, the asker is told it failed (with the reason), not that it finished. If the asker is stopped first, the request is not run.
 - A file that is busy with its own request is refused at once; try again when it has finished. A file needs a provider selected in its own pane.
@@ -150,15 +150,8 @@ Cells that already hold something are not overwritten unless you agree; cells th
 ## Safety and permissions
 
 - **Ask / Auto** (next to the prompt): *Ask* approves each change, *Auto* approves automatically, including overwriting non-empty cells. In *Ask* mode, overwriting existing data needs your OK.
-- **Undo.** Excel's own `Ctrl+Z` cannot undo what the assistant does (Office.js writes do not go on Excel's undo stack), so Excel Partner keeps its own record. Open **Changes**: each edit has an **Undo** button, and **Undo last reply** puts back everything the assistant changed in its latest reply, newest first.
-  - Put back: values, formulas, number formats, fills, fonts, borders, alignment, merged cells, column widths and row heights of the cells an edit touched (`write_range`, `set_formula`, `set_cells`, `clear_range`, `format_range`, `find_replace`, `copy_to`, `sort_range`, `merge_range`, `resize_range`) and rows added by `insert_rows`.
-  - **Cells you changed after the assistant's edit are never overwritten**: they keep your version and the undo message lists them. Undoing twice does nothing the second time.
-  - Not put back: cell notes, hyperlinks, formatting of single characters inside a cell, data validation and conditional formats on cleared or copied cells, charts, pivot tables, tables, shapes, sheet operations, named ranges, filters, print layout, row/column structure changes and anything done through `execute_office_js`. These show **Can't undo** in Changes.
-  - Before the first of those in a reply, a copy of the whole file is saved to `%LOCALAPPDATA%\Excel Partner\backups\` as `.xlsx`, `.docx` or `.pptx` (newest 10 kept; `office-partner backups` lists them). Restoring is "open the copy". If no copy could be saved, the change list says so.
-  - An edit over 50,000 cells (20,000 when formatting is involved) is not recorded. The undo history lives in memory only: reloading the task pane clears it, and old entries expire after about 500,000 recorded cells.
-  - Excel tables that grew because the assistant wrote just below them are shrunk back.
-  - With several workbooks open, Excel can refuse the undo ("the workbook has lost focus"): bring that workbook to the front and press Undo again; nothing was changed.
-- Other changes stay one-way. Save important work first and review what was changed.
+- **No undo.** Excel's own `Ctrl+Z` cannot undo what the assistant does (Office.js writes do not go on Excel's undo stack), and Office Partner keeps no copy of your file, so large files stay fast. Save important work first and review what was changed in **Changes**.
+- Large writes are sent in batches of about 15,000 cells with recalculation paused (the previous calculation mode is always restored), so Excel stays responsive.
 - Python and skill scripts (`run_python`, `run_skill_script`) run with **your Windows user permissions** and can reach local files and the network. Keep them on **Ask** unless you trust the task.
 - `execute_office_js` (free-form Office.js) is on by default. Disable it with `BRIDGE_ALLOW_OFFICE_JS=0` or `"allowOfficeJs": false` in `config.json`, then restart the bridge.
 - Selected cells and workbook context are sent to your chosen provider as part of each request. Their data policy applies.
@@ -178,7 +171,6 @@ Cells that already hold something are not overwritten unless you agree; cells th
 | `office-partner logs` | Show recent log lines |
 | `office-partner login <name> <url>` / `sessions` / `logout <name>` | Save, list and delete signed-in sessions for the test assistant (see Testing above) |
 | `office-partner knowledge [<url>]` / `show` / `delete` | See and manage what the assistant has learned about each system |
-| `office-partner backups` | List the workbook copies saved before changes Undo cannot reverse (and where the folder is) |
 | `office-partner update [--from <spec\|.tgz>]` | Install the latest release (or the given package); same as Settings > Updates |
 | `office-partner uninstall` | Stop, unregister and remove start-up and certificate trust |
 | `office-partner help` | Full CLI usage |

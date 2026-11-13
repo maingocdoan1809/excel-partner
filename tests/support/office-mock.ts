@@ -401,6 +401,20 @@ export class MockSheet {
   getRangeByIndexes(r: number, c: number, rows: number, cols: number) {
     return makeRange(this, r, c, rows, cols);
   }
+  /** Excel's Find: matches the displayed text; every hit cell becomes its own area. */
+  findAllOrNullObject(term: string, options: { matchCase?: boolean; completeMatch?: boolean } = {}) {
+    const hits: MockRange[] = [];
+    const needle = options.matchCase ? term : term.toLowerCase();
+    const keys = [...this.cells.keys()].map((key) => key.split(",").map(Number) as [number, number]).sort((x, y) => x[0] - y[0] || x[1] - y[1]);
+    for (const [r, c] of keys) {
+      const cell = makeRange(this, r, c, 1, 1).text[0]![0]!;
+      const hay = options.matchCase ? cell : cell.toLowerCase();
+      if (cell !== "" && (options.completeMatch ? hay === needle : hay.includes(needle))) hits.push(makeRange(this, r, c, 1, 1));
+    }
+    this.book.nativeSearches++;
+    this.book.lastFindTerm = term;
+    return { isNullObject: hits.length === 0, areas: { items: hits, load() {} }, load() {} };
+  }
   getUsedRangeOrNullObject() {
     let r0 = Infinity, c0 = Infinity, r1 = -1, c1 = -1;
     for (const [key, cell] of this.cells) {
@@ -487,9 +501,10 @@ export class MockRange {
       }),
     );
   }
-  set numberFormat(grid: string[][]) {
-    this.assertShape(grid);
-    this.style({ numberFormat: grid[0]![0] });
+  /** Like Office.js: a single value applies to every cell, a grid must match the range. */
+  set numberFormat(grid: string[][] | string) {
+    if (typeof grid !== "string") this.assertShape(grid);
+    this.style({ numberFormat: typeof grid === "string" ? grid : grid[0]![0] });
   }
   private assertShape(grid: unknown[][]) {
     if (grid.length !== this.rowCount || grid.some((row) => row.length !== this.columnCount)) {
@@ -630,6 +645,21 @@ export class MockRange {
   getCell(r: number, c: number) {
     return makeRange(this.sheet, this.rowIndex + r, this.columnIndex + c, 1, 1);
   }
+  /** Part of this range that holds a value or formula. */
+  getUsedRangeOrNullObject() {
+    let r0 = Infinity, c0 = Infinity, r1 = -1, c1 = -1;
+    for (const [key, cell] of this.sheet.cells) {
+      if (cell.v === null && cell.f === null) continue;
+      const [r, c] = key.split(",").map(Number) as [number, number];
+      if (r < this.rowIndex || r >= this.rowIndex + this.rowCount || c < this.columnIndex || c >= this.columnIndex + this.columnCount) continue;
+      r0 = Math.min(r0, r); c0 = Math.min(c0, c); r1 = Math.max(r1, r); c1 = Math.max(c1, c);
+    }
+    if (r1 < 0) return makeRange(this.sheet, 0, 0, 1, 1, true);
+    return makeRange(this.sheet, r0, c0, r1 - r0 + 1, c1 - c0 + 1);
+  }
+  getOffsetRange(dr: number, dc: number) {
+    return makeRange(this.sheet, this.rowIndex + dr, this.columnIndex + dc, this.rowCount, this.columnCount);
+  }
   getResizedRange(dr: number, dc: number) {
     return makeRange(this.sheet, this.rowIndex, this.columnIndex, this.rowCount + dr, this.columnCount + dc);
   }
@@ -715,6 +745,12 @@ function computeFormula(sheet: MockSheet, formula: string): number | string {
 export class MockWorkbook {
   readonly worksheetActivated = new MockEvents();
   readonly trackedObjects = new Set<object>();
+  /** Calculation mode as set by the code under test, and how often a one-sync suspend was requested. */
+  calculationMode = "Automatic";
+  nativeSearches = 0;
+  lastFindTerm = "";
+  suspendedScreen = 0;
+  readonly calculationModes: string[] = [];
   sheets: MockSheet[] = [];
   active = 0;
   selection = { sheet: "Sheet1", address: "A1" };
@@ -761,6 +797,12 @@ export function installOfficeMock(book: MockWorkbook): void {
     trackedObjects: {
       add: (object: object) => { book.trackedObjects.add(object); },
       remove: (object: object) => { book.trackedObjects.delete(object); },
+    },
+    application: {
+      get calculationMode() { return book.calculationMode; },
+      set calculationMode(mode: string) { book.calculationMode = mode; book.calculationModes.push(mode); },
+      load: () => undefined,
+      suspendScreenUpdatingUntilNextSync: () => { book.suspendedScreen++; },
     },
     workbook: {
       worksheets: {
@@ -824,6 +866,7 @@ export function installOfficeMock(book: MockWorkbook): void {
     RangeUnderlineStyle: { single: "Single", none: "None" },
     InsertShiftDirection: { down: "Down", right: "Right" },
     DeleteShiftDirection: { up: "Up", left: "Left" },
+    CalculationMode: { automatic: "Automatic", manual: "Manual", automaticExceptTables: "AutomaticExceptTables" },
     ClearApplyTo: { all: "All", contents: "Contents", formats: "Formats" },
     RangeCopyType: { formulas: "Formulas", all: "All", values: "Values", formats: "Formats" },
     WorksheetPositionType: { after: "After", before: "Before", beginning: "Beginning", end: "End" },

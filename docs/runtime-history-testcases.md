@@ -79,8 +79,8 @@ providers. Real provider prompts and real Office writes remain opt-in.
 - UI keeps a bounded durable outbox; inability to queue is visible. No claim of
   guaranteed recovery after a crash if both bridge and browser storage fail.
 - Retention is explicit. Database storage, rendered pages and model context have
-  separate limits. Office undo stays memory-only; stored change records do not
-  make prior document edits undoable.
+  separate limits. There is no Office undo; stored change records only
+  list what was changed.
 - Old app releases may read their retained localStorage snapshot; schema upgrades
   must be additive/versioned and fail closed for unsupported future versions.
 

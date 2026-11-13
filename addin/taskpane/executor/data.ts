@@ -5,7 +5,7 @@ import {
   type FilterRangeInput,
   type SortRangeInput,
 } from "../../../protocol/src/index.js";
-import { ToolFailure, resolveSheet, stripSheet } from "./common.js";
+import { ToolFailure, resolveSheet, stripSheet, runExcel } from "./common.js";
 import { loadGeometry } from "./write.js";
 
 /** Relative 0-based column index of a sheet column letter inside a range, or a clear error. */
@@ -18,7 +18,7 @@ export function relativeColumn(letter: string, firstColumnIndex: number, columnC
 }
 
 export async function sortRange(input: SortRangeInput): Promise<unknown> {
-  return Excel.run(async (context) => {
+  return runExcel(async (context) => {
     const sheet = resolveSheet(context, input.sheet);
     sheet.load("name");
     const range = sheet.getRange(input.address);
@@ -110,7 +110,7 @@ async function describeFilter(context: Excel.RequestContext, filter: Excel.AutoF
 }
 
 export async function filterRange(input: FilterRangeInput): Promise<unknown> {
-  return Excel.run(async (context) => {
+  return runExcel(async (context) => {
     const sheet = resolveSheet(context, input.sheet);
     sheet.load("name");
     const filter = sheet.autoFilter;

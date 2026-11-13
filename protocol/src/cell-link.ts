@@ -16,8 +16,9 @@ export interface CellTarget {
   address: string;
 }
 
-const MAX_ROW = 1_048_576;
-const MAX_COLUMN = 16_384;
+/** Excel's sheet limits. */
+export const MAX_ROW = 1_048_576;
+export const MAX_COLUMN = 16_384;
 const MAX_NAME = 255;
 
 /** One cell such as `B2` or `$B$2`. */

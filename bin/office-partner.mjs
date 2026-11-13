@@ -296,15 +296,6 @@ async function testScripts(rest) {
   if (!sites.length) console.log("No scripts yet. The assistant saves one for each test case that passes or fails because of the application.");
   for (const site of sites) console.log(`  ${site}`);
 }
-async function workbookBackups(rest) {
-  const { DocumentBackups } = await import(pathToFileURL(path.join(root, "dist", "bridge", "src", "document-backups.js")).href);
-  const store = new DocumentBackups(path.join(dataDir, "backups"));
-  if (rest[0] === "path") { console.log(store.dir); return; }
-  console.log(`Backups folder: ${store.dir}`);
-  const list = store.list();
-  if (!list.length) console.log("No backups yet. The assistant saves a copy of the workbook, document or presentation before it does something Undo cannot reverse (free-form Office.js, deleting sheets, charts, pivots...). Only the newest 10 are kept.");
-  for (const item of list) console.log(`  ${item.savedAt.slice(0, 19).replace("T", " ")}  ${String(Math.max(1, Math.round(item.size / 1024))).padStart(7)} KB  ${item.file}`);
-}
 const TARGETS = { addin: "addin", app: "addin", gateway: "gateway", all: "all" };
 const HELP = `Usage: office-partner <command> [addin|gateway|all]
 
@@ -328,7 +319,6 @@ const HELP = `Usage: office-partner <command> [addin|gateway|all]
   login      Sign in once for the QA assistant: login <name> <url> [--origin <url>]. Also: sessions, logout <name>.
   knowledge  What the assistant has learned about each system: knowledge [<url>] | show <url> <note> | delete <url> <note> | path.
   scripts    Playwright regression scripts saved per test case: scripts [<url>] | show <url> <case id> | delete <url> <case id> | path.
-  backups    Copies of workbooks (.xlsx), documents (.docx) and presentations (.pptx) saved before changes Undo cannot reverse: backups | path.
   allow-host Let the bridge answer to another hostname/IP (e.g. a WSL IP): allow-host <name> [--remove]; no name lists them.
   update     Install the latest release and refresh both (always the whole package). --from <spec|.tgz> installs that instead.
   uninstall  Stop and remove registration and startup entries.
@@ -392,7 +382,6 @@ async function main() {
   if (command === "login" || command === "sessions" || command === "logout") { await testSessions(command, args.slice(1)); return; }
   if (command === "knowledge") { await siteKnowledge(args.slice(1)); return; }
   if (command === "scripts") { await testScripts(args.slice(1)); return; }
-  if (command === "backups") { await workbookBackups(args.slice(1)); return; }
   if (command === "allow-host") { allowHost(args.slice(1).filter(arg => !arg.startsWith("--")), args.includes("--remove")); return; }
   const flags = args.filter(arg => arg.startsWith("--"));
   const positional = args.filter(arg => !arg.startsWith("--"));

@@ -11,7 +11,7 @@ import {
   type ShapeInfo,
   type UpdateShapeInput,
 } from "../../../protocol/src/index.js";
-import { ToolFailure, resolveSheet } from "./common.js";
+import { ToolFailure, resolveSheet, runExcel } from "./common.js";
 
 /** Cells are inset a little so shapes drawn "over" a range do not touch the gridlines. */
 const ANCHOR_INSET_PT = 2;
@@ -324,7 +324,7 @@ export async function readActiveShape(context: Excel.RequestContext): Promise<{ 
 
 export async function listShapes(input: ListShapesInput): Promise<unknown> {
   requireShapeApi();
-  return Excel.run(async (context) => {
+  return runExcel(async (context) => {
     const sheet = resolveSheet(context, input.sheet);
     sheet.load("name");
     sheet.shapes.load(`items/${BASE_PROPS.split(",").join(",items/")}`);
@@ -414,7 +414,7 @@ export function validateFlow(shapes: ShapeInfo[], partial: boolean) {
 
 export async function addShape(input: AddShapeInput): Promise<unknown> {
   requireShapeApi();
-  return Excel.run(async (context) => {
+  return runExcel(async (context) => {
     const sheet = resolveSheet(context, input.sheet);
     sheet.load("name");
     const box = (await resolveBox(context, sheet, input))!;
@@ -458,7 +458,7 @@ const BODY_ONLY_KEYS = ["text", "fillColor", "fontColor", "fontSize", "fontName"
 
 export async function updateShape(input: UpdateShapeInput): Promise<unknown> {
   requireShapeApi();
-  return Excel.run(async (context) => {
+  return runExcel(async (context) => {
     const sheet = resolveSheet(context, input.sheet);
     sheet.load("name");
     const shape = await findShape(context, sheet, input.name);
@@ -498,7 +498,7 @@ export async function updateShape(input: UpdateShapeInput): Promise<unknown> {
 
 export async function deleteShapes(input: DeleteShapesInput): Promise<unknown> {
   requireShapeApi();
-  return Excel.run(async (context) => {
+  return runExcel(async (context) => {
     const sheet = resolveSheet(context, input.sheet);
     sheet.load("name");
     const found = input.names.map((name) => {
@@ -532,7 +532,7 @@ function styleLine(line: Excel.Shape, input: { arrow: "end" | "both" | "none" | 
 
 export async function addLine(input: AddLineInput): Promise<unknown> {
   requireShapeApi();
-  return Excel.run(async (context) => {
+  return runExcel(async (context) => {
     const sheet = resolveSheet(context, input.sheet);
     sheet.load("name");
     const start = sheet.getRange(input.from);
@@ -567,7 +567,7 @@ export async function addLine(input: AddLineInput): Promise<unknown> {
 
 export async function addConnector(input: AddConnectorInput): Promise<unknown> {
   requireShapeApi();
-  return Excel.run(async (context) => {
+  return runExcel(async (context) => {
     const sheet = resolveSheet(context, input.sheet);
     sheet.load("name");
     const from = await findShape(context, sheet, input.from, "source shape");

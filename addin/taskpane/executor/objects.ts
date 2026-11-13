@@ -6,7 +6,7 @@ import {
   type ModifyTableInput,
   type SheetRef,
 } from "../../../protocol/src/index.js";
-import { ToolFailure, resolveSheet, stripSheet } from "./common.js";
+import { ToolFailure, resolveSheet, stripSheet, runExcel } from "./common.js";
 
 const pascal = (text: string) => text.charAt(0).toUpperCase() + text.slice(1);
 const suffix = () => Math.random().toString(36).slice(2, 7);
@@ -47,7 +47,7 @@ async function locateChart(context: Excel.RequestContext, ref: SheetRef | undefi
 /* -------------------------------------------------------------------------- */
 
 export async function getObjects(input: GetObjectsInput): Promise<unknown> {
-  return Excel.run(async (context) => {
+  return runExcel(async (context) => {
     let sheets: Excel.Worksheet[];
     if (input.sheet) sheets = [resolveSheet(context, input.sheet)];
     else {
@@ -148,7 +148,7 @@ function styleChart(chart: Excel.Chart, input: ModifyChartInput): void {
 }
 
 export async function modifyChart(input: ModifyChartInput): Promise<unknown> {
-  return Excel.run(async (context) => {
+  return runExcel(async (context) => {
     const seriesBy = { auto: Excel.ChartSeriesBy.auto, rows: Excel.ChartSeriesBy.rows, columns: Excel.ChartSeriesBy.columns }[input.seriesBy];
 
     if (input.operation === "create") {
@@ -196,7 +196,7 @@ function assertFields(requested: string[], available: string[]): void {
 }
 
 export async function modifyPivotTable(input: ModifyPivotTableInput): Promise<unknown> {
-  return Excel.run(async (context) => {
+  return runExcel(async (context) => {
     const workbookPivots = context.workbook.pivotTables;
     const existing = workbookPivots.getItemOrNullObject(input.name);
     existing.load("isNullObject");
@@ -272,7 +272,7 @@ function addFields(pt: Excel.PivotTable, input: ModifyPivotTableInput): void {
 /* -------------------------------------------------------------------------- */
 
 export async function modifyTable(input: ModifyTableInput): Promise<unknown> {
-  return Excel.run(async (context) => {
+  return runExcel(async (context) => {
     if (input.operation === "create") {
       const sheet = resolveSheet(context, input.sheet);
       sheet.load("name");

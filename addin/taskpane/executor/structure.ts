@@ -4,10 +4,10 @@ import {
   type InsertRowsInput,
   type ModifyStructureInput,
 } from "../../../protocol/src/index.js";
-import { ToolFailure, resolveSheet } from "./common.js";
+import { ToolFailure, resolveSheet, runExcel } from "./common.js";
 
 export async function insertRows(input: InsertRowsInput): Promise<unknown> {
-  return Excel.run(async (context) => {
+  return runExcel(async (context) => {
     const sheet = resolveSheet(context, input.sheet);
     sheet.load("name");
     const rowNumber = Number.parseInt(input.at.replace(/[^0-9]/g, ""), 10);
@@ -23,7 +23,7 @@ export async function insertRows(input: InsertRowsInput): Promise<unknown> {
 }
 
 export async function modifyStructure(input: ModifyStructureInput): Promise<unknown> {
-  return Excel.run(async (context) => {
+  return runExcel(async (context) => {
     const sheet = resolveSheet(context, input.sheet);
     sheet.load("name");
     const isRows = input.dimension === "rows";

@@ -72,8 +72,6 @@ export interface BridgeClientHandlers {
   /** Another workbook's assistant asked this one to do something. Run it as a turn, or call declineDelegation. */
   onDelegatedPrompt?(request: DelegatedPromptMessage): void;
   onError(message: string): void;
-  /** Wraps every workbook tool run, so edits can be recorded for undo. Reads pass straight through. */
-  runTool?(context: { callId: string; requestId: string }, tool: string, args: unknown, execute: (tool: string, args: unknown) => Promise<ToolResult>): Promise<ToolResult>;
   /** A tool request from the bridge finished running in this workbook. */
   onToolExecuted?(tool: string, args: unknown, result: ToolResult, context: { callId: string; requestId: string }): void;
 }
@@ -84,6 +82,14 @@ const MAX_BACKOFF_MS = 15_000;
  * Owns the task pane side of the bridge protocol: handshake, reconnect, tool
  * execution and outbound messages. It never talks to a CLI directly.
  */
+/** Excel works on one thing at a time, so changes to the file queue up here whichever client sends them. */
+let writeChain: Promise<unknown> = Promise.resolve();
+function serialWrite<T>(work: () => Promise<T>): Promise<T> {
+  const result = writeChain.then(work, work);
+  writeChain = result.catch(() => undefined);
+  return result;
+}
+
 export class BridgeClient {
   private ws: WebSocket | null = null;
   private reconnectAttempt = 0;
@@ -216,14 +222,6 @@ export class BridgeClient {
   /** Replace this installation with the latest release; the bridge stops and comes back by itself. */
   async startUpdate(): Promise<void> {
     await this.sessionFetch("/session/update", { method: "POST", body: "{}" });
-  }
-
-  /** Store a copy of the open workbook on this computer; used before changes that cannot be undone. */
-  async saveBackup(workbookName: string, bytes: Uint8Array): Promise<{ file: string; folder: string }> {
-    const data = await this.sessionFetch<{ file: string; folder: string }>("/session/backup", {
-      method: "POST", body: bytes as BodyInit, headers: { "x-file-name": encodeURIComponent(workbookName), "content-type": "application/octet-stream" },
-    });
-    return { file: data.file, folder: data.folder };
   }
 
   async listWorkspaces(documentUrl: string, workbookName: string): Promise<{ roots: WorkspaceRoot[]; defaultError: string | null }> {
@@ -487,11 +485,13 @@ export class BridgeClient {
     }
     const controller = new AbortController();
     this.operations.add(controller);
-    const execute = (name: string, input: unknown): Promise<ToolResult> => controller.signal.aborted
+    const run = (name: string, input: unknown): Promise<ToolResult> => controller.signal.aborted
       ? Promise.resolve({ ok: false, error: { code: "cancelled", message: "The request ended before this change could run." } })
       : activeHost().execute(name, input, controller.signal);
+    // Changes to the file run one at a time, so two big writes never hit Excel together. Reads run straight away.
+    const execute = (name: string, input: unknown): Promise<ToolResult> => activeHost().writeTools.has(name) ? serialWrite(() => run(name, input)) : run(name, input);
     const result = message.tool === "__authorize_mcp"
-      ? { ok: true as const, data: { approved: this.permissionMode === "auto" || await this.askPermission("Allow external MCP tool?", "This tool can access external services or local files. Office undo does not apply.", "Allow", message.timeoutMs, JSON.stringify(message.args, null, 2)) } }
+      ? { ok: true as const, data: { approved: this.permissionMode === "auto" || await this.askPermission("Allow external MCP tool?", "This tool can access external services or local files.", "Allow", message.timeoutMs, JSON.stringify(message.args, null, 2)) } }
       : message.tool === "__authorize_provider_tool"
       ? { ok: true as const, data: { approved: this.permissionMode === "auto" || await this.askPermission(
         "Allow OpenCode tool?", "OpenCode requests permission to run this tool on your computer.", "Allow tool", message.timeoutMs,
@@ -526,9 +526,7 @@ export class BridgeClient {
         message.tool,
         message.args,
         this.permissionMode,
-        (tool, args) => this.handlers.runTool
-          ? this.handlers.runTool({ callId: message.callId, requestId: message.requestId }, tool, args, execute)
-          : execute(tool, args),
+        execute,
         (detail) => this.askPermission(`Allow ${activeHost().noun} change?`, detail, "Allow change", message.timeoutMs,
           JSON.stringify(message.args, null, 2).slice(0, 8000)),
       );

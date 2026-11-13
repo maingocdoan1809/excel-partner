@@ -9,7 +9,8 @@ import {
   type SetCellsInput,
   type Size,
 } from "../../../protocol/src/index.js";
-import { ToolFailure, normalizeValues, resolveSheet, stripSheet } from "./common.js";
+import { ToolFailure, normalizeValues, resolveSheet, stripSheet, runExcel } from "./common.js";
+import { copyInBatches, inBatches, manualCalculationIf, needsBatches } from "./bulk.js";
 import {
   applyBorders,
   applyCellStyle,
@@ -33,7 +34,7 @@ type CellEntry = CellValue | [CellValue, string] | [CellValue, string, string];
 const a1 = (row: number, col: number) => `${numberToColumn(col + 1)}${row + 1}`;
 
 export async function getCellRanges(input: GetCellRangesInput): Promise<unknown> {
-  return Excel.run(async (context) => {
+  return runExcel(async (context) => {
     const sheet = resolveSheet(context, input.sheet);
     sheet.load("name");
     const used = sheet.getUsedRangeOrNullObject(true);
@@ -170,7 +171,7 @@ async function loadNotes(context: Excel.RequestContext, sheet: Excel.Worksheet):
 /* -------------------------------------------------------------------------- */
 
 export async function setCells(input: SetCellsInput): Promise<unknown> {
-  return Excel.run(async (context) => {
+  return runExcel(async (context) => {
     const sheet = resolveSheet(context, input.sheet);
     sheet.load("name");
     const entries = Object.entries(input.cells).map(([address, spec]) => ({ address: address.replace(/\$/g, ""), spec, pos: cellPosition(address) }));
@@ -220,28 +221,33 @@ export async function setCells(input: SetCellsInput): Promise<unknown> {
 
     const formulaCells: string[] = [];
     const noteEntries: Array<[string, string]> = [];
-    for (const { address, spec } of entries) {
-      const cell = sheet.getRange(address);
-      if (spec.formula !== undefined) {
-        cell.formulas = [[spec.formula.startsWith("=") ? spec.formula : `=${spec.formula}`]];
-        formulaCells.push(address);
-      } else if (spec.value !== undefined) {
-        cell.values = [[spec.value]];
+    const writeEntries = (from: number, count: number) => {
+      for (const { address, spec } of entries.slice(from, from + count)) {
+        const cell = sheet.getRange(address);
+        if (spec.formula !== undefined) {
+          cell.formulas = [[spec.formula.startsWith("=") ? spec.formula : `=${spec.formula}`]];
+          formulaCells.push(address);
+        } else if (spec.value !== undefined) {
+          cell.values = [[spec.value]];
+        }
+        if (spec.style) {
+          applyCellStyle(cell, spec.style);
+          if (spec.style.numberFormat) cell.numberFormat = [[spec.style.numberFormat]];
+        }
+        if (spec.borders) applyBorders(cell, spec.borders);
+        if (spec.note !== undefined) noteEntries.push([address, spec.note]);
       }
-      if (spec.style) {
-        applyCellStyle(cell, spec.style);
-        if (spec.style.numberFormat) cell.numberFormat = [[spec.style.numberFormat]];
-      }
-      if (spec.borders) applyBorders(cell, spec.borders);
-      if (spec.note !== undefined) noteEntries.push([address, spec.note]);
-    }
-    if (noteEntries.length > 0) await writeNotesFor(context, sheet, noteEntries);
+    };
 
-    let filled: Excel.Range = source;
-    if (input.copyTo) {
-      filled = sheet.getRange(input.copyTo);
-      filled.copyFrom(source, Excel.RangeCopyType.all);
-    }
+    const filled = input.copyTo ? sheet.getRange(input.copyTo) : source;
+    const copyGeometry = input.copyTo ? await loadGeometry(context, filled) : null;
+    const kind = entries.some(({ spec }) => spec.formula !== undefined) ? "formulas" : "values";
+    // Many cells, or a big copy: write them in batches sized by measured time, with calculation paused.
+    await manualCalculationIf(context, needsBatches(kind, entries.length) || (copyGeometry !== null && needsBatches("fill", copyGeometry.rowCount * copyGeometry.columnCount)), async () => {
+      await inBatches(context, kind, entries.length, 1, writeEntries);
+      if (noteEntries.length > 0) await writeNotesFor(context, sheet, noteEntries);
+      if (copyGeometry) await copyInBatches(context, source, bounds.r1 - bounds.r0 + 1, filled, copyGeometry.rowCount, copyGeometry.columnCount, Excel.RangeCopyType.all);
+    });
 
     const messages: string[] = [];
     if (input.resizeWidth) applySize(source.getEntireColumn(), input.resizeWidth, "width");
@@ -308,7 +314,7 @@ async function writeNotesFor(context: Excel.RequestContext, sheet: Excel.Workshe
 /* -------------------------------------------------------------------------- */
 
 export async function copyTo(input: CopyToInput): Promise<unknown> {
-  return Excel.run(async (context) => {
+  return runExcel(async (context) => {
     const sheet = resolveSheet(context, input.sheet);
     sheet.load("name");
     const source = sheet.getRange(input.source);
@@ -347,7 +353,7 @@ function applySize(range: Excel.Range, size: Size, axis: "width" | "height"): vo
 }
 
 export async function resizeRange(input: ResizeRangeInput): Promise<unknown> {
-  return Excel.run(async (context) => {
+  return runExcel(async (context) => {
     const sheet = resolveSheet(context, input.sheet);
     sheet.load("name");
     const range = input.address ? sheet.getRange(input.address) : sheet.getRange();
@@ -363,7 +369,7 @@ export async function resizeRange(input: ResizeRangeInput): Promise<unknown> {
 const MAX_IMAGE_BASE64 = 1_500_000;
 
 export async function readRangeImage(input: ReadRangeImageInput): Promise<unknown> {
-  return Excel.run(async (context) => {
+  return runExcel(async (context) => {
     const sheet = resolveSheet(context, input.sheet);
     sheet.load("name");
     const range = sheet.getRange(input.address);

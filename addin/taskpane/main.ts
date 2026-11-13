@@ -8,13 +8,13 @@ import { setupUsagePanel } from "./ui/usage-panel.js";
 import { setupHistoryPanel } from "./ui/history-panel.js";
 import { setupTemplatePanel } from "./ui/template-panel.js";
 import { watchShapeSelectionEvents } from "./executor/selection-events.js";
+import { noteUserActivity, recoverCalculationMode } from "./executor/bulk.js";
 import { activeHost, initHost } from "./host/index.js";
 import { HOST_BASELINE, isSupported } from "./host/requirements.js";
 import { monitorSelection } from "./ui/selection.js";
 import type { ProviderEvent, ProviderId } from "../../protocol/src/index.js";
 import { BridgeClient, randomId, type UploadedAttachment } from "./bridge-client.js";
 import type { PermissionMode } from "./permissions.js";
-import { UndoJournal } from "./executor/journal.js";
 import { setProposalReviewer } from "./executor/word/index.js";
 import { showProposalReview } from "./ui/proposal.js";
 import { setupUsagePopover } from "./ui/usage-popover.js";
@@ -134,9 +134,6 @@ const historyNotice = (text: string) => {
 };
 const store = new DurableHistory(() => client, () => activeHost().id, localStorage, historyNotice);
 let restoreChatId: string | null = null;
-const journal = new UndoJournal((tool) => activeHost().writeTools.has(tool), async () => client.saveBackup((await currentWorkbookName()) || activeHost().noun, await activeHost().readFile()));
-// Handle for end-to-end checks against a live workbook; it grants nothing execute_office_js does not already have.
-(globalThis as { __undoJournal?: UndoJournal }).__undoJournal = journal;
 let client: BridgeClient;
 let provider: ProviderId = loadProvider();
 let activeModel: string | null | undefined;
@@ -295,7 +292,7 @@ const usagePanel = setupUsagePanel({
 const { refreshUsage, renderUsage, exportUsage } = usagePanel;
 
 const { recordChange, renderChanges } = setupChangesPanel({
-  getSession: () => session, journal, schedulePersist, goTo, elements: els,
+  getSession: () => session, schedulePersist, goTo, elements: els,
 });
 
 const { renderHistory, continueViewedSession, deleteViewedSession, clearHistory } = setupHistoryPanel({
@@ -320,6 +317,8 @@ Office.onReady((info) => {
   // Excel, Word and PowerPoint share this pane. Any other Office application has no tools here.
   if (!["Excel", "Word", "PowerPoint"].includes(String(info.host))) return;
   initHost(String(info.host));
+  // A previous pane that stopped mid-write may have left calculation on manual.
+  if (activeHost().id === "excel") void recoverCalculationMode().catch(() => undefined);
   applyHostBranding();
   {
     // The manifest only asks for what every host has; what this host needs is checked here, so an old Office says so.
@@ -375,7 +374,6 @@ Office.onReady((info) => {
     },
     onProviderStatus: ({ provider: id, detection }) => providerPicker.onStatus(id, detection),
     onProviderEvent: handleEvent,
-    runTool: (context, tool, args, execute) => journal.run(context, tool, args, execute),
     onBrowserFrame: (frame) => { if (frame.requestId === currentRequestId) browserView.push(frame); },
     readWorkbookName,
     onConnectedFiles: (files) => {
@@ -1451,6 +1449,8 @@ function watchSelection(): void {
   // the active object. This is a one-shot debounce, not a polling timer.
   let selectionTimer: number | undefined;
   const selectionChanged = () => {
+    // A big write in the background gives way while the person is moving around the workbook.
+    noteUserActivity();
     window.clearTimeout(selectionTimer);
     selectionTimer = window.setTimeout(() => monitor.refresh(), 80);
   };

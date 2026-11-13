@@ -17,7 +17,7 @@ Shared MCP connection management: McpServers -> stdio / Streamable HTTP
 - `runtime/src/office-runtime.ts`: validation, host/capability gates, dispatch and external-tool approval. Existing domain helpers/session models remain under `bridge/src`; they are reused, not copied into the gateway.
 - `runtime/src/mcp-servers.ts`: persisted server configuration and per-pane MCP connection lifecycle.
 - `runtime/src/results.ts`: shared conversion for external MCP results; gateway retains its separate API wire conversion for official-client tool results.
-- The Office Partner task pane owns its host executor, Ask/Auto prompts, undo journal and backup capture. Official Claude clients own their independent Office executors.
+- The Office Partner task pane owns its host executor, Ask/Auto prompts. Official Claude clients own their independent Office executors.
 
 No provider gets an external server’s command configuration. Enabled servers expose their actual tools and input schemas directly, using stable names such as `ext_<server namespace>__summarize_numbers`. Disabled servers contribute no tools. There are no generic list/call wrapper tools or discovery prompts.
 

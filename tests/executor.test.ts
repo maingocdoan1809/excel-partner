@@ -1,13 +1,15 @@
-import { beforeEach, describe, expect, it } from "vitest";
-import { getSelectionLabel } from "../addin/taskpane/executor/read.js";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { SEARCH_TUNING, getSelectionLabel } from "../addin/taskpane/executor/read.js";
 import { executeTool } from "../addin/taskpane/executor/index.js";
 import { parseToolInput, SelectionSnapshotSchema } from "../protocol/src/index.js";
+import { BULK, inBatches, noteUserActivity, recoverCalculationMode, withManualCalculation } from "../addin/taskpane/executor/bulk.js";
 import { MockWorkbook, MockSheet, MockShape, installOfficeMock } from "./support/office-mock.js";
 
 let book: MockWorkbook;
 let sheet: MockSheet;
 
 beforeEach(() => {
+  BULK.pause = async () => undefined;
   book = new MockWorkbook();
   sheet = book.addSheet("Sheet1");
   book.fill("Sheet1", [
@@ -74,6 +76,220 @@ describe("reading", () => {
 
   it("reports a missing sheet with a typed error", async () => {
     expectError(await call("read_range", { address: "A1", sheet: { name: "Nope" } }), "sheet_not_found");
+  });
+});
+
+describe("searching a large sheet", () => {
+  afterEach(() => { SEARCH_TUNING.nativeCells = 100_000; });
+
+  it("uses Excel's Find above the size threshold and returns only the hits", async () => {
+    SEARCH_TUNING.nativeCells = 4;
+    book.fill("Sheet1", [["Banana", "x"]], "E1");
+    sheet.setCell(9, 6, { v: "banana split", f: null });
+    const result = await call("search_data", { searchTerm: "banana" });
+    expect(book.nativeSearches).toBe(1);
+    expect(result).toMatchObject({ ok: true, data: { totalFound: 2, matches: [{ address: "E1" }, { address: "G10" }], note: expect.stringContaining("Find") } });
+  });
+
+  it("searches for the literal text, not for Excel's wildcards", async () => {
+    SEARCH_TUNING.nativeCells = 4;
+    await call("search_data", { searchTerm: "a*b?~" });
+    expect(book.lastFindTerm).toBe("a~*b~?~~");
+  });
+
+  it("keeps the exact scan below the threshold and for regular expressions", async () => {
+    await call("search_data", { searchTerm: "apple" });
+    SEARCH_TUNING.nativeCells = 4;
+    await call("search_data", { searchTerm: "app.*", useRegex: true });
+    await call("search_data", { searchTerm: "apple", address: "A1:C3" });
+    expect(book.nativeSearches).toBe(0);
+  });
+});
+
+describe("formula-heavy writes", () => {
+  const block = (rows: number, formula: (row: number) => string) =>
+    Array.from({ length: rows }, (_, i) => [i + 1, formula(i + 2)]);
+
+  it("writes the first formula of a column once and fills it down", async () => {
+    const values = block(200, (row) => `=H${row - 1}*2`);
+    const result = await call("write_range", { address: "H1", values });
+    expect(result).toMatchObject({ ok: true, data: { rowsWritten: 200, timing: { filledDownColumns: 1 } } });
+    expect(book.get("Sheet1", "I200")).toBe("=H200*2");
+    expect(book.get("Sheet1", "I2")).toBe("=H2*2");
+  });
+
+  it("rewrites a row that the fill got wrong, so the result is what was asked for", async () => {
+    const values = block(200, (row) => (row === 51 ? "=H50*3" : `=H${row - 1}*2`));
+    await call("write_range", { address: "H1", values });
+    expect(book.get("Sheet1", "I50")).toBe("=H50*3");
+    expect(book.get("Sheet1", "I49")).toBe("=H49*2");
+    expect(book.get("Sheet1", "I51")).toBe("=H51*2");
+  });
+
+  it("does not fill a column that mixes formulas and plain values", async () => {
+    const values = block(100, (row) => `=H${row - 1}*2`);
+    values[10] = [11, 5 as never];
+    const result = await call("write_range", { address: "H1", values });
+    expect(result).toMatchObject({ ok: true });
+    expect((result as { data: { timing: { filledDownColumns?: number } } }).data.timing.filledDownColumns).toBeUndefined();
+    expect(book.get("Sheet1", "I11")).toBe(5);
+  });
+
+  it("fills set_formula down in batches with recalculation paused", async () => {
+    const result = await call("set_formula", { address: "H1:H30000", formula: "=ROW()" });
+    expect(result).toMatchObject({ ok: true, data: { timing: { batches: expect.any(Number) } } });
+    expect((result as { data: { timing: { batches: number } } }).data.timing.batches).toBeGreaterThan(1);
+    expect(book.calculationModes).toEqual(["Manual", "Automatic"]);
+  });
+});
+
+describe("other big edits", () => {
+  it("writes many set_cells formulas in batches with calculation paused", async () => {
+    const cells: Record<string, { formula: string }> = {};
+    for (let i = 1; i <= 1_800; i++) cells[`P${i}`] = { formula: `=${i}+1` };
+    const result = await call("set_cells", { cells });
+    expect(result).toMatchObject({ ok: true, data: { cellsWritten: 1_800 } });
+    expect(book.get("Sheet1", "P1800")).toBe("=1800+1");
+    expect(book.get("Sheet1", "P1")).toBe("=1+1");
+    expect(book.calculationModes).toEqual(["Manual", "Automatic"]);
+  });
+
+  it("clears a large range slice by slice, touching only the used part", async () => {
+    const values = Array.from({ length: 30_000 }, (_, i) => [i]);
+    await call("write_range", { address: "T1", values });
+    book.calculationModes.length = 0;
+    const result = await call("clear_range", { address: "T1:Z60000" });
+    expect(result).toMatchObject({ ok: true });
+    expect(book.get("Sheet1", "T1")).toBeNull();
+    expect(book.get("Sheet1", "T30000")).toBeNull();
+    expect(book.calculationModes).toEqual(["Manual", "Automatic"]);
+  });
+
+  it("formats a large range in slices and reports each setting once", async () => {
+    const result = await call("format_range", { address: "A1:H5000", format: { bold: true, numberFormat: "#,##0", columnWidth: 12, borders: "outline" } });
+    expect(result).toMatchObject({ ok: true, data: { applied: ["bold", "numberFormat", "columnWidth", "borders"] } });
+    // Formatting never changes a value, so calculation is left alone.
+    expect(book.calculationModes).toEqual([]);
+  });
+});
+
+describe("set_cells copyTo in batches", () => {
+  it("fills a long destination, including the short last repeat", async () => {
+    const result = await call("set_cells", { cells: { X1: { value: "a" }, X2: { value: "b" } }, copyTo: "X1000:X11000" });
+    expect(result).toMatchObject({ ok: true });
+    expect(book.get("Sheet1", "X1000")).toBe("a");
+    expect(book.get("Sheet1", "X1001")).toBe("b");
+    expect(book.get("Sheet1", "X11000")).toBe("a");
+    expect(book.get("Sheet1", "X11001")).toBeNull();
+  });
+});
+
+describe("calculation mode recovery", () => {
+  const KEY = "office-partner.calculation-mode-to-restore";
+  const store = new Map<string, string>();
+  beforeEach(() => {
+    store.clear();
+    (globalThis as { localStorage?: unknown }).localStorage = { getItem: (k: string) => store.get(k) ?? null, setItem: (k: string, v: string) => void store.set(k, v), removeItem: (k: string) => void store.delete(k) };
+  });
+  afterEach(() => { delete (globalThis as { localStorage?: unknown }).localStorage; });
+
+  it("puts the mode back when an earlier pane stopped long ago while calculation was paused", async () => {
+    store.set(KEY, JSON.stringify({ mode: "Automatic", at: Date.now() - 5 * 60_000 }));
+    book.calculationMode = "Manual";
+    expect(await recoverCalculationMode()).toBe("Automatic");
+    expect(book.calculationMode).toBe("Automatic");
+    expect(store.size).toBe(0);
+  });
+
+  it("leaves alone a mode that another pane is using right now, and one the person chose themselves", async () => {
+    store.set(KEY, JSON.stringify({ mode: "Automatic", at: Date.now() }));
+    book.calculationMode = "Manual";
+    expect(await recoverCalculationMode()).toBeNull();
+    expect(book.calculationMode).toBe("Manual");
+    store.set(KEY, JSON.stringify({ mode: "Automatic", at: Date.now() - 5 * 60_000 }));
+    book.calculationMode = "Automatic";
+    expect(await recoverCalculationMode()).toBeNull();
+  });
+
+  it("keeps the record when the mode cannot be restored, and reports the original error", async () => {
+    const failing = new Error("the work failed");
+    await expect(Excel.run((context) => withManualCalculation(context as never, async () => {
+      Object.defineProperty(book, "calculationMode", { configurable: true, get: () => "Manual", set: () => { throw new Error("restore failed"); } });
+      throw failing;
+    }))).rejects.toBe(failing);
+    expect(store.has(KEY)).toBe(true);
+    delete (book as { calculationMode?: unknown }).calculationMode;
+  });
+});
+
+describe("batch sizing", () => {
+  it("shrinks batches when a round trip is slow and grows them when it is fast", async () => {
+    const sizes: number[] = [];
+    const ctx = { sync: async () => undefined };
+    let clock = 0;
+    let slow = true;
+    BULK.now = () => clock;
+    const realSync = ctx.sync;
+    ctx.sync = async () => { clock += slow ? 4_000 : 10; await realSync(); };
+    await inBatches(ctx, "values", 100_000, 10, (_start, count) => { sizes.push(count); if (sizes.length === 3) slow = false; });
+    BULK.now = (typeof performance !== "undefined" ? () => performance.now() : () => Date.now());
+    expect(sizes[1]!).toBeLessThan(sizes[0]!);
+    expect(sizes[2]!).toBeLessThan(sizes[1]!);
+    expect(sizes[sizes.length - 1]!).toBeGreaterThan(sizes[2]!);
+  });
+});
+
+describe("giving way to the person", () => {
+  it("waits between batches while the person is active, and not when idle", async () => {
+    const pauses: number[] = [];
+    BULK.pause = async (ms) => { pauses.push(ms); };
+    const ctx = { sync: async () => undefined };
+    await inBatches(ctx, "values", 5_000, 10, () => undefined);
+    const idle = pauses.length;
+    pauses.length = 0;
+    noteUserActivity();
+    await inBatches(ctx, "values", 5_000, 10, () => undefined);
+    expect(pauses.length).toBeGreaterThan(idle);
+    expect(pauses.filter((ms) => ms === 100).length).toBeGreaterThan(0);
+  });
+});
+
+describe("execute_office_js bulk helpers", () => {
+  it("offers partner.writeGrid to the code it runs", async () => {
+    const result = await call("execute_office_js", { code: 'const s = context.workbook.worksheets.getItem("Sheet1"); await partner.writeGrid(context, s.getRange("L1"), [[1, 2], [3, "=L2+1"]]); return "ok";' });
+    expect(result).toMatchObject({ ok: true });
+    expect(book.get("Sheet1", "M1")).toBe(2);
+    expect(book.calculationModes).toEqual([]);
+  });
+});
+
+describe("large writes", () => {
+  it("sends a big block in batches with recalculation off, then restores the mode", async () => {
+    const rows = Array.from({ length: 20_000 }, (_, i) => [i, i * 2, `r${i}`]);
+    const result = await call("write_range", { address: "H1", values: rows });
+    expect(result).toMatchObject({ ok: true, data: { address: "H1:J20000", rowsWritten: 20_000 } });
+    expect(book.get("Sheet1", "J20000")).toBe("r19999");
+    expect(book.get("Sheet1", "H1")).toBe(0);
+    expect(book.calculationModes).toEqual(["Manual", "Automatic"]);
+    expect(book.calculationMode).toBe("Automatic");
+    expect(book.suspendedScreen).toBe((result as { data: { timing: { batches: number } } }).data.timing.batches);
+  });
+
+  it("restores the calculation mode when a batch fails", async () => {
+    const rows = Array.from({ length: 20_000 }, (_, i) => [i, i, i]);
+    await call("write_range", { address: "H1", values: [[1]] });
+    book.calculationModes.length = 0;
+    const bad = rows.map((row, i) => (i === 16_000 ? [1, 2, Symbol("x") as never] : row));
+    await call("write_range", { address: "L1", values: bad }).catch(() => undefined);
+    expect(book.calculationMode).toBe("Automatic");
+  });
+
+  it("leaves calculation alone for a small block, formulas or not, and pauses it for a big formula block", async () => {
+    await call("write_range", { address: "H1", values: [[1, 2], [3, 4]] });
+    await call("write_range", { address: "H5", values: [["=1+1"]] });
+    expect(book.calculationModes).toEqual([]);
+    await call("write_range", { address: "J1", values: Array.from({ length: 1_200 }, (_, i) => [`=${i}+1`]) });
+    expect(book.calculationModes).toEqual(["Manual", "Automatic"]);
   });
 });
 

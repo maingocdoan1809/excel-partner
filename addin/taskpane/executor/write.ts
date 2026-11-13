@@ -7,7 +7,8 @@ import {
   type SetFormulaInput,
   type WriteRangeInput,
 } from "../../../protocol/src/index.js";
-import { ToolFailure, isErrorValue, resolveSheet, stripSheet } from "./common.js";
+import { ToolFailure, isErrorValue, isFormulaString, resolveSheet, stripSheet, runExcel } from "./common.js";
+import { LARGE_RANGE_CELLS, emptyStats, inBatches, manualCalculationIf, needsBatches, overRows, timingOf, writeGrid, type BulkStats } from "./bulk.js";
 
 /** Cells re-read after a write to report what formulas evaluated to. */
 const VERIFY_CELL_LIMIT = 2_000;
@@ -147,7 +148,7 @@ export async function loadGeometry(context: Excel.RequestContext, range: Excel.R
 }
 
 export async function writeRange(input: WriteRangeInput): Promise<unknown> {
-  return Excel.run(async (context) => {
+  return runExcel(async (context) => {
     const sheet = resolveSheet(context, input.sheet);
     sheet.load("name");
 
@@ -183,12 +184,22 @@ export async function writeRange(input: WriteRangeInput): Promise<unknown> {
     }
     await assertCanWrite(context, target, geometry, input.allowOverwrite);
 
-    target.values = grid;
+    let written: Awaited<ReturnType<typeof writeGrid>>;
+    try {
+      written = await writeGrid(context, target, grid);
+    } catch (error) {
+      if (error instanceof ToolFailure) throw error;
+      const reason = error instanceof Error ? error.message : String(error);
+      throw new ToolFailure(
+        "office_error",
+        `The write stopped part-way (${reason}). Some of ${input.address} may already hold the new data: read it back, then repeat the write with allowOverwrite=true.`,
+      );
+    }
     if (notes.length > 0) await writeNotes(context, sheet, notes);
     target.load("address");
     await context.sync();
 
-    const formulaStrings = grid.flat().filter((cell) => typeof cell === "string" && cell.startsWith("=")).length;
+    const formulaStrings = grid.flat().filter(isFormulaString).length;
     const report = formulaStrings > 0
       ? await reportFormulaResults(context, sheet, geometry, [
           `${formulaStrings} value(s) starting with "=" were stored as formulas. To store literal text, prefix it with an apostrophe.`,
@@ -200,6 +211,7 @@ export async function writeRange(input: WriteRangeInput): Promise<unknown> {
       address: stripSheet(target.address),
       rowsWritten: rows,
       columnsWritten: columns,
+      timing: timingOf(written, written.filledColumns > 0 ? { filledDownColumns: written.filledColumns } : {}),
       ...(notes.length > 0 ? { notesWritten: notes.length } : {}),
       ...report,
     };
@@ -238,7 +250,7 @@ async function writeNotes(
 }
 
 export async function setFormula(input: SetFormulaInput): Promise<unknown> {
-  return Excel.run(async (context) => {
+  return runExcel(async (context) => {
     const sheet = resolveSheet(context, input.sheet);
     sheet.load("name");
     const range = sheet.getRange(input.address);
@@ -248,31 +260,50 @@ export async function setFormula(input: SetFormulaInput): Promise<unknown> {
     const formula = input.formula.startsWith("=") ? input.formula : `=${input.formula}`;
     const first = range.getCell(0, 0);
     first.formulas = [[formula]];
-    // Fill from the first cell so relative references shift per cell.
+    let stats: BulkStats = emptyStats();
+    // Fill from the first cell so relative references shift per cell, in batches sized by measured time.
     if (geometry.rowCount * geometry.columnCount > 1) {
-      range.copyFrom(first, Excel.RangeCopyType.formulas);
+      stats = await manualCalculationIf(context, needsBatches("fill", geometry.rowCount * geometry.columnCount), () =>
+        inBatches(context, "fill", geometry.rowCount, geometry.columnCount, (start, count) => {
+          range.getCell(start, 0).getResizedRange(count - 1, geometry.columnCount - 1).copyFrom(first, Excel.RangeCopyType.formulas);
+        }),
+      );
     }
     range.load("address");
     await context.sync();
     const report = await reportFormulaResults(context, sheet, geometry);
-    return { sheet: sheet.name, address: stripSheet(range.address), formula, ...report };
+    return { sheet: sheet.name, address: stripSheet(range.address), formula, ...report, timing: timingOf(stats) };
   });
 }
 
 export async function clearRange(input: ClearRangeInput): Promise<unknown> {
-  return Excel.run(async (context) => {
+  return runExcel(async (context) => {
     const sheet = resolveSheet(context, input.sheet);
     sheet.load("name");
     const range = sheet.getRange(input.address);
-    range.load("address");
+    range.load("address,rowCount,columnCount");
+    await context.sync();
     const applyTo = {
       contents: Excel.ClearApplyTo.contents,
       formats: Excel.ClearApplyTo.formats,
       all: Excel.ClearApplyTo.all,
     }[input.clearType];
+    // Only the part Excel actually holds something in needs slicing; a whole column or row is cleared in one go.
+    let target = range;
+    if (range.rowCount * range.columnCount > LARGE_RANGE_CELLS) {
+      const used = range.getUsedRangeOrNullObject(false);
+      used.load("isNullObject,rowCount,columnCount");
+      await context.sync();
+      if (!used.isNullObject) target = used;
+    }
+    if (target.rowCount * target.columnCount > LARGE_RANGE_CELLS) {
+      // Clearing formats never changes a value, so calculation only needs pausing for the other kinds.
+      await manualCalculationIf(context, input.clearType !== "formats", () => overRows(context, target, target.rowCount, target.columnCount, "fill", (slice) => slice.clear(applyTo)));
+    }
+    // The whole range is cleared once more: cheap now that the heavy part is gone, and it also removes what lies
+    // beyond the used part (data validation, conditional formats).
     range.clear(applyTo);
     await context.sync();
     return { sheet: sheet.name, address: stripSheet(range.address), clearType: input.clearType };
   });
 }
-

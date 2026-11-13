@@ -1,9 +1,9 @@
 import type { ManageNamesInput, MergeRangeInput, PageLayoutInput } from "../../../protocol/src/index.js";
-import { ToolFailure, resolveSheet, stripSheet } from "./common.js";
+import { ToolFailure, resolveSheet, stripSheet, runExcel } from "./common.js";
 import { findOccupied, loadGeometry, overwriteFailure } from "./write.js";
 
 export async function mergeRange(input: MergeRangeInput): Promise<unknown> {
-  return Excel.run(async (context) => {
+  return runExcel(async (context) => {
     const sheet = resolveSheet(context, input.sheet);
     sheet.load("name");
     const range = sheet.getRange(input.address);
@@ -29,7 +29,7 @@ export async function mergeRange(input: MergeRangeInput): Promise<unknown> {
 }
 
 export async function manageNames(input: ManageNamesInput): Promise<unknown> {
-  return Excel.run(async (context) => {
+  return runExcel(async (context) => {
     const sheetScoped = input.scope !== "workbook";
     const sheet = sheetScoped ? context.workbook.worksheets.getItem(input.scope) : null;
     const names = sheet ? sheet.names : context.workbook.names;
@@ -75,7 +75,7 @@ export async function pageLayout(input: PageLayoutInput): Promise<unknown> {
   if (!Office.context.requirements.isSetSupported("ExcelApi", "1.9")) {
     throw new ToolFailure("unsupported", "this Excel version cannot change page layout (needs ExcelApi 1.9)");
   }
-  return Excel.run(async (context) => {
+  return runExcel(async (context) => {
     const sheet = resolveSheet(context, input.sheet);
     sheet.load("name");
     const layout = sheet.pageLayout;

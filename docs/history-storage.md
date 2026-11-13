@@ -40,8 +40,8 @@ controls remain available for these cases and persistent disk/permission errors.
 Outbox keys are unique per running pane, including duplicated browser tabs.
 
 History restores the exact per-pane active chat ID after a managed reload.
-Ordinary reopening still starts a new chat. Undo remains memory-only; stored
-change records do not restore the ability to undo prior document changes.
+Ordinary reopening still starts a new chat. There is no undo; stored
+change records only list what was changed.
 
 ## Migration, update and rollback
 

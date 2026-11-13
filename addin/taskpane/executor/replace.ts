@@ -1,6 +1,6 @@
 import { MAX_REPLACE_CELLS, type FindReplaceInput } from "../../../protocol/src/index.js";
 import { cellAddress, scanCells } from "./audit.js";
-import { ToolFailure, isErrorValue } from "./common.js";
+import { ToolFailure, isErrorValue, runExcel } from "./common.js";
 
 interface Change {
   sheet: string;
@@ -21,7 +21,7 @@ function needsTextPrefix(text: string): boolean {
 }
 
 export async function findReplace(input: FindReplaceInput): Promise<unknown> {
-  return Excel.run(async (context) => {
+  return runExcel(async (context) => {
     const source = escapeRegExp(input.find);
     const flags = input.matchCase ? "g" : "gi";
     const pattern = new RegExp(input.wholeCell ? `^${source}$` : source, flags);

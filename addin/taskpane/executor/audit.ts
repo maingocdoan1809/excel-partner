@@ -5,7 +5,7 @@ import {
   type FindErrorsInput,
   type SheetRef,
 } from "../../../protocol/src/index.js";
-import { isErrorValue, resolveSheet } from "./common.js";
+import { isErrorValue, resolveSheet, runExcel } from "./common.js";
 
 /** One block of cells handed to a scan visitor. Indexes are zero-based and absolute on the sheet. */
 export interface ScanChunk {
@@ -95,7 +95,7 @@ interface ErrorCell {
 }
 
 export async function findErrors(input: FindErrorsInput): Promise<unknown> {
-  return Excel.run(async (context) => {
+  return runExcel(async (context) => {
     const errors: ErrorCell[] = [];
     const byType: Record<string, number> = {};
     let total = 0;
@@ -188,7 +188,7 @@ const DOMINANT_SHARE = 0.6;
 const MIN_FORMULAS = 3;
 
 export async function checkFormulaConsistency(input: CheckFormulaConsistencyInput): Promise<unknown> {
-  return Excel.run(async (context) => {
+  return runExcel(async (context) => {
     const lines = new Map<string, { sheet: string; cells: LineCell[] }>();
 
     const { sheetsScanned, scanTruncated } = await scanCells(context, input, (chunk) => {

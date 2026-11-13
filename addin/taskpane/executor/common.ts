@@ -12,6 +12,53 @@ export class ToolFailure extends Error {
   }
 }
 
+/** How long a call waits for the person to leave cell-edit mode (a quarter of it on Excel for the web). */
+const CELL_EDIT_WAIT_MS = 30_000;
+
+const inCellEditMode = (error: unknown): boolean =>
+  !!error && typeof error === "object" && (error as { code?: unknown }).code === "InvalidOperationInCellEditMode";
+
+/**
+ * `Excel.run`, but when the person is typing in a cell (Excel refuses every call then) the call waits for them to
+ * press Enter or Esc instead of failing, and says so if they do not. It only waits when nothing has been changed yet:
+ * a batch that already synced some work is not run again, because that could repeat what it did.
+ */
+export async function runExcel<T>(batch: (context: Excel.RequestContext) => Promise<T>): Promise<T> {
+  let synced = false;
+  try {
+    return await Excel.run((context) => {
+      const sync = context.sync.bind(context);
+      context.sync = (async (...args: Parameters<typeof sync>) => {
+        const result = await sync(...args);
+        synced = true;
+        return result;
+      }) as typeof context.sync;
+      return batch(context);
+    });
+  } catch (error) {
+    if (!inCellEditMode(error) || synced) throw error;
+  }
+  const web = Office.context.platform === Office.PlatformType.OfficeOnline;
+  const limit = web ? CELL_EDIT_WAIT_MS / 4 : CELL_EDIT_WAIT_MS;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let gaveUp = false;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      gaveUp = true;
+      reject(new ToolFailure("timeout", `The spreadsheet is in cell edit mode. Waited ${limit / 1000} seconds for it to end. Ask the user to press Enter or Escape in the spreadsheet, then retry.`));
+    }, limit);
+  });
+  try {
+    // A call that gives up must not run late: the batch is skipped once the wait is over.
+    return await Promise.race([Excel.run({ delayForCellEdit: true }, (context) => (gaveUp ? Promise.reject(new Error("cell edit wait ended")) : batch(context))), timeout]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** A cell entry that Excel will store as a formula. */
+export const isFormulaString = (cell: unknown): cell is string => typeof cell === "string" && cell.startsWith("=");
+
 const ERROR_VALUE = /^#(NULL!|DIV\/0!|VALUE!|REF!|NAME\?|NUM!|N\/A|SPILL!|CALC!|GETTING_DATA|CONNECT!|BLOCKED!|FIELD!|UNKNOWN!)$/;
 
 /** True for the text Excel shows in a cell whose formula failed (`#REF!`, `#N/A`, ...). */

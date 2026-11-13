@@ -1,6 +1,7 @@
 import type { ExecuteOfficeJsInput, HostId } from "../../../protocol/src/index.js";
 import { ToolFailure } from "./common.js";
 import { backgroundExcel } from "./background-excel.js";
+import { bulkHelpers } from "./bulk.js";
 
 /** Largest JSON result (characters) sent back to the model. */
 const MAX_RESULT_CHARS = 30_000;
@@ -16,6 +17,7 @@ function hostRunner(host: HostId): (batch: (context: SyncContext) => Promise<unk
   if (!available) throw new ToolFailure("unsupported", `${namespaceOf(host)} is not available in this task pane`);
   if (host === "word") return (batch) => Word.run(batch as never);
   if (host === "powerpoint") return (batch) => PowerPoint.run(batch as never);
+  // Plain Excel.run: the model's code may already have changed things, so it is never run a second time.
   return (batch) => Excel.run(batch as never);
 }
 
@@ -37,7 +39,7 @@ export async function executeOfficeJs(input: ExecuteOfficeJsInput, host: HostId 
   const namespace = host === "word" ? "Word" : host === "powerpoint" ? "PowerPoint" : "Excel";
   let fn: (...values: unknown[]) => Promise<unknown>;
   try {
-    fn = new AsyncFunction("context", namespace, "Office", input.code);
+    fn = new AsyncFunction("context", namespace, "Office", "partner", input.code);
   } catch (error) {
     throw new ToolFailure("invalid_arguments", `the code does not compile: ${error instanceof Error ? error.message : String(error)}`);
   }
@@ -45,7 +47,7 @@ export async function executeOfficeJs(input: ExecuteOfficeJsInput, host: HostId 
   const runner = hostRunner(host);
   const background = host === "excel" ? backgroundExcel() : null;
   return runner(async (context) => {
-    const returned = await fn(background?.wrap(context) ?? context, background?.namespace ?? hostNamespace(host), background?.wrap(Office) ?? Office);
+    const returned = await fn(background?.wrap(context) ?? context, background?.namespace ?? hostNamespace(host), background?.wrap(Office) ?? Office, bulkHelpers);
     await context.sync();
     const navigation = background?.skipped.size ? {
       navigationSuppressed: [...background.skipped],

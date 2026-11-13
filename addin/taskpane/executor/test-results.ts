@@ -1,5 +1,5 @@
 import { numberToColumn, type RecordTestResultsInput } from "../../../protocol/src/index.js";
-import { ToolFailure } from "./common.js";
+import { ToolFailure, runExcel } from "./common.js";
 
 const norm = (value: unknown) => String(value ?? "").trim().toLowerCase().replace(/\s+/g, " ");
 
@@ -19,7 +19,7 @@ const cellKey = (sheet: string, row: number, column: number) => `${sheet}|${row}
  * already holds something this tool did not write is never touched unless the caller says the user agreed.
  */
 export async function recordTestResults(input: RecordTestResultsInput): Promise<unknown> {
-  return Excel.run(async (context) => {
+  return runExcel(async (context) => {
     const sheet = context.workbook.worksheets.getItemOrNullObject(input.sheet);
     await context.sync();
     if (sheet.isNullObject) throw new ToolFailure("sheet_not_found", `Sheet '${input.sheet}' was not found.`);

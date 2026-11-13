@@ -2,7 +2,6 @@ import { afterEach, describe, expect, it } from "vitest";
 import { detectHost } from "../addin/taskpane/host/detect.js";
 import { activeHost, hostAdapterFor, initHost } from "../addin/taskpane/host/index.js";
 import { HOST_BASELINE, isSupported, requireSupport } from "../addin/taskpane/host/requirements.js";
-import { planUndo } from "../addin/taskpane/executor/undo-plan.js";
 import { describeChange } from "../addin/taskpane/ui/changes.js";
 import { PPT_WRITE_TOOLS, PptSelectionSnapshotSchema, WORD_WRITE_TOOLS, WordSelectionSnapshotSchema, exposedToolNamesForHost } from "../protocol/src/index.js";
 import { FakeWordDoc, installWordFake, uninstallWordFake } from "./support/fake-word.js";
@@ -40,10 +39,10 @@ describe("detectHost", () => {
 
 describe("host adapters", () => {
   it("describe each application", () => {
-    expect(["excel", "word", "powerpoint"].map((id) => { const h = hostAdapterFor(id as never); return [h.id, h.app, h.noun, h.extension, h.hasSheets]; })).toEqual([
-      ["excel", "Excel", "workbook", ".xlsx", true],
-      ["word", "Word", "document", ".docx", false],
-      ["powerpoint", "PowerPoint", "presentation", ".pptx", false],
+    expect(["excel", "word", "powerpoint"].map((id) => { const h = hostAdapterFor(id as never); return [h.id, h.app, h.noun, h.hasSheets]; })).toEqual([
+      ["excel", "Excel", "workbook", true],
+      ["word", "Word", "document", false],
+      ["powerpoint", "PowerPoint", "presentation", false],
     ]);
   });
 
@@ -167,7 +166,7 @@ describe("requirement gate", () => {
   });
 });
 
-describe("change list and undo planning for Word and PowerPoint", () => {
+describe("change list for Word and PowerPoint", () => {
   it("shows the tool's own summary", () => {
     const writeTools = hostAdapterFor("word").writeTools;
     expect(describeChange("edit_doc_text", {}, { ok: true, data: { summary: "Replaced 1 match" } }, writeTools)).toMatchObject({ ok: true, summary: "Replaced 1 match" });
@@ -186,13 +185,4 @@ describe("change list and undo planning for Word and PowerPoint", () => {
     expect(describeChange("edit_table", { operation: "add_rows" }, okResult, writeTools)).not.toBeNull();
   });
 
-  it("backs up before a Word or PowerPoint edit and skips reads", () => {
-    expect(planUndo("edit_doc_text", {})).toMatchObject({ kind: "irreversible" });
-    expect(planUndo("edit_slide_xml", {})).toMatchObject({ kind: "irreversible" });
-    expect(planUndo("execute_office_js", {})).toMatchObject({ kind: "irreversible" });
-    expect(planUndo("edit_table", { operation: "read" })).toEqual({ kind: "none" });
-    expect(planUndo("manage_content_controls", { operation: "list" })).toEqual({ kind: "none" });
-    expect(planUndo("collapse_blank_paragraphs", { preview: true })).toEqual({ kind: "none" });
-    expect(planUndo("collapse_blank_paragraphs", { preview: false })).toMatchObject({ kind: "irreversible" });
-  });
 });

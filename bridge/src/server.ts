@@ -11,7 +11,6 @@ import { McpServers } from "../../runtime/src/mcp-servers.js";
 import { OfficeRuntime } from "../../runtime/src/office-runtime.js";
 import { PROJECT_ROOT, type BridgeConfig } from "./config.js";
 import { Delegations } from "./delegations.js";
-import { DocumentBackups } from "./document-backups.js";
 import { bearerToken, connectedSession, contentType, readBody, sendJson } from "./http-util.js";
 import { Logger } from "./logger.js";
 import { PaneSockets } from "./pane-connection.js";
@@ -123,7 +122,6 @@ export class Bridge {
     const testScripts = new TestScripts(path.join(dataDir, "scripts"));
     const testingAdmin = new TestingAdmin(testSessions, siteKnowledge, testScripts, login => loginSession({ ...login, toolsDir: path.join(dataDir, "tools") }));
     this.mcpServers = new McpServers(path.join(dataDir, "mcp-servers.json"));
-    const backups = new DocumentBackups(path.join(dataDir, "backups"));
     this.updater = options.updater === undefined
       ? new UpdateService({
           packageRoot: PROJECT_ROOT,
@@ -181,7 +179,7 @@ export class Bridge {
     });
     this.routes = {
       system: new SystemRoutes(this.sessions, this.providers, this.updater, () => this.logins.isBusy),
-      files: new FileRoutes({ sessions: this.sessions, backups, logger: this.logger, activateWorkbook: options.activateWorkbook ?? activateWorkbook }),
+      files: new FileRoutes({ sessions: this.sessions, logger: this.logger, activateWorkbook: options.activateWorkbook ?? activateWorkbook }),
       mcp: new McpRoutes({ sessions: this.sessions, mcpServers: this.mcpServers, discover: discoverMcp }),
       providers: new ProviderRoutes({ sessions: this.sessions, providers: this.providers, logins: this.logins, usage, logger: this.logger }),
       skills: new SkillRoutes({ sessions: this.sessions, skills: this.skills, userSkills, systemPrompt }),
@@ -320,7 +318,6 @@ export class Bridge {
 
     if (method === "GET" && url.pathname === "/session/usage") return providers.usage(req, res, url);
     if (method === "POST" && url.pathname === "/session/attachment") return files.attachment(req, res);
-    if (method === "POST" && url.pathname === "/session/backup") return files.backup(req, res);
     if (method === "POST" && url.pathname === "/session/go-to") return files.goTo(req, res);
     if (url.pathname === "/session/update" && (method === "GET" || method === "POST")) return this.handleUpdate(req, res, url);
     if (method === "GET" && url.pathname === "/session/models") return providers.models(req, res, url);

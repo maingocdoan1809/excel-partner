@@ -353,7 +353,13 @@ const META: Partial<Record<ExcelToolName, Meta>> = {
     annotations: WRITE,
     description:
       "WRITE, ADVANCED. Run Office.js code in the workbook for anything the other tools cannot do. Use only as a last resort: " +
-      "the code can change or delete anything. Disabled unless the user enabled it.",
+      "the code can change or delete anything. Disabled unless the user enabled it. " +
+      "Large datasets (measured in real Excel): copying with range.copyFrom/autoFill runs at ~100,000 formula cells per second, but WRITING formulas (formulas/formulasR1C1 arrays) only ~5,000-7,000 cells per second, so 100-250 rows x 100+ columns of formulas freezes Excel for 2-7 seconds per sync. " +
+      "Therefore: write ONE seed row of formulas and copyFrom it down (in chunks of about 10,000 cells per sync) instead of writing a formula per cell; write values in 2D arrays of at most about 20,000 cells per sync, formulas at most about 2,000 per sync; one context.sync() per batch, batches one after another; keep every sync under about half a second. " +
+      "The code receives a 4th argument `partner` that already does this safely: `await partner.writeGrid(context, topLeftRange, grid2D)` writes in time-adaptive batches with calculation paused and restored, and `await partner.manualCalculation(context, async () => { ... })` wraps your own batches (it saves the calculation mode, sets manual, restores in finally). Prefer them to hand-written loops. " +
+      "Before writing, measure: find the real bounds with worksheet.getUsedRange(true), never whole columns. Above ~1000 rows read in chunks, and never return thousands of rows (return counts, summaries or fewer than 50 items). " +
+      "Apply number formats and styles once to the whole range after the data is in; do not autofit, sort or filter large ranges while writing; avoid volatile functions (OFFSET, INDIRECT, TODAY, NOW, RAND) and whole-column references in repeated formulas. " +
+      "Summaries must stay formulas that point at the source, not numbers computed in code. After writing, read back the last row and check for #VALUE!, #REF!, #NAME?, #DIV/0! before saying it is done; say the longest sync you measured.",
   },
 };
 

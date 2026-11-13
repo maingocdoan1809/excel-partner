@@ -1,6 +1,5 @@
 import {
   EXECUTOR_CAPS,
-  numberToColumn,
   type CellValue,
   type ReadRangeInput,
   type SearchDataInput,
@@ -12,8 +11,8 @@ import {
   stripSheet,
   toCsv,
   truncateCells,
-  workbookName,
-} from "./common.js";
+  workbookName, runExcel } from "./common.js";
+import { cellAddress } from "./audit.js";
 
 import { readActiveShape } from "./shapes.js";
 
@@ -24,6 +23,7 @@ export const OBJECT_SELECTED_NOTE =
 
 /** Small identity read for the composer; never fetch cell values or shape text. */
 export async function getSelectionLabel(): Promise<{ label: string; title: string }> {
+  // Plain Excel.run: this feeds the selection chip, which must fail fast while the person is typing in a cell.
   return Excel.run(async context => {
     if (Office.context.requirements.isSetSupported("ExcelApi", "1.19")) {
       // Charts are identified through the chart API; see readActiveShape for why they must not be read as shapes.
@@ -62,7 +62,7 @@ export async function getSelection(): Promise<unknown> {
     return await readSelection();
   } catch (error) {
     if ((error as { code?: string })?.code !== "InvalidSelection") throw error;
-    return Excel.run(async (context) => {
+    return runExcel(async (context) => {
       const selected = await readActiveShape(context);
       const sheet = context.workbook.worksheets.getActiveWorksheet();
       sheet.load("name,id");
@@ -88,7 +88,7 @@ export async function getSelection(): Promise<unknown> {
 }
 
 async function readSelection(): Promise<unknown> {
-  return Excel.run(async (context) => {
+  return runExcel(async (context) => {
     const selected = await readActiveShape(context);
     if (selected.activeShape) {
       const sheet = context.workbook.worksheets.getActiveWorksheet();
@@ -164,27 +164,38 @@ async function detectHeaders(
   return cells.some((c) => c !== "") ? cells : null;
 }
 
+/** Sheets (and tables) described per round trip, so a workbook with hundreds of them never sends one giant request. */
+const SYNC_GROUP = 20;
+
 export async function getSheets(): Promise<unknown> {
-  return Excel.run(async (context) => {
+  return runExcel(async (context) => {
     const sheets = context.workbook.worksheets;
     sheets.load("items/name,items/id,items/visibility");
     const active = sheets.getActiveWorksheet();
     active.load("name");
     await context.sync();
 
-    const usedRanges = sheets.items.map((sheet) => sheet.getUsedRangeOrNullObject(true));
-    usedRanges.forEach((range) => range.load("address"));
-    sheets.items.forEach((sheet) => sheet.tables.load("items/name"));
-    await context.sync();
+    const usedRanges: Excel.Range[] = [];
+    for (let start = 0; start < sheets.items.length; start += SYNC_GROUP) {
+      const group = sheets.items.slice(start, start + SYNC_GROUP);
+      const used = group.map((sheet) => sheet.getUsedRangeOrNullObject(true));
+      used.forEach((range) => range.load("address"));
+      group.forEach((sheet) => sheet.tables.load("items/name"));
+      await context.sync();
+      usedRanges.push(...used);
+    }
 
     const tableRanges = sheets.items.map((sheet) =>
       sheet.tables.items.map((table) => {
         const range = table.getRange();
-        range.load("address");
         return { name: table.name, range };
       }),
     );
-    if (tableRanges.some((tables) => tables.length > 0)) await context.sync();
+    const pending = tableRanges.flat();
+    for (let start = 0; start < pending.length; start += SYNC_GROUP) {
+      pending.slice(start, start + SYNC_GROUP).forEach(({ range }) => range.load("address"));
+      await context.sync();
+    }
 
     return {
       activeSheet: active.name,
@@ -201,7 +212,7 @@ export async function getSheets(): Promise<unknown> {
 }
 
 export async function readRange(input: ReadRangeInput): Promise<unknown> {
-  return Excel.run(async (context) => {
+  return runExcel(async (context) => {
     const sheet = resolveSheet(context, input.sheet);
     sheet.load("name");
     const full = sheet.getRange(input.address);
@@ -266,8 +277,16 @@ function buildMatcher(input: SearchDataInput): (text: string) => boolean {
   };
 }
 
+/**
+ * Above this many cells in the searched area, Excel's own Find does the work and only the hits travel to the pane,
+ * instead of downloading every cell. Find matches the displayed text, so smaller areas keep the exact scan below.
+ */
+export const SEARCH_TUNING = { nativeCells: 100_000 };
+/** Hit areas loaded per round trip. */
+const FIND_GROUP = 20;
+
 export async function searchData(input: SearchDataInput): Promise<unknown> {
-  return Excel.run(async (context) => {
+  return runExcel(async (context) => {
     const sheets = context.workbook.worksheets;
     sheets.load("items/name,items/visibility");
     await context.sync();
@@ -282,6 +301,7 @@ export async function searchData(input: SearchDataInput): Promise<unknown> {
     const matches: Match[] = [];
     let scanned = 0;
     let scanTruncated = false;
+    let usedNativeFind = false;
 
     outer: for (const sheet of targets) {
       let used = sheet.getUsedRangeOrNullObject(true);
@@ -295,6 +315,49 @@ export async function searchData(input: SearchDataInput): Promise<unknown> {
       used.load("isNullObject,rowIndex,columnIndex,rowCount,columnCount");
       await context.sync();
       if (used.isNullObject) continue;
+
+      if (!input.address && !input.useRegex && !input.matchFormulas && used.rowCount * used.columnCount > SEARCH_TUNING.nativeCells) {
+        // Excel's Find treats * ? ~ as wildcards; the search here is for the literal text.
+        const term = input.searchTerm.replace(/[~*?]/g, "~$&");
+        const found = sheet.findAllOrNullObject(term, { matchCase: input.matchCase, completeMatch: input.wholeCell });
+        found.load("isNullObject,areas/items");
+        await context.sync();
+        usedNativeFind = true;
+        if (found.isNullObject) continue;
+        // No more areas than matches are needed; Excel does not promise their order, so put them in sheet order.
+        const areas = found.areas.items.slice(0, wanted);
+        for (let start = 0; start < areas.length; start += FIND_GROUP) {
+          areas.slice(start, start + FIND_GROUP).forEach((area) => area.load("rowIndex,columnIndex,rowCount,columnCount"));
+          await context.sync();
+        }
+        areas.sort((x, y) => x.rowIndex - y.rowIndex || x.columnIndex - y.columnIndex);
+        for (let start = 0; start < areas.length; start += FIND_GROUP) {
+          // One hit area can be a whole block of cells; only as many rows as could still be needed are read.
+          const group = areas.slice(start, start + FIND_GROUP).map((area) => {
+            const rows = Math.min(area.rowCount, Math.ceil(wanted / area.columnCount));
+            return rows === area.rowCount ? area : area.getResizedRange(rows - area.rowCount, 0);
+          });
+          group.forEach((area) => area.load("values,formulas,rowIndex,columnIndex,rowCount,columnCount"));
+          await context.sync();
+          for (const area of group) {
+            for (let r = 0; r < area.rowCount; r++) {
+              for (let c = 0; c < area.columnCount; c++) {
+                const value = area.values[r]?.[c];
+                if (value === null || value === undefined || value === "") continue;
+                const formula = String(area.formulas[r]?.[c] ?? "");
+                matches.push({
+                  sheet: sheet.name,
+                  address: cellAddress(area.rowIndex + r, area.columnIndex + c),
+                  value: value as CellValue,
+                  ...(formula.startsWith("=") ? { formula } : {}),
+                });
+                if (matches.length >= wanted) break outer;
+              }
+            }
+          }
+        }
+        continue;
+      }
 
       // Read in row chunks so one call never loads an unbounded block.
       const rowsPerChunk = Math.max(1, Math.floor(EXECUTOR_CAPS.readCells / used.columnCount));
@@ -318,7 +381,7 @@ export async function searchData(input: SearchDataInput): Promise<unknown> {
             if (isMatch(isFormula ? formula : String(value))) {
               matches.push({
                 sheet: sheet.name,
-                address: `${numberToColumn(used.columnIndex + c + 1)}${used.rowIndex + offset + r + 1}`,
+                address: cellAddress(used.rowIndex + offset + r, used.columnIndex + c),
                 value: value as CellValue,
                 ...(isFormula ? { formula } : {}),
               });
@@ -338,6 +401,7 @@ export async function searchData(input: SearchDataInput): Promise<unknown> {
       hasMore,
       nextOffset: hasMore ? input.offset + input.limit : null,
       scanTruncated,
+      ...(usedNativeFind ? { note: "Large sheet: searched with Excel's Find, which matches the text as displayed (for example 1,500, not 1500). Hits are listed in sheet order but only the first ones Excel returned are examined, so for a very common term narrow the search with address." } : {}),
     };
   });
 }

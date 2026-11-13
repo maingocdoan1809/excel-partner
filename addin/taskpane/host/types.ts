@@ -7,9 +7,7 @@ export interface HostAdapter {
   readonly app: string;
   /** What the open file is called in the interface: workbook, document, presentation. */
   readonly noun: string;
-  /** File extension a backup copy gets. */
-  readonly extension: ".xlsx" | ".docx" | ".pptx";
-  /** Tools that change the file. The Changes list shows their results and a backup is taken before the first one of a reply. */
+  /** Tools that change the file. The Changes list shows their results. */
   readonly writeTools: ReadonlySet<string>;
   /** Run one tool request in the open file. Arguments were validated by the bridge. */
   execute(tool: string, args: unknown, signal?: AbortSignal): Promise<ToolResult>;
@@ -17,8 +15,6 @@ export interface HostAdapter {
   readName(): Promise<string | null>;
   /** Short text for the selection chip. Throws when the selection cannot be identified. */
   readSelectionLabel(): Promise<{ label: string; title: string }>;
-  /** The open file as zip bytes (xlsx/docx/pptx), for backups. */
-  readFile(): Promise<Uint8Array>;
   /** Excel only: sheets, cell links, shape-selection events and cross-file features. */
   readonly hasSheets: boolean;
 }
