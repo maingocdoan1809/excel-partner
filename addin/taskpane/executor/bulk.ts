@@ -303,5 +303,20 @@ export async function writeGrid(context: Excel.RequestContext, topLeft: Excel.Ra
   });
 }
 
+/**
+ * Copy `source` over `destination` (repeating it down) in time-adaptive batches, with calculation paused when it is
+ * big. For `execute_office_js` code that fills a block from a sample row. `type` is formulas, all, values or formats.
+ */
+export async function fillDown(context: Excel.RequestContext, source: Excel.Range, destination: Excel.Range, type: "formulas" | "all" | "values" | "formats" = "formulas"): Promise<BulkStats> {
+  source.load("rowCount");
+  destination.load("rowCount,columnCount");
+  await context.sync();
+  const cells = destination.rowCount * destination.columnCount;
+  const copyType = Excel.RangeCopyType[type];
+  return manualCalculationIf(context, needsBatches("fill", cells), () =>
+    copyInBatches(context, source, source.rowCount, destination, destination.rowCount, destination.columnCount, copyType),
+  );
+}
+
 /** The helpers `execute_office_js` code receives as `partner`. */
-export const bulkHelpers = { manualCalculation: withManualCalculation, writeGrid };
+export const bulkHelpers = { manualCalculation: withManualCalculation, writeGrid, fillDown, inBatches };

@@ -254,6 +254,15 @@ describe("giving way to the person", () => {
   });
 });
 
+describe("execute_office_js bulk helpers (fillDown)", () => {
+  it("fills a sample row down in adaptive batches with calculation paused", async () => {
+    const result = await call("execute_office_js", { code: 'const s = context.workbook.worksheets.getItem("Sheet1"); s.getRange("H1:J1").values = [["=1+1", "=2+2", "=3+3"]]; await context.sync(); await partner.fillDown(context, s.getRange("H1:J1"), s.getRange("H2:J3000")); return "ok";' });
+    expect(result).toMatchObject({ ok: true });
+    expect(book.get("Sheet1", "J3000")).toBe("=3+3");
+    expect(book.calculationModes).toEqual(["Manual", "Automatic"]);
+  });
+});
+
 describe("execute_office_js bulk helpers", () => {
   it("offers partner.writeGrid to the code it runs", async () => {
     const result = await call("execute_office_js", { code: 'const s = context.workbook.worksheets.getItem("Sheet1"); await partner.writeGrid(context, s.getRange("L1"), [[1, 2], [3, "=L2+1"]]); return "ok";' });
