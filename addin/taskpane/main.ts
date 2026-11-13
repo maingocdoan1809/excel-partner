@@ -42,6 +42,7 @@ import { setupSettings } from "./ui/settings.js";
 import { setupSystemPanel } from "./ui/system-panel.js";
 import { renderToolCard, paintTool, formatToolValue, toolChevron } from "./ui/tool-view.js";
 import { ThoughtView } from "./ui/thought.js";
+import { FollowEnd, steadyVisibility } from "./ui/follow-end.js";
 import { mentionsFile, mentionsSheet } from "./ui/cell-links.js";
 import { ProviderIdSchema, exposedToolNamesForHost, sameWorkbookName } from "../../protocol/src/index.js";
 import {
@@ -156,6 +157,8 @@ interface PendingPrompt {
   attachments: typeof pendingAttachments;
   message: StoredMessage;
   state: "pending" | "next_turn" | "held";
+  /** Why the bridge refused it, shown beside "Not sent". */
+  reason?: string;
 }
 const pendingPrompts = new Map<string, PendingPrompt>();
 let autoQueueAllowed = true;
@@ -187,6 +190,16 @@ const previewCopy = byId<HTMLButtonElement>("preview-copy");
 let previewing: StoredArtifact | null = null;
 let liveToolGroup: { element: HTMLDetailsElement; message: StoredMessage } | null = null;
 let thinking: HTMLElement | null = null;
+// While the person reads older messages the chat stays put; this button takes them back to the newest one.
+const jumpToLatest = document.createElement("button");
+jumpToLatest.type = "button";
+jumpToLatest.className = "jump-latest";
+jumpToLatest.hidden = true;
+jumpToLatest.textContent = "↓ Latest";
+jumpToLatest.setAttribute("aria-label", "Jump to the latest message");
+els.messages.after(jumpToLatest);
+const follow = new FollowEnd(els.messages, { onChange: steadyVisibility((visible) => { jumpToLatest.hidden = !visible; }) });
+jumpToLatest.addEventListener("click", () => follow.scroll(true));
 const thoughts = new ThoughtView(els.messages, () => thinking, () => scrollToEnd());
 /** The other workbooks open with this add-in (not this one), as the bridge last listed them. */
 let otherFiles: string[] = [];
@@ -338,7 +351,7 @@ Office.onReady((info) => {
       dock.hidden = false;
       document.body.classList.add("question-active");
       const pending = showUserInput(dock, request, signal);
-      scrollToEnd();
+      scrollToEnd(true);
       const response = await pending;
       dock.hidden = true;
       document.body.classList.remove("question-active");
@@ -733,7 +746,7 @@ function bubble(kind: "user" | "assistant" | "error"): HTMLDivElement {
 function append(message: StoredMessage): HTMLElement {
   session.messages.push(message);
   const element = renderMessage(els.messages, message);
-  scrollToEnd();
+  scrollToEnd(message.kind === "user");
   schedulePersist();
   return element;
 }
@@ -761,12 +774,15 @@ function renderDelivery(element: HTMLElement, message: StoredMessage): void {
   label.className = "message-delivery";
   const pending = message.queueId ? pendingPrompts.get(message.queueId) : undefined;
   label.textContent = message.delivery === "pending" && pending?.state !== "held" && pending ? "Pending" : "Not sent";
+  if (pending?.reason) label.title = pending.reason;
   if (!pending || pending.state === "held") {
     const send = document.createElement("button");
     send.type = "button";
     send.textContent = "Send";
     send.addEventListener("click", () => {
-      if (currentRequestId || !client.connected) return;
+      // A held message goes out as the next reply, so it cannot be sent while one is still running.
+      if (currentRequestId) { showToast("A reply is still running. Wait for it to finish (or press Stop), then press Send."); return; }
+      if (!client.connected) { showToast("Not connected to the bridge. Try again after it reconnects."); return; }
       void submit(pending ?? { id: message.queueId ?? randomId(), parentRequestId: "", prompt: message.text, attachments: [], message, state: "held" });
     });
     label.append(send);
@@ -1084,6 +1100,7 @@ function handleEvent(event: ProviderEvent): void {
       } else {
         item.state = event.state === "rejected" ? "held" : event.state;
         if (!currentRequestId && !autoQueueAllowed) item.state = "held";
+        if (event.state === "rejected" && event.message) item.reason = event.message;
         updateDelivery(item);
         if (event.message) showToast(event.message);
         if (event.state === "next_turn" && autoQueueAllowed) sendNextPending();
@@ -1316,7 +1333,7 @@ function loadSession(stored: StoredSession): void {
   liveTools.clear();
   els.messages.replaceChildren();
   for (const message of stored.messages) renderMessage(els.messages, message);
-  scrollToEnd();
+  scrollToEnd(true);
   renderChanges();
   void refreshUsage();
 }
@@ -1589,8 +1606,9 @@ function updateSendControl(): void {
   byId("stop-button").hidden = !running || !hasPrompt;
 }
 
-function scrollToEnd(): void {
-  els.messages.scrollTop = els.messages.scrollHeight;
+/** Streaming text follows the end of the chat only while the person is reading the end; `force` for what they asked for. */
+function scrollToEnd(force = false): void {
+  follow.scroll(force);
 }
 
 function summarize(value: unknown): string {

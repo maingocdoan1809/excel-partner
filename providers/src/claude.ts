@@ -31,6 +31,8 @@ interface ClaudeSession {
   resumable: boolean;
   process: ClaudeProcess;
   active: ClaudeTurn | null;
+  /** The CLI re-emits the messages it takes (`--replay-user-messages`): needed to hand it a message during a turn. */
+  replaysMessages: boolean;
 }
 
 interface ClaudeTurn {
@@ -40,7 +42,17 @@ interface ClaudeTurn {
   questions: Map<string, AbortController>;
   interruptSent: boolean;
   interruptController: AbortController;
+  /**
+   * Messages the person sent during the turn that the CLI has not yet taken (it re-emits each one, by uuid, when it does).
+   * One that arrives after the CLI's last step runs as a turn of its own right after this one, so this turn stays open
+   * for it instead of ending at the first result.
+   */
+  steered: Set<string>;
+  steerTimer?: ReturnType<typeof setTimeout>;
 }
+
+/** How long a finished turn waits for the CLI to take a message that is still queued before it gives up on it. */
+const STEER_PICKUP_MS = 15_000;
 
 /** Shape of one entry in the CLI's `initialize` control response (`models`). */
 interface ClaudeModelInfo { value?: unknown; displayName?: unknown; description?: unknown; resolvedModel?: unknown }
@@ -180,19 +192,26 @@ export class ClaudeAdapter extends BaseCliAdapter {
    * and remembered: everything else works, there is just no thinking text to show.
    */
   private thinkingDisplay = true;
+  /** `--replay-user-messages` is missing from the oldest CLIs; without it a message cannot be handed over during a turn. */
+  private replayMessages = true;
 
   override async startSession(ctx: StartSessionContext): Promise<string> {
-    if (!this.thinkingDisplay) return this.openSession(ctx, false);
-    try { return await this.openSession(ctx, true); }
-    catch (error) {
-      if (!/--thinking-display|thinking-display/.test(error instanceof Error ? error.message : String(error))) throw error;
-      this.runtime.logger.warn("claude does not support --thinking-display; thinking will not be shown");
-      this.thinkingDisplay = false;
-      return this.openSession(ctx, false);
+    for (;;) {
+      try { return await this.openSession(ctx, this.thinkingDisplay, this.replayMessages); }
+      catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        if (this.thinkingDisplay && /--thinking-display|thinking-display/.test(message)) {
+          this.runtime.logger.warn("claude does not support --thinking-display; thinking will not be shown");
+          this.thinkingDisplay = false;
+        } else if (this.replayMessages && /replay-user-messages/.test(message)) {
+          this.runtime.logger.warn("claude does not support --replay-user-messages; messages sent during a turn will be queued by the bridge");
+          this.replayMessages = false;
+        } else throw error;
+      }
     }
   }
 
-  private async openSession(ctx: StartSessionContext, thinkingDisplay: boolean): Promise<string> {
+  private async openSession(ctx: StartSessionContext, thinkingDisplay: boolean, replayMessages: boolean): Promise<string> {
     if (ctx.resumeSessionId && !validNativeId(ctx.resumeSessionId)) throw new Error("Invalid Claude resume session ID");
     ctx.signal.throwIfAborted();
     const providerSessionId = `claude-${randomUUID()}`;
@@ -217,6 +236,7 @@ export class ClaudeAdapter extends BaseCliAdapter {
         args: [
           "-p", "--input-format", "stream-json", "--permission-prompt-tool", "stdio",
           "--output-format", "stream-json", "--verbose", "--include-partial-messages",
+          ...(replayMessages ? ["--replay-user-messages"] : []),
           ...(ctx.resumeSessionId ? ["--resume", conversationId] : ["--session-id", conversationId]),
           "--mcp-config", mcpConfigPath, "--strict-mcp-config",
           // Rebuild current prompt/tool schemas on resume instead of restoring
@@ -245,7 +265,7 @@ export class ClaudeAdapter extends BaseCliAdapter {
         },
       });
       session = { requestUserInput: ctx.requestUserInput, mcp: ctx.mcp, mcpConfigPath,
-        conversationId, resumable: Boolean(ctx.resumeSessionId), process: transport, active: null };
+        conversationId, resumable: Boolean(ctx.resumeSessionId), process: transport, active: null, replaysMessages: replayMessages };
       await transport.request("initialize", ctx.signal);
       ctx.signal.throwIfAborted();
       this.sessions.set(providerSessionId, session);
@@ -282,7 +302,7 @@ export class ClaudeAdapter extends BaseCliAdapter {
       input = { ...input, command: { name: target.name, args: task ?? "" } };
     }
     const active: ClaudeTurn = { input, queue: new AsyncQueue(), translator: new ClaudeStreamTranslator(requestId),
-      questions: new Map(), interruptSent: false, interruptController: new AbortController() };
+      questions: new Map(), interruptSent: false, interruptController: new AbortController(), steered: new Set() };
     session.active = active;
     const abort = () => { void this.interrupt(session); };
     input.signal.addEventListener("abort", abort, { once: true });
@@ -321,6 +341,10 @@ export class ClaudeAdapter extends BaseCliAdapter {
       void this.answerControl(session, active, message);
       return;
     }
+    if (message.type === "user" && message.isReplay === true && typeof message.uuid === "string" && active.steered.delete(message.uuid) && active.steered.size === 0) {
+      clearTimeout(active.steerTimer); // The CLI took it: it will answer inside the turn that is running, or a follow-up turn that ends this one.
+      active.steerTimer = undefined;
+    }
     const confirmsSession = (message.type === "result" || (message.type === "system" && message.subtype === "init"))
       && typeof message.session_id === "string" && validNativeId(message.session_id);
     if (confirmsSession) {
@@ -336,7 +360,10 @@ export class ClaudeAdapter extends BaseCliAdapter {
     if (confirmsSession || (message.type === "result" && session.resumable)) active.queue.push({ type: "session_info", requestId,
       provider: this.id, providerSessionId: session.conversationId });
     for (const event of active.translator.translate(message)) {
-      if (event.type === "turn_finished") this.finish(session, active.input.signal.aborted ? "cancelled" : event.reason);
+      if (event.type === "turn_finished") {
+        if (this.holdForSteered(session, active, message)) continue;
+        this.finish(session, active.input.signal.aborted ? "cancelled" : event.reason);
+      }
       else active.queue.push(event.type === "usage_update" ? { ...event,
         usage: { ...event.usage, source: "claude_result", providerSessionId: session.conversationId } } : event);
     }
@@ -359,9 +386,33 @@ export class ClaudeAdapter extends BaseCliAdapter {
     } finally { active.questions.delete(message.request_id); }
   }
 
+  /** A result arrived while a message the person sent is still queued: the CLI runs it next, so the turn goes on. */
+  private holdForSteered(session: ClaudeSession, active: ClaudeTurn, message: Record<string, any>): boolean {
+    if (message.type !== "result" || message.is_error || active.steered.size === 0 || active.input.signal.aborted) return false;
+    active.steerTimer ??= setTimeout(() => { if (session.active === active) this.finish(session, "completed"); }, STEER_PICKUP_MS);
+    return true;
+  }
+
+  /** The CLI takes a message written to its input during a turn at its next step, so it is simply written. */
+  async steerTurn(providerSessionId: string, text: string): Promise<boolean> {
+    const session = this.sessions.get(providerSessionId);
+    const active = session?.active;
+    if (!session?.replaysMessages || !active || active.interruptSent || active.input.signal.aborted) return false;
+    const uuid = randomUUID();
+    active.steered.add(uuid);
+    try {
+      session.process.write({ type: "user", uuid, session_id: session.conversationId, parent_tool_use_id: null, message: { role: "user", content: text } });
+    } catch {
+      active.steered.delete(uuid);
+      return false;
+    }
+    return true;
+  }
+
   private finish(session: ClaudeSession, reason: "completed" | "cancelled" | "error"): void {
     const active = session.active;
     if (!active) return;
+    clearTimeout(active.steerTimer);
     session.active = null;
     active.interruptController.abort();
     for (const question of active.questions.values()) question.abort();

@@ -121,6 +121,17 @@ export class ProviderSessionManager<S extends ProviderSessionState = ProviderSes
     yield terminal ?? { type: "turn_finished", requestId: input.requestId, reason: input.signal.aborted ? "cancelled" : "error" };
   }
 
+  /** Give a message to the running turn through the provider itself; false means the caller should queue it. */
+  async steer(session: S, text: string): Promise<boolean> {
+    if (!session.provider || !session.providerSessionId) return false;
+    try {
+      return (await this.providers.get(session.provider)?.steerTurn?.(session.providerSessionId, text)) === true;
+    } catch (error) {
+      this.log.warn("steerTurn failed; the message is queued instead", { error: String(error) });
+      return false;
+    }
+  }
+
   async cancel(session: S): Promise<void> {
     if (session.provider && session.providerSessionId) await this.providers.get(session.provider)?.cancelTurn(session.providerSessionId);
   }

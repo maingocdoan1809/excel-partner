@@ -114,6 +114,7 @@ export class ProfiledAdapter implements ProviderAdapter {
     }
   }
   async cancelTurn(id: string) { await this.sessions.get(id)?.adapter.cancelTurn(id); }
+  async steerTurn(id: string, text: string): Promise<boolean> { return (await this.sessions.get(id)?.adapter.steerTurn?.(id, text)) ?? false; }
   async closeSession(id: string) { const state = this.sessions.get(id); this.sessions.delete(id); await state?.adapter.closeSession(id); }
   async dispose() { await Promise.all([...this.adapters.values()].map(adapter => adapter.dispose())); this.adapters.clear(); this.sessions.clear(); }
 }

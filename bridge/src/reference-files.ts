@@ -178,6 +178,17 @@ export class ReferenceFiles {
     return { path: real, folder: false };
   }
 
+  /**
+   * The `<user_attached_files>` block for what a person pointed at with @, shared by a message sent now and one queued while
+   * a reply runs: each entry says whether it is a file or a folder, so a saved reference folder is never refused as "not a file".
+   */
+  mentionedFilesBlock(inputs: string[], grants: ReadonlySet<string> = new Set()): string {
+    const entries = inputs.map((input) => this.mentionedPath(input, grants)).map(({ path: file, folder }) => JSON.stringify(folder
+      ? { name: path.basename(file), path: file, kind: "reference_folder", hint: "A folder the user pointed at. Call list_reference_files with this path to see what is inside, then read the files you need." }
+      : { name: path.basename(file), path: file, kind: "reference" }));
+    return "\n\n<user_attached_files>\n" + entries.join("\n") + "\n</user_attached_files>";
+  }
+
   /** Check a selected file without copying its content into the session. */
   selectedPath(input: string, grants: ReadonlySet<string> = new Set()): string {
     const file = this.resolve(input, grants);

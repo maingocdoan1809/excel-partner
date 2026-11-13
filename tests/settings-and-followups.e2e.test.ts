@@ -2,6 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { ReferenceFiles } from "../bridge/src/reference-files.js";
 import { Bridge } from "../bridge/src/server.js";
 import { loadConfig } from "../bridge/src/config.js";
 import { SkillStore } from "../bridge/src/skills.js";
@@ -18,7 +19,14 @@ class BoundaryAdapter extends MockAdapter {
   useTool = true;
   release!: () => void;
   private gate = new Promise<void>(resolve => { this.release = resolve; });
+  /** A provider that takes a message sent during the turn itself; off by default, so the bridge's own queue is what is tested. */
+  steerAccepts = false;
+  steered: string[] = [];
   constructor() { super({ id: "claude" }); }
+  async steerTurn(_providerSessionId: string, text: string): Promise<boolean> {
+    this.steered.push(text);
+    return this.steerAccepts;
+  }
   override async startSession(context: StartSessionContext) {
     this.contexts.push(context);
     return super.startSession(context);
@@ -48,7 +56,7 @@ afterEach(async () => {
   await bridge?.close(); bridge = null;
   if (folder) fs.rmSync(folder, { recursive: true, force: true });
 });
-async function setup() {
+async function setup(options: { references?: ReferenceFiles } = {}) {
   folder = fs.mkdtempSync(path.join(os.tmpdir(), "settings-followups-"));
   const upload = path.join(folder, "uploaded");
   const external = path.join(folder, "external");
@@ -60,6 +68,7 @@ async function setup() {
     usageFile: null, savedReferencesFile: null, workspaceConfigPath: null,
     skillUploadDir: upload, skills: new SkillStore([upload, external], path.join(folder, "templates")),
     systemPromptFile: path.join(folder, "system-prompt.txt"), registry: new ProviderRegistry().register(adapter),
+    ...(options.references ? { references: options.references } : {}),
   });
   const { url } = await bridge.listen();
   pane = await PaneClient.connect(url.replace("http", "ws") + "/ws");
@@ -135,6 +144,55 @@ describe("editable settings and pending user prompts", () => {
     expect(await (await fetch(url + "/skills")).json()).toMatchObject({ skills: expect.arrayContaining([{ name: "report", description: "Updated" }]) });
     expect((await fetch(url + "/session/skills?name=readonly&file=SKILL.md", { headers })).status).toBe(403);
     expect((await fetch(url + "/session/skills", { method: "PUT", headers, body: JSON.stringify({ name: "readonly", ...document }) })).status).toBe(403);
+  });
+
+  it("accepts a folder pointed at with @ in a message queued while a reply is running", async () => {
+    const docs = fs.mkdtempSync(path.join(os.tmpdir(), "followup-folder-"));
+    try {
+      fs.writeFileSync(path.join(docs, "rules.md"), "house rules");
+      const { adapter, pane } = await setup({ references: new ReferenceFiles([docs]) });
+      pane.send({ type: "prompt", requestId: "first", prompt: "Make a report", selection: null });
+      await pane.waitFor(message => message.type === "turn_started");
+      pane.send({ type: "followup", requestId: "first", id: "folder", prompt: "Also read @docs", referencePaths: [docs, path.join(docs, "rules.md")] });
+      const status = await pane.waitFor(message => message.type === "followup_status" && message.id === "folder");
+      expect(status).toMatchObject({ state: "pending" });
+      adapter.release();
+      await pane.waitFor(message => message.type === "turn_finished");
+      const text = (adapter.results[0] as { additional_user_messages?: Array<{ text: string }> }).additional_user_messages![0]!.text;
+      expect(text).toContain('"kind":"reference_folder"');
+      expect(text).toContain('"kind":"reference"');
+      expect(text).not.toContain("is not a file");
+    } finally {
+      fs.rmSync(docs, { recursive: true, force: true });
+    }
+  });
+
+  it("hands a message sent during the turn to the provider when it takes it, and does not queue it as well", async () => {
+    const { adapter, pane } = await setup();
+    adapter.steerAccepts = true;
+    pane.send({ type: "prompt", requestId: "first", prompt: "Make a report", selection: null });
+    await pane.waitFor(message => message.type === "turn_started");
+    pane.send({ type: "followup", requestId: "first", id: "now", prompt: "Use blue headers" });
+    const status = await pane.waitFor(message => message.type === "followup_status" && message.id === "now");
+    expect(status).toMatchObject({ state: "delivered" });
+    expect(adapter.steered).toEqual(["Use blue headers"]);
+    adapter.release();
+    await pane.waitFor(message => message.type === "turn_finished");
+    // The provider has it: the tool result carries nothing extra, and nothing is left for the next turn.
+    expect(adapter.results[0]).not.toHaveProperty("additional_user_messages");
+    expect(pane.received.filter(message => message.type === "followup_status" && message.id === "now")).toHaveLength(1);
+  });
+
+  it("queues the message at the next tool call when the provider cannot take it during the turn", async () => {
+    const { adapter, pane } = await setup();
+    pane.send({ type: "prompt", requestId: "first", prompt: "Make a report", selection: null });
+    await pane.waitFor(message => message.type === "turn_started");
+    pane.send({ type: "followup", requestId: "first", id: "later", prompt: "Use green headers" });
+    expect(await pane.waitFor(message => message.type === "followup_status" && message.id === "later")).toMatchObject({ state: "pending" });
+    expect(adapter.steered).toEqual(["Use green headers"]); // asked first, then queued
+    adapter.release();
+    await pane.waitFor(message => message.type === "turn_finished");
+    expect(adapter.results[0]).toMatchObject({ additional_user_messages: [{ id: "later", text: "Use green headers" }] });
   });
 
   it("delivers additional user instructions once at the next tool boundary in order", async () => {

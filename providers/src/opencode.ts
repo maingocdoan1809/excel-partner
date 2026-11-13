@@ -1,3 +1,4 @@
+import { TURN_IDLE_LIMIT_MS } from "./turn-limits.js";
 import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
@@ -410,7 +411,8 @@ export class OpencodeAdapter extends BaseCliAdapter {
       }>(
         "session/prompt",
         { sessionId: session.acpSessionId, prompt: [{ type: "text", text }, ...(input.images ?? []).map(image => ({ type: "image", mimeType: image.mediaType, data: image.data }))] },
-        30 * 60_000,
+        TURN_IDLE_LIMIT_MS,
+        { idle: true },
       );
     };
 

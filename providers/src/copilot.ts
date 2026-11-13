@@ -1,3 +1,4 @@
+import { TURN_IDLE_LIMIT_MS } from "./turn-limits.js";
 import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
@@ -272,7 +273,8 @@ export class CopilotAdapter extends BaseCliAdapter {
       .request<{ stopReason?: string; usage?: { inputTokens: number; outputTokens: number; totalTokens: number; cachedReadTokens?: number } }>(
         "session/prompt",
         { sessionId: session.acpSessionId, prompt: [{ type: "text", text }, ...(input.images ?? []).map(image => ({ type: "image", mimeType: image.mediaType, data: image.data }))] },
-        30 * 60_000,
+        TURN_IDLE_LIMIT_MS,
+        { idle: true },
       )
       .then(async (response) => {
         this.flushText(active);
@@ -343,6 +345,11 @@ export class CopilotAdapter extends BaseCliAdapter {
       return; // Do not charge pre-resume history to this request when its baseline is unknown.
     }
     active.queue.push({ type: "usage_update", requestId: active.requestId, usage: session.usage.next(total) });
+  }
+
+  /** Only the SDK transport can take a message mid-turn; an ACP session is queued by the caller. */
+  async steerTurn(providerSessionId: string, text: string): Promise<boolean> {
+    return this.native.has(providerSessionId) ? this.native.steer(providerSessionId, text) : false;
   }
 
   override async cancelTurn(providerSessionId: string): Promise<void> {

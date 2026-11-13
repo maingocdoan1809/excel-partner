@@ -34,6 +34,8 @@ interface Pending {
   resolve: (value: unknown) => void;
   reject: (error: Error) => void;
   method: string;
+  /** Restarts the timeout; only for requests whose limit is "silence", not "total time". */
+  rearm?: () => void;
 }
 
 /**
@@ -92,14 +94,24 @@ export class JsonRpcPeer {
     else this.exitListeners.push(listener);
   }
 
-  request<T = unknown>(method: string, params?: unknown, timeoutMs = 60_000): Promise<T> {
+  /**
+   * Send a request and wait for its answer. `timeoutMs` is the total time allowed, or, with `idle`, the time the peer
+   * may stay completely silent: anything it sends (a notification, a request of its own) starts the count again, so a
+   * long turn that keeps working never times out.
+   */
+  request<T = unknown>(method: string, params?: unknown, timeoutMs = 60_000, options: { idle?: boolean } = {}): Promise<T> {
     if (this.closed) return Promise.reject(new Error(`${method}: process is not running`));
     const id = this.nextId++;
     return new Promise<T>((resolve, reject) => {
-      const timer = setTimeout(() => {
-        this.pending.delete(id);
-        reject(new Error(`${method}: timed out after ${timeoutMs}ms`));
-      }, timeoutMs);
+      let timer: NodeJS.Timeout;
+      const arm = () => {
+        clearTimeout(timer);
+        timer = setTimeout(() => {
+          this.pending.delete(id);
+          reject(new Error(`${method}: timed out after ${timeoutMs}ms${options.idle ? " without any activity" : ""}`));
+        }, timeoutMs);
+      };
+      arm();
       this.pending.set(id, {
         method,
         resolve: (value) => {
@@ -110,6 +122,7 @@ export class JsonRpcPeer {
           clearTimeout(timer);
           reject(error);
         },
+        ...(options.idle ? { rearm: arm } : {}),
       });
       this.write({ id, method, params });
     });
@@ -159,6 +172,9 @@ export class JsonRpcPeer {
     } catch {
       return;
     }
+
+    // Anything the peer sends shows it is alive: requests waiting only on its silence start their count again.
+    for (const waiting of this.pending.values()) waiting.rearm?.();
 
     const id = message.id as number | string | undefined;
     const method = message.method as string | undefined;

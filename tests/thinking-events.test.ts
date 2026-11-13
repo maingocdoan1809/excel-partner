@@ -77,6 +77,21 @@ describe("Claude thinking-display flag", () => {
   });
 });
 
+describe("Claude replay-user-messages flag", () => {
+  it("opens again without it when the CLI does not know it, keeps the thinking flag, and remembers", async () => {
+    const claude = new ClaudeAdapter(runtime);
+    const calls: Array<[boolean, boolean]> = [];
+    (claude as unknown as { openSession: (ctx: unknown, thinking: boolean, replay: boolean) => Promise<string> }).openSession = async (_ctx, thinking, replay) => {
+      calls.push([thinking, replay]);
+      if (replay) throw new Error("claude exited (code=1, signal=null): error: unknown option '--replay-user-messages'");
+      return "id";
+    };
+    expect(await claude.startSession({} as StartSessionContext)).toBe("id");
+    expect(await claude.startSession({} as StartSessionContext)).toBe("id");
+    expect(calls).toEqual([[true, true], [true, false], [true, false]]);
+  });
+});
+
 describe("Codex reasoning", () => {
   function run(notifications: Array<[string, Record<string, unknown>]>) {
     const events: ProviderEvent[] = [];

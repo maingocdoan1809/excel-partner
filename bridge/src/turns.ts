@@ -123,11 +123,7 @@ export class TurnRunner {
     }
     if (referencePaths?.length) {
       try {
-        const selected = referencePaths.map((file) => references.mentionedPath(file, session.referenceGrants));
-        prompt += "\n\n<user_attached_files>\n" + selected.map(({ path: file, folder }) => JSON.stringify(folder
-          ? { name: path.basename(file), path: file, kind: "reference_folder", hint: "A folder the user pointed at. Call list_reference_files with this path to see what is inside, then read the files you need." }
-          : { name: path.basename(file), path: file, kind: "reference" }),
-        ).join("\n") + "\n</user_attached_files>";
+        prompt += references.mentionedFilesBlock(referencePaths, session.referenceGrants);
       } catch (error) {
         session.send({ type: "error", requestId, code: "invalid_attachment", message: error instanceof Error ? error.message : String(error) });
         session.send({ type: "turn_finished", requestId, reason: "error" });
@@ -284,6 +280,12 @@ export class TurnRunner {
     session.takeFollowups(requestId, "next_turn");
     session.endTurn(requestId);
     session.send({ type: "turn_finished", requestId, reason });
+  }
+
+  /** Give a message to the turn that is running, through the provider; false when it must be queued instead. */
+  steer(session: WorkbookSession, requestId: string, text: string): Promise<boolean> {
+    if (session.activeRequestId !== requestId || session.turnController?.signal.aborted) return Promise.resolve(false);
+    return this.deps.providerSessions.steer(session, text);
   }
 
   async cancel(session: WorkbookSession, requestId: string): Promise<void> {

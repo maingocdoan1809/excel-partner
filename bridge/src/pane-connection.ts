@@ -162,7 +162,7 @@ export class PaneSockets {
         delegations.decline(session, message.delegationId, typeof message.reason === "string" ? message.reason.slice(0, 200) : "");
         return;
       case "followup": {
-        const respond = (state: "pending" | "next_turn" | "rejected", detail?: string) => session.send({ type: "followup_status", requestId: message.requestId, id: message.id, state, message: detail });
+        const respond = (state: "pending" | "delivered" | "next_turn" | "rejected", detail?: string) => session.send({ type: "followup_status", requestId: message.requestId, id: message.id, state, message: detail });
         if (session.activeRequestId !== message.requestId || session.turnController?.signal.aborted) { respond("next_turn"); return; }
         try {
           let text = expandSkillPrompt(message.prompt, this.deps.skills).prompt;
@@ -172,9 +172,10 @@ export class PaneSockets {
             text += "\n\n<user_attached_files>\n" + files.map(file => JSON.stringify({ name: file!.name, path: attachmentPath(file!.id), kind: file!.kind })).join("\n") + "\n</user_attached_files>";
           }
           if (message.referencePaths?.length) {
-            const files = message.referencePaths.map(file => this.deps.references.selectedPath(file, session.referenceGrants));
-            text += "\n\n<user_attached_files>\n" + files.map(file => JSON.stringify({ name: path.basename(file), path: file, kind: "reference" })).join("\n") + "\n</user_attached_files>";
+            text += this.deps.references.mentionedFilesBlock(message.referencePaths, session.referenceGrants);
           }
+          // The CLI takes a message sent during a turn itself (at its next step); the queue is for CLIs that cannot.
+          if (await turns.steer(session, message.requestId, text)) { respond("delivered"); return; }
           session.queueFollowup(message.requestId, message.id, text);
           respond("pending");
         } catch (error) { respond("rejected", error instanceof Error ? error.message : String(error)); }

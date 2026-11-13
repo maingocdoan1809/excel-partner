@@ -135,6 +135,13 @@ describe("JsonRpcPeer", () => {
         process.stdout.write(JSON.stringify({ id: 99, method: "client/question", params: { q: 1 } }) + "\\n");
         process.stdout.write(JSON.stringify({ method: "note", params: { n: 1 } }) + "\\n");
         process.stdout.write(JSON.stringify({ id: m.id, result: "asked" }) + "\\n");
+      } else if (m.method === "chatty") {
+        // Works for 400 ms, saying something every 60 ms, then answers.
+        let n = 0;
+        const timer = setInterval(() => {
+          process.stdout.write(JSON.stringify({ method: "progress", params: { n: ++n } }) + "\\n");
+          if (n === 7) { clearInterval(timer); process.stdout.write(JSON.stringify({ id: m.id, result: "done" }) + "\\n"); }
+        }, 60);
       } else if (m.method === "die") process.exit(3);
     });
   `;
@@ -165,6 +172,18 @@ describe("JsonRpcPeer", () => {
     await expect(pending).rejects.toThrow(/exited/);
     await expect(peer.request("echo", {})).rejects.toThrow(/not running/);
     expect(peer.alive).toBe(false);
+  });
+
+  it("lets a long request run while the peer keeps working, and only times it out for silence", async () => {
+    const peer = spawnPeer({ onNotification: () => undefined });
+    try {
+      // 200 ms would end a 400 ms job if it were a total limit; the peer is never silent for that long.
+      expect(await peer.request("chatty", {}, 200, { idle: true })).toBe("done");
+      await expect(peer.request("chatty", {}, 200)).rejects.toThrow(/timed out after 200ms$/);
+      await expect(peer.request("silent", {}, 100, { idle: true })).rejects.toThrow(/timed out after 100ms without any activity/);
+    } finally {
+      await peer.close();
+    }
   });
 
   it("times out requests the peer never answers", async () => {

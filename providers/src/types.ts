@@ -116,6 +116,13 @@ export interface ProviderAdapter {
   sendTurn(input: SendTurnInput): AsyncIterable<ProviderEvent>;
   /** Interrupt the running turn. Normal cancellation retains the session. */
   cancelTurn(providerSessionId: string): Promise<void>;
+  /**
+   * Hand a message from the person to the turn that is running now, the way the CLI itself takes one at its next step.
+   * Resolves true once the CLI has it and will answer it inside the running turn (the turn's own events carry the
+   * answer); false when there is no turn to join or the CLI cannot take it, and the caller queues it instead.
+   * Optional: an adapter without it always gets the queue.
+   */
+  steerTurn?(providerSessionId: string, text: string): Promise<boolean>;
   /** End the session and release the CLI process. */
   closeSession(providerSessionId: string): Promise<void>;
   /** Release all resources; called on bridge shutdown. */

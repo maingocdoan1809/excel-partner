@@ -56,7 +56,7 @@ beforeEach(() => {
   sdk.resumeId = undefined;
   sdk.open = async () => sdk.session;
   sdk.session = { sessionId: "native-id", on: (handler: any) => { sdk.handler = handler; return () => { sdk.handler = null; }; },
-    sendAndWait: (...args: any[]) => sdk.run(...args), abort: vi.fn(async () => {}), disconnect: vi.fn(async () => {}) };
+    sendAndWait: (...args: any[]) => sdk.run(...args), send: vi.fn(async () => "message-id"), abort: vi.fn(async () => {}), disconnect: vi.fn(async () => {}) };
   sdk.run = async () => {};
 });
 afterEach(async () => { await manager.dispose(); vi.unstubAllEnvs(); fs.rmSync(dir, { recursive: true, force: true }); });
@@ -66,6 +66,69 @@ async function turn(id: string, signal = new AbortController().signal) {
   for await (const event of manager.send({ providerSessionId: id, requestId: "r", prompt: "Ask where", selection: null, signal }, process.env)) events.push(event);
   return events;
 }
+
+describe("Copilot native turn length", () => {
+  afterEach(() => { vi.useRealTimers(); });
+  const minutes = (n: number) => n * 60_000;
+
+  it("lets a turn run past 30 minutes while the CLI keeps sending events", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval", "Date"] });
+    const id = await manager.start(ctx, process.execPath, process.env);
+    let finish!: () => void;
+    sdk.run = (_prompt: unknown, timeout: number) => { expect(timeout).toBeGreaterThan(minutes(60)); return new Promise<void>(resolve => { finish = resolve; }); };
+    const running = turn(id);
+    await vi.waitFor(() => expect(finish).toBeTypeOf("function"));
+    for (let i = 0; i < 8; i++) { await vi.advanceTimersByTimeAsync(minutes(10)); sdk.handler?.({ type: "assistant.turn_start", data: {} }); }
+    finish();
+    const events = await running;
+    expect(events.some(event => event.type === "error")).toBe(false);
+    expect(events.at(-1)).toMatchObject({ type: "turn_finished", reason: "completed" });
+  });
+
+  it("stops a CLI that has sent nothing for 20 minutes, and says how to carry on", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval", "Date"] });
+    const id = await manager.start(ctx, process.execPath, process.env);
+    let finish!: () => void;
+    sdk.run = () => new Promise<void>(resolve => { finish = resolve; });
+    sdk.session.abort = vi.fn(async () => { finish(); }); // aborting ends the wait, as in the real CLI
+    const running = turn(id);
+    await vi.waitFor(() => expect(finish).toBeTypeOf("function"));
+    await vi.advanceTimersByTimeAsync(minutes(21));
+    const events = await running;
+    expect(sdk.session.abort).toHaveBeenCalled();
+    expect(events).toContainEqual(expect.objectContaining({ type: "error", message: expect.stringContaining('Send "continue"') }));
+    expect(events.at(-1)).toMatchObject({ type: "turn_finished", reason: "error" });
+  });
+});
+
+describe("Copilot native message sent during a turn", () => {
+  it("hands it to the running turn with mode immediate, not as a queued turn of its own", async () => {
+    const id = await manager.start(ctx, process.execPath, process.env);
+    let finish!: () => void;
+    sdk.run = () => new Promise<void>(resolve => { finish = resolve; });
+    const running = turn(id);
+    await vi.waitFor(() => expect(finish).toBeTypeOf("function"));
+    expect(await manager.steer(id, "Also use blue")).toBe(true);
+    expect(sdk.session.send).toHaveBeenCalledWith({ prompt: "Also use blue", mode: "immediate" });
+    finish();
+    await running;
+  });
+
+  it("says no when no turn is running or the turn was stopped, so the caller queues the message", async () => {
+    const id = await manager.start(ctx, process.execPath, process.env);
+    expect(await manager.steer(id, "Nothing running")).toBe(false);
+    const controller = new AbortController();
+    let finish!: () => void;
+    sdk.run = () => new Promise<void>(resolve => { finish = resolve; });
+    const running = turn(id, controller.signal);
+    await vi.waitFor(() => expect(finish).toBeTypeOf("function"));
+    controller.abort();
+    expect(await manager.steer(id, "Stopped")).toBe(false);
+    expect(sdk.session.send).not.toHaveBeenCalled();
+    finish();
+    await running;
+  });
+});
 
 describe("Copilot native question transport", () => {
   it("uses the installed executable, limits tools, and keeps workbook permission in the gateway", async () => {

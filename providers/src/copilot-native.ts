@@ -15,6 +15,7 @@ import { ensureWorkspaceDir } from "./workspace.js";
 import { connectMcpTools, type McpToolBridge, type McpToolBridgeFactory } from "./mcp-tool-bridge.js";
 import type { SendTurnInput, StartSessionContext } from "./types.js";
 import { normalizeCommands } from "./commands.js";
+import { TURN_BACKSTOP_MS, TURN_IDLE_LIMIT_MS, idleMessage } from "./turn-limits.js";
 
 interface NativeSession {
   ask: StartSessionContext["requestUserInput"];
@@ -148,6 +149,19 @@ export class CopilotNativeSessions {
     } catch (error) { await client.stop(); await bridge.close().catch(() => {}); throw error; }
   }
 
+  /**
+   * `immediate` puts the message into the turn that is running: the CLI takes it at its next step, or right after its last
+   * one, and either way the turn's single idle comes after the answer. The default `enqueue` would run it as a turn of its own
+   * after this one, which the model answers by repeating work it has already done.
+   */
+  async steer(id: string, text: string): Promise<boolean> {
+    const state = this.sessions.get(id);
+    const active = state?.active;
+    if (!state || !active || active.signal.aborted || active.controller.signal.aborted) return false;
+    await state.session.send({ prompt: text, mode: "immediate" });
+    return true;
+  }
+
   async *send(input: SendTurnInput, env: NodeJS.ProcessEnv): AsyncIterable<ProviderEvent> {
     const state = this.sessions.get(input.providerSessionId)!;
     const { requestId } = input;
@@ -173,7 +187,9 @@ export class CopilotNativeSessions {
       queue.push({ type: "thinking_delta", requestId, text: `${lastReasoning && lastReasoning !== reasoningId ? "\n\n" : ""}${text}` });
       lastReasoning = reasoningId;
     };
+    let lastActivity = Date.now();
     const unsubscribe = state.session.on(event => {
+      lastActivity = Date.now();
       if (event.agentId || ("parentToolCallId" in event.data && event.data.parentToolCallId)) return;
       switch (event.type) {
         case "assistant.reasoning_delta":
@@ -221,10 +237,18 @@ export class CopilotNativeSessions {
     });
     const cancel = () => { controller.abort(); void state.session.abort().catch(() => undefined); };
     input.signal.addEventListener("abort", cancel, { once: true });
+    // The turn may run as long as the CLI keeps sending events; only a CLI that has gone silent is stopped.
+    const watchdog = setInterval(() => {
+      if (failed || Date.now() - lastActivity < TURN_IDLE_LIMIT_MS) return;
+      failed = true;
+      queue.push({ type: "error", requestId, code: "provider_error", message: idleMessage("Copilot") });
+      cancel();
+    }, 30_000);
+    watchdog.unref?.();
     const context = buildTurnPrompt(input.prompt, input.selection);
     const prompt = input.userPrompt?.trim() ? `${input.userPrompt}\n\n<addin_context>\n${context}\n</addin_context>` : context;
     const run = async () => {
-      if (!input.command) { await state.session.sendAndWait({ prompt }, 30 * 60_000); return; }
+      if (!input.command) { await state.session.sendAndWait({ prompt }, TURN_BACKSTOP_MS); return; }
       const { name } = input.command;
       let args = input.command.args;
       for (let depth = 0; depth < 5; depth++) {
@@ -238,7 +262,7 @@ export class CopilotNativeSessions {
           case "add-timeline-entry": queue.push({ type: "message_completed", requestId, text: result.entry.text }); return;
           case "agent-prompt":
             if (result.notice) queue.push({ type: "message_completed", requestId, text: result.notice });
-            await state.session.sendAndWait({ prompt: result.prompt, agentMode: result.mode }, 30 * 60_000); return;
+            await state.session.sendAndWait({ prompt: result.prompt, agentMode: result.mode }, TURN_BACKSTOP_MS); return;
           case "select-subcommand": {
             const answer = await askProviderQuestions(UserInputRequestSchema.parse({ questions: [{ id: "subcommand", question: result.title,
               options: result.options.slice(0, 30).map(option => ({ label: option.name, description: option.description })), allowFreeform: true }] }),
@@ -270,7 +294,7 @@ export class CopilotNativeSessions {
     });
     try { for await (const event of queue) yield event; }
     finally {
-      controller.abort(); unsubscribe(); input.signal.removeEventListener("abort", cancel);
+      clearInterval(watchdog); controller.abort(); unsubscribe(); input.signal.removeEventListener("abort", cancel);
       if (state.active?.queue === queue) state.active = undefined;
     }
   }

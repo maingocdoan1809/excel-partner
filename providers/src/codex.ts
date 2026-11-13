@@ -327,6 +327,22 @@ export class CodexAdapter extends BaseCliAdapter {
     if (session) await this.interrupt(session);
   }
 
+  /**
+   * `turn/steer` adds input to the turn that is running and fails when that turn is not the active one, so a message
+   * is either part of the running turn (which then answers it) or refused and queued by the caller.
+   */
+  async steerTurn(providerSessionId: string, text: string): Promise<boolean> {
+    const session = this.sessions.get(providerSessionId);
+    const active = session?.active;
+    if (!session || !active?.turnId || active.interrupting) return false;
+    try {
+      await session.peer.request("turn/steer", { threadId: session.threadId, expectedTurnId: active.turnId, input: [{ type: "text", text, text_elements: [] }] });
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   override async closeSession(providerSessionId: string): Promise<void> {
     const session = this.sessions.get(providerSessionId);
     this.sessions.delete(providerSessionId);
