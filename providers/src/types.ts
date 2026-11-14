@@ -1,10 +1,13 @@
 import type {
+  ProviderCapabilities,
   ProviderConnectionStatus,
   ProviderDetection,
   ProviderEvent,
   ProviderId,
   PromptSelectionSnapshot,
 } from "../../protocol/src/index.js";
+import type { ProviderOption } from "../../protocol/src/provider-options.js";
+import type { LoginAccount, LoginChoice, ProviderLoginStatus } from "../../protocol/src/provider-login.js";
 
 /**
  * Everything an adapter needs to launch its CLI wired to the local Excel MCP
@@ -80,6 +83,14 @@ export interface SendTurnInput {
   signal: AbortSignal;
 }
 
+/** One sign-in attempt. The bridge shows its status and hands it the code the sign-in page returned. */
+export interface ProviderLoginAttempt {
+  status(): ProviderLoginStatus;
+  /** Hands over the code the sign-in page showed; throws when no code is expected. */
+  submitCode(code: string): void;
+  cancel(): void;
+}
+
 export interface ProviderModel {
   id: string;
   name: string;
@@ -98,8 +109,30 @@ export interface ProviderAdapter {
   runtimeRevision?(): string;
   listCommands?(providerSessionId?: string): Promise<import("../../protocol/src/commands.js").ProviderCommand[]>;
   readonly id: ProviderId;
+  readonly capabilities: ProviderCapabilities;
+  /** Extra instructions for how this provider reaches the client's MCP tools, when its way differs from the usual one. */
+  readonly clientToolNotes?: string;
   /** Whether the CLI is installed and what it supports. */
   detect(force?: boolean): Promise<ProviderDetection>;
+  /**
+   * Proves a turn can start: the CLI is signed in and a session opens with the given MCP tools registered.
+   * Sends no prompt. Rejects with a ProviderLoginError when the person still has to sign in.
+   */
+  verifyReady(mcp: McpEndpoint): Promise<void>;
+  /** Starts a sign-in with the provider's own CLI. `choice` is only for providers that list accounts (login kind `account`). */
+  startLogin(choice?: LoginChoice): ProviderLoginAttempt;
+  /** Installs the CLI the release names for this provider and makes the provider use it. */
+  install(): Promise<void>;
+  /** Stops using the CLI the product installed for this provider. */
+  uninstall(): Promise<void>;
+  /** Signs the CLI out (`accountId` names which account, for providers that list them). Rejects when the provider has no sign-out. */
+  logout(accountId?: string): Promise<void>;
+  /** The accounts to choose from; only providers whose login kind is `account`. */
+  loginAccounts?(): Promise<LoginAccount[]>;
+  /** Settings the CLI offers for this session beyond model and effort (a mode, for example), as it last reported them. */
+  sessionOptions?(providerSessionId: string): ProviderOption[];
+  /** Changes one of them in the running session and returns the options as the CLI now reports them. */
+  setSessionOption?(providerSessionId: string, optionId: string, value: string): Promise<ProviderOption[]>;
   /** Models advertised by the installed CLI, when it offers a catalog. */
   listModels?(): Promise<ProviderModelCatalog>;
   /** Read the native title without a model request. Missing titles stay unknown. */

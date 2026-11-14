@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { zipSync, strToU8 } from "fflate";
 import { AttachmentError, attachmentPath, createAttachment } from "../bridge/src/attachments.js";
-import { SessionManager } from "../bridge/src/session-manager.js";
-import { OfficeRuntime } from "../runtime/src/office-runtime.js";
+import { WorkbookSessions } from "../bridge/src/workbook-sessions.js";
+import { OfficeRuntime } from "../bridge/src/office-runtime.js";
 
 const png = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 0]);
 const xlsx = Buffer.from(zipSync({
@@ -21,7 +21,7 @@ describe("user-selected attachments", () => {
   });
 
   it("lets the CLI read text and individual ZIP entries from multiple attachments", async () => {
-    const sessions = new SessionManager({ ttlMs: 60_000 });
+    const sessions = new WorkbookSessions({ ttlMs: 60_000 });
     const session = sessions.create("0123456789abcdef", null);
     const md = createAttachment("notes.md", Buffer.from("# Notes\nFirst file"));
     const zip = createAttachment("bundle.zip", Buffer.from(zipSync({ "readme.txt": strToU8("Second file") })));
@@ -36,7 +36,7 @@ describe("user-selected attachments", () => {
   });
 
   it("serves an uploaded image and workbook only in their workbook session", async () => {
-    const sessions = new SessionManager({ ttlMs: 60_000 });
+    const sessions = new WorkbookSessions({ ttlMs: 60_000 });
     const one = sessions.create("0123456789abcdef", null);
     const two = sessions.create("fedcba9876543210", null);
     const image = createAttachment("photo.png", png);

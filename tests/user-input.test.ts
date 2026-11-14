@@ -3,14 +3,14 @@ import type { WebSocket } from "ws";
 import { UserInputRequestSchema, validateUserInputResponse, type ServerMessage } from "../protocol/src/index.js";
 import { WorkbookSession } from "../bridge/src/session.js";
 import { answerClaudeQuestion, answerCodexQuestions } from "../providers/src/user-input.js";
-import { SessionManager } from "../bridge/src/session-manager.js";
+import { WorkbookSessions } from "../bridge/src/workbook-sessions.js";
 
 const request = UserInputRequestSchema.parse({ questions: [{ id: "output", question: "Where?",
   options: [{ label: "Current sheet" }, { label: "New sheet" }], allowFreeform: false }] });
 
 function connected() {
   const messages: ServerMessage[] = [];
-  const manager = new SessionManager({ ttlMs: 60_000 });
+  const manager = new WorkbookSessions({ ttlMs: 60_000 });
   const session: WorkbookSession = manager.create("workbook", null);
   const socket = { readyState: 1, send: (raw: string) => messages.push(JSON.parse(raw)) } as unknown as WebSocket;
   session.attachSocket(socket);

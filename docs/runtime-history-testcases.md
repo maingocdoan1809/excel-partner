@@ -141,7 +141,7 @@ Windows reproduction with 208,084 command characters fails with
 `ENAMETOOLONG`; the file-backed form initializes successfully with a 208,000
 character Unicode prompt and a 233-character command, without a model call.
 The adapter now writes exact UTF-8 instructions into its private session
-directory and passes `--system-prompt-file`. Existing session cleanup removes
+directory and passes `--append-system-prompt-file` (`--system-prompt-file` for the gateway, which supplies the whole prompt). Existing session cleanup removes
 the file on initialization failure and close. No truncation or prompt replay is
 introduced. Mock regression also verifies fresh instructions on native resume.
 

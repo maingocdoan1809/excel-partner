@@ -2,7 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { exposedToolNames } from "../protocol/src/index.js";
 import { FakeAnthropic, type FakeStep } from "./support/fake-anthropic.js";
 import { Harness } from "./support/harness.js";

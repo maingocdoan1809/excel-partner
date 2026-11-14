@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from "vitest";
-import { createHistoryScheduler } from "../addin/taskpane/ui/history-scheduler.js";
+import { createHistoryScheduler } from "../frontend/taskpane/ui/history-scheduler.js";
 afterEach(() => vi.useRealTimers());
 it("H14 checkpoints continuous streaming within 500ms and flushes once on close", () => {
   vi.useFakeTimers(); const persist = vi.fn(); const scheduler = createHistoryScheduler(persist);

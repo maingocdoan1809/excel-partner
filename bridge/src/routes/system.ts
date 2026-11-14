@@ -7,7 +7,7 @@ import { z } from "zod";
 import { ProviderIdSchema } from "../../../protocol/src/index.js";
 import { providerPackageRoot } from "../../../providers/src/profiled.js";
 import { connectedSession, readBody, sendJson } from "../http-util.js";
-import type { SessionManager } from "../session-manager.js";
+import type { WorkbookSessions } from "../workbook-sessions.js";
 import { UpdateError, type UpdateService } from "../updater.js";
 import type { ProviderRegistry } from "../../../providers/src/registry.js";
 
@@ -15,7 +15,7 @@ const root = providerPackageRoot();
 const store = createRequire(import.meta.url)(path.join(root, "bin", "runtime-store.cjs"));
 const action = z.object({ action: z.enum(["install", "remove", "repair", "debug-on", "debug-off"]), provider: ProviderIdSchema.optional() });
 export class SystemRoutes {
-  constructor(private readonly sessions: SessionManager, private readonly providers: ProviderRegistry, private readonly updater: UpdateService | null,
+  constructor(private readonly sessions: WorkbookSessions, private readonly providers: ProviderRegistry, private readonly updater: UpdateService | null,
     private readonly loginBusy = () => false) {}
   async handle(req: http.IncomingMessage, res: http.ServerResponse, url: URL) {
     const session = connectedSession(this.sessions, req);
@@ -49,21 +49,15 @@ export class SystemRoutes {
         return sendJson(res, 200, { ok: true });
       }
       if (!input.provider) return sendJson(res, 400, { error: "Choose a provider." });
-      if (input.action === "remove") {
-        store.changeState(dataDir, (state: any) => { state.selected = state.selected.filter((id: string) => id !== input.provider); delete state.active[input.provider!]; delete state.pending?.[input.provider!]; state.disabled = [...new Set([...(state.disabled ?? []), input.provider])]; });
-      } else {
-        const deployment = await import(pathToFileURL(path.join(root, "bin", "manage.mjs")).href);
-        const baseline = deployment.ensureBaseline(root, dataDir);
-        await manager.installRuntime(root, input.provider, { dataDir, adapterRoot: baseline.root });
-      }
+      const adapter = this.providers.require(input.provider);
+      if (input.action === "remove") await adapter.uninstall(); else await adapter.install();
       this.providers.invalidateModels(input.provider);
       return sendJson(res, 200, { ok: true });
     } catch (error) {
       if (error instanceof UpdateError) return sendJson(res, 409, { error: error.message, code: error.code });
       const message = String(error);
-      const code = message.includes("NATIVE_PREFLIGHT_AUTH_REQUIRED") ? "login_required" : message.includes("OPERATION_LOCKED") ? "operation_locked" : "system_action_failed";
-      return sendJson(res, 400, { code, error: code === "login_required" ? "Private CLI installed. Sign in using this provider, then retry installation. Your previous CLI is still selected."
-        : "The operation did not finish. Your previous configuration is retained; export diagnostics before retrying." });
+      const code = message.includes("OPERATION_LOCKED") ? "operation_locked" : "system_action_failed";
+      return sendJson(res, 400, { code, error: "The operation did not finish. Your previous configuration is retained; export diagnostics before retrying." });
     }
   }
 }

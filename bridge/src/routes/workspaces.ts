@@ -6,11 +6,11 @@ import { connectedSession, readBody, sendJson } from "../http-util.js";
 import type { Logger } from "../logger.js";
 import { ReferenceError_, type ReferenceFiles, workbookFolderFromUrl } from "../reference-files.js";
 import type { SavedReferences } from "../saved-references.js";
-import type { SessionManager } from "../session-manager.js";
+import type { WorkbookSessions } from "../workbook-sessions.js";
 import { activeWorkbookPath as findActiveWorkbookPath, pickWorkspaceFolder as pickFolderDialog } from "../windows-workspace.js";
 
 export interface WorkspaceRouteDeps {
-  sessions: SessionManager;
+  sessions: WorkbookSessions;
   references: ReferenceFiles;
   savedReferences: SavedReferences;
   logger: Logger;

@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 import { describe, expect, it, vi } from "vitest";
-import { BridgeClient } from "../addin/taskpane/bridge-client.js";
-import { hostAdapterFor } from "../addin/taskpane/host/index.js";
-import { showUserInput } from "../addin/taskpane/ui/user-input.js";
+import { BridgeClient } from "../frontend/taskpane/bridge-client.js";
+import { hostAdapterFor } from "../frontend/taskpane/host/index.js";
+import { showUserInput } from "../frontend/taskpane/ui/user-input.js";
 
 describe("pane native question lifecycle", () => {
   it.each(["stop", "finish", "provider", "disconnect"])("dismisses a pending question on %s even in Auto mode", async reason => {

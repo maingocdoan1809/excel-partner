@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { PPT_TOOL_NAMES, PPT_WRITE_TOOLS, PptToolInputSchemas, type PptToolName } from "../protocol/src/index.js";
-import { PPT_TOOL_DEFINITIONS } from "../runtime/src/tool-definitions-ppt.js";
-import { executePptTool } from "../addin/taskpane/executor/powerpoint/index.js";
+import { PPT_TOOL_DEFINITIONS } from "../shared/src/tool-definitions-ppt.js";
+import { executePptTool } from "../frontend/taskpane/executor/powerpoint/index.js";
 
 /** Object keys of a schema, looking through refine/superRefine wrappers. */
 function shapeKeys(schema: z.ZodTypeAny): string[] {

@@ -1,5 +1,5 @@
 import { expect, it } from "vitest";
-import { toolResultToMcp } from "../runtime/src/results.js";
+import { toolResultToMcp } from "../shared/src/results.js";
 
 it("preserves external MCP errors, images and structured results without mutating the original", () => {
   const original = { isError: true, content: [{ type: "text" as const, text: "external failure" }, { type: "image" as const, mimeType: "image/png", data: "aGVsbG8=" }], structuredContent: { reason: "failure" } };

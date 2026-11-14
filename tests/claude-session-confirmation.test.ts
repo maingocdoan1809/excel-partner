@@ -10,7 +10,7 @@ import type { StartSessionContext } from "../providers/src/types.js";
 const cli = vi.hoisted(() => ({ spawn: vi.fn(), messages: [] as object[], failInit: false, hold: false,
   inputs: [] as any[], children: [] as any[] }));
 vi.mock("cross-spawn", () => ({ default: cli.spawn }));
-import { ClaudeAdapter } from "../providers/src/claude.js";
+import { ClaudeAdapter } from "../providers/src/claude/adapter.js";
 
 const runtime = { bridgeUrl: "", mcp: { command: "", args: [] }, logger: { debug() {}, warn() {} } };
 let adapter: ClaudeAdapter;
@@ -80,7 +80,8 @@ describe("Claude persistent sessions", () => {
     const args = cli.spawn.mock.calls[0]![1] as string[];
     expect(args.join(" ").length).toBeLessThan(4_000);
     expect(args).not.toContain("--system-prompt");
-    const file = args[args.indexOf("--system-prompt-file") + 1]!;
+    expect(args).not.toContain("--system-prompt-file");
+    const file = args[args.indexOf("--append-system-prompt-file") + 1]!;
     expect(fs.readFileSync(file, "utf8")).toBe(prompt);
     if (process.platform !== "win32") expect(fs.statSync(file).mode & 0o777).toBe(0o600);
     expect((await turn(id)).at(-1)).toMatchObject({ reason: "completed" });
@@ -88,7 +89,7 @@ describe("Claude persistent sessions", () => {
     const resumedPrompt = "Updated Office instructions\n" + prompt;
     const resumed = await start("confirmed-session", { systemPrompt: resumedPrompt });
     const resumedArgs = cli.spawn.mock.calls[1]![1] as string[];
-    const resumedFile = resumedArgs[resumedArgs.indexOf("--system-prompt-file") + 1]!;
+    const resumedFile = resumedArgs[resumedArgs.indexOf("--append-system-prompt-file") + 1]!;
     expect(resumedArgs[resumedArgs.indexOf("--resume") + 1]).toBe("confirmed-session");
     expect(resumedFile).not.toBe(file); expect(fs.readFileSync(resumedFile, "utf8")).toBe(resumedPrompt);
     expect((await turn(resumed)).at(-1)).toMatchObject({ reason: "completed" });
@@ -107,8 +108,15 @@ describe("Claude persistent sessions", () => {
     await start(undefined, { systemPrompt });
     const args = cli.spawn.mock.calls[0]![1] as string[];
     expect(args[args.indexOf("--system-prompt-snapshot") + 1]).toBe("off");
-    if (systemPrompt?.trim()) expect(fs.readFileSync(args[args.indexOf("--system-prompt-file") + 1]!, "utf8")).toBe(systemPrompt);
+    if (systemPrompt?.trim()) expect(fs.readFileSync(args[args.indexOf("--append-system-prompt-file") + 1]!, "utf8")).toBe(systemPrompt);
     else expect(args).not.toContain("--system-prompt");
+  });
+
+  it("replaces Claude's own prompt only when the caller supplies the whole prompt (the gateway)", async () => {
+    await start(undefined, { systemPrompt: "Whole prompt", systemPromptMode: "replace" });
+    const args = cli.spawn.mock.calls[0]![1] as string[];
+    expect(fs.readFileSync(args[args.indexOf("--system-prompt-file") + 1]!, "utf8")).toBe("Whole prompt");
+    expect(args).not.toContain("--append-system-prompt-file");
   });
 
   it("does not launch when session creation was already cancelled", async () => {
@@ -131,7 +139,7 @@ describe("Claude persistent sessions", () => {
     await expect(start(undefined, { systemPrompt: "Custom Office instructions" })).rejects.toThrow("initialization failed");
     expect(cli.children[0].kill).toHaveBeenCalled();
     const args = cli.spawn.mock.calls[0]![1] as string[];
-    expect(fs.existsSync(path.dirname(args[args.indexOf("--system-prompt-file") + 1]!))).toBe(false);
+    expect(fs.existsSync(path.dirname(args[args.indexOf("--append-system-prompt-file") + 1]!))).toBe(false);
   });
 
   it("reuses one process and keeps request IDs and usage separate across turns", async () => {

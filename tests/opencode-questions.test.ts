@@ -1,6 +1,6 @@
 import http from "node:http";
 import { afterEach, describe, expect, it } from "vitest";
-import { watchOpencodeQuestions } from "../providers/src/opencode-questions.js";
+import { watchOpencodeQuestions } from "../providers/src/opencode/questions.js";
 import type { UserInputResponse } from "../protocol/src/index.js";
 
 let server: http.Server | undefined;

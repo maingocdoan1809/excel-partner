@@ -5,7 +5,8 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { expect, it } from 'vitest';
 import { Harness } from './support/harness.js';
-import { CopilotNativeSessions } from '../providers/src/copilot-native.js';
+import { CopilotAdapter } from '../providers/src/copilot/adapter.js';
+import { CopilotNativeSessions } from '../providers/src/copilot/native.js';
 
 let installed = true;
 try { execFileSync(process.env.COPILOT_BIN ?? 'copilot', ['--version'], { stdio: 'ignore', timeout: 5000 }); }
@@ -28,7 +29,7 @@ it.skipIf(!installed)('builds current Copilot native schemas on/off/on without a
       await post({ action: 'select', id: 'fixture', enabled });
       const id = await manager.start({ workbookConnectionId: pane.workbookConnectionId, sessionId: pane.id,
         model: null, signal: new AbortController().signal,
-        mcp: sessionMcpEndpoint(h.bridge.config, pane), requestUserInput: async () => ({ cancelled: true, answers: {} }),
+        mcp: sessionMcpEndpoint(h.bridge.config, pane, CopilotAdapter.capabilities), requestUserInput: async () => ({ cancelled: true, answers: {} }),
       }, process.env.COPILOT_BIN ?? 'copilot', process.env);
       const session = (manager as any).sessions.get(id).session;
       await session.rpc.tools.initializeAndValidate();

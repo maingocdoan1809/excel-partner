@@ -1,9 +1,9 @@
 // @vitest-environment jsdom
 import { afterEach, expect, it, vi } from "vitest";
-import type { BridgeClient } from "../addin/taskpane/bridge-client.js";
-import { setupMcp } from "../addin/taskpane/ui/mcp.js";
-import { discoverMcpCatalog } from "../runtime/src/mcp-catalog.js";
-import { McpServers } from "../runtime/src/mcp-servers.js";
+import type { BridgeClient } from "../frontend/taskpane/bridge-client.js";
+import { setupMcp } from "../frontend/taskpane/ui/mcp.js";
+import { discoverMcpCatalog } from "../shared/src/mcp-catalog.js";
+import { McpServers } from "../shared/src/mcp-servers.js";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";

@@ -3,8 +3,8 @@ import os from "node:os";
 import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { exposedToolNames, parseToolInput } from "../protocol/src/index.js";
-import { SessionManager } from "../bridge/src/session-manager.js";
-import { OfficeRuntime } from "../runtime/src/office-runtime.js";
+import { WorkbookSessions } from "../bridge/src/workbook-sessions.js";
+import { OfficeRuntime } from "../bridge/src/office-runtime.js";
 import { TestScripts, validateScript } from "../bridge/src/test-scripts.js";
 
 const origin = "https://staging.example.com";
@@ -24,7 +24,7 @@ const save = (overrides: Record<string, unknown> = {}) => ({
 function setup() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ep-scripts-"));
   const scripts = new TestScripts(dir);
-  const sessions = new SessionManager({ ttlMs: 60_000 });
+  const sessions = new WorkbookSessions({ ttlMs: 60_000 });
   const session = sessions.create("scripts", null);
   session.capabilities.playwright = true;
   Object.defineProperty(session, "isConnected", { get: () => true, configurable: true });

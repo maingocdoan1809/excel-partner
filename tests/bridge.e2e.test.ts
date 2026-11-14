@@ -126,6 +126,19 @@ describe("bridge end to end", () => {
     expect(await (await fetch(`${url}/session/provider-login`, { method: "DELETE", headers })).json()).toMatchObject({ state: "idle" });
     await pane.close();
   });
+  it("requires a connected workbook token to sign a provider out", async () => {
+    const { url } = await startBridge();
+    expect((await fetch(`${url}/session/provider-logout?provider=copilot`, { method: "POST" })).status).toBe(401);
+    const pane = await PaneClient.connect(`${url.replace("http", "ws")}/ws`);
+    const hello = await handshake(pane);
+    const headers = { authorization: `Bearer ${hello.sessionToken}` };
+    expect((await fetch(`${url}/session/provider-logout?provider=copilot`, { headers })).status).toBe(405);
+    expect((await fetch(`${url}/session/provider-logout?provider=nope`, { method: "POST", headers })).status).toBe(400);
+    const refused = await fetch(`${url}/session/provider-logout?provider=copilot`, { method: "POST", headers });
+    expect(refused.status).toBe(409);
+    expect(await refused.json()).toMatchObject({ error: expect.any(String) });
+    await pane.close();
+  });
   it("passes two selected paths to the CLI without copying either file", async () => {
     const folder = fs.mkdtempSync(path.join(os.tmpdir(), "selected-paths-"));
     const first = path.join(folder, "first.md");

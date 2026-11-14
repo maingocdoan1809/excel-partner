@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import fs from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { setupUpdatePanel, type UpdateClient, type UpdateInfo } from "../addin/taskpane/ui/update-panel.js";
+import { setupUpdatePanel, type UpdateClient, type UpdateInfo } from "../frontend/taskpane/ui/update-panel.js";
 
 const info = (extra: Partial<UpdateInfo> = {}): UpdateInfo => ({
   current: "0.1.19", latest: "0.1.20", updateAvailable: true, canUpdate: true, status: { state: "idle" }, logFile: "C:\\data\\update.log", ...extra,
@@ -17,7 +17,7 @@ function storage() {
 }
 
 function setup(replies: Array<UpdateInfo | Error> = [info()], over: Partial<UpdateClient> = {}) {
-  document.body.innerHTML = fs.readFileSync("addin/taskpane/index.html", "utf8").match(/<body[^>]*>([\s\S]*)<\/body>/)![1]!;
+  document.body.innerHTML = fs.readFileSync("frontend/taskpane/index.html", "utf8").match(/<body[^>]*>([\s\S]*)<\/body>/)![1]!;
   const queue = [...replies];
   const client = {
     updateInfo: vi.fn(async () => {

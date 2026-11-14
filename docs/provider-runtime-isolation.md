@@ -18,9 +18,9 @@ model behavior, service availability or organization policy.
 ## Findings in this repository
 
 - `package.json` pins `@github/copilot-sdk` to `1.0.18`.
-- `providers/src/copilot.ts` chooses `COPILOT_BIN` or the `copilot` PATH command.
+- `providers/src/copilot/adapter.ts` chooses `COPILOT_BIN` or the `copilot` PATH command.
   The ACP path uses this command for discovery and sessions.
-- `providers/src/copilot-native.ts` explicitly passes the resolved external
+- `providers/src/copilot/native.ts` explicitly passes the resolved external
   executable to `RuntimeConnection.forStdio` for models, commands and sessions.
   This overrides the SDK's bundled runtime selection.
 - The installed SDK's package metadata associates SDK `1.0.18` with runtime
@@ -36,7 +36,7 @@ model behavior, service availability or organization policy.
   `process.env`.
 - Claude, Codex and OpenCode similarly use their `*_BIN` override or PATH.
 - `bridge/src/provider-login.ts` independently chooses the Copilot executable.
-- `providers/src/session-manager.ts` preserves native conversation IDs and
+- `shared/src/session-manager.ts` preserves native conversation IDs and
   reuses workers, but does not record a runtime profile/version in session state.
 
 These facts establish exposure to global updates. They do not establish the

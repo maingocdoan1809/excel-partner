@@ -4,15 +4,15 @@ import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { parseToolInput } from "../protocol/src/index.js";
 import { runPython } from "../bridge/src/python-runner.js";
-import { OfficeRuntime } from "../runtime/src/office-runtime.js";
-import { SessionManager } from "../bridge/src/session-manager.js";
+import { OfficeRuntime } from "../bridge/src/office-runtime.js";
+import { WorkbookSessions } from "../bridge/src/workbook-sessions.js";
 import { createAttachment } from "../bridge/src/attachments.js";
 
 const input = (code: string, extra = {}) => parseToolInput("run_python", { code, ...extra });
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllEnvs(); });
 
 function setup(approved = true) {
-  const sessions = new SessionManager({ ttlMs: 60_000 });
+  const sessions = new WorkbookSessions({ ttlMs: 60_000 });
   const session = sessions.create("python-test", null);
   vi.spyOn(session, "isConnected", "get").mockReturnValue(true);
   const permission = vi.spyOn(session, "requestTool").mockResolvedValue({ ok: true, data: { approved } });

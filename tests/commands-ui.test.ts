@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createSlashMenu } from "../addin/taskpane/ui/slash-menu.js";
+import { createSlashMenu } from "../frontend/taskpane/ui/slash-menu.js";
 import { normalizeCommands } from "../providers/src/commands.js";
 import type { ProviderCommand } from "../protocol/src/commands.js";
 

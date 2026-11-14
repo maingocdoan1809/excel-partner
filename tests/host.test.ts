@@ -2,9 +2,9 @@ import { describe, expect, it, vi } from "vitest";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { createExcelMcpServer } from "../excel_mcp/src/server.js";
-import { ALL_TOOL_DEFINITIONS } from "../runtime/src/tool-definitions.js";
-import { SessionManager } from "../bridge/src/session-manager.js";
-import { OfficeRuntime } from "../runtime/src/office-runtime.js";
+import { ALL_TOOL_DEFINITIONS } from "../shared/src/tool-definitions.js";
+import { WorkbookSessions } from "../bridge/src/workbook-sessions.js";
+import { OfficeRuntime } from "../bridge/src/office-runtime.js";
 import { disconnectedMidCall, DISCONNECTED_MID_CALL, isDisconnectedMidCall } from "../bridge/src/session.js";
 import { buildTurnPrompt } from "../providers/src/prompt.js";
 import {
@@ -253,7 +253,7 @@ describe("MCP ListTools per OFFICE_HOST", () => {
 const limits = { maxReadCells: 100, maxWriteCells: 100, maxSheets: 10, maxSelectionCells: 10 };
 
 function gatewayWith(host: HostId | undefined, enrich = vi.fn(async (selection: never) => selection)) {
-  const sessions = new SessionManager({ ttlMs: 60_000 });
+  const sessions = new WorkbookSessions({ ttlMs: 60_000 });
   const session = sessions.create(`conn-${host ?? "legacy"}`, host ? { host } : null);
   const gateway = new OfficeRuntime(sessions, limits, 1000, undefined, true, null, null, null, enrich as never);
   const requestTool = vi.spyOn(session, "requestTool");
@@ -295,7 +295,7 @@ describe("OfficeRuntime host gate", () => {
   });
 
   it("keeps execute_office_js behind the opt-in on every host", async () => {
-    const sessions = new SessionManager({ ttlMs: 60_000 });
+    const sessions = new WorkbookSessions({ ttlMs: 60_000 });
     const session = sessions.create("conn-off", { host: "word" });
     const gateway = new OfficeRuntime(sessions, limits, 1000);
     const result = await gateway.invoke({ sessionId: session.id, tool: "execute_office_js", args: { code: "return 1;" } });
@@ -319,7 +319,7 @@ describe("OfficeRuntime host gate", () => {
   });
 
   it("connects the files of every Office app to each other, each seen with the application it is open in", () => {
-    const sessions = new SessionManager({ ttlMs: 60_000 });
+    const sessions = new WorkbookSessions({ ttlMs: 60_000 });
     const sheet = sessions.create("conn-excel-a", { host: "excel" });
     const doc = sessions.create("conn-word-a", { host: "word" });
     const deck = sessions.create("conn-ppt-a", { host: "powerpoint" });
@@ -331,7 +331,7 @@ describe("OfficeRuntime host gate", () => {
   });
 
   it("leaves a browser tab out of the list, as before", () => {
-    const sessions = new SessionManager({ ttlMs: 60_000 });
+    const sessions = new WorkbookSessions({ ttlMs: 60_000 });
     const doc = sessions.create("conn-word-b", { host: "word" });
     const tab = sessions.create("conn-tab-b", { host: "excel", standalone: true });
     for (const session of [doc, tab]) vi.spyOn(session, "isConnected", "get").mockReturnValue(true);

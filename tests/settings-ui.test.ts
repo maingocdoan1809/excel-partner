@@ -1,11 +1,11 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import fs from "node:fs";
-import { setupSettings } from "../addin/taskpane/ui/settings.js";
-import { renderToolCard, formatToolValue } from "../addin/taskpane/ui/tool-view.js";
+import { setupSettings } from "../frontend/taskpane/ui/settings.js";
+import { renderToolCard, formatToolValue } from "../frontend/taskpane/ui/tool-view.js";
 
 beforeEach(() => {
-  const html = fs.readFileSync("addin/taskpane/index.html", "utf8");
+  const html = fs.readFileSync("frontend/taskpane/index.html", "utf8");
   document.body.innerHTML = html.split("<body>")[1]!.split("</body>")[0]!;
   localStorage.clear();
 });

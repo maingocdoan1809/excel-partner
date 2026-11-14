@@ -1,4 +1,6 @@
 import { z } from "zod";
+import { ProviderIdSchema } from "./providers.js";
+import { ProviderOptionSchema } from "./provider-options.js";
 import { TokenUsageSchema } from "./usage.js";
 
 /** Why a turn ended. */
@@ -19,7 +21,7 @@ export const ProviderEventSchema = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("session_info"),
     requestId: z.string(),
-    provider: z.enum(["claude", "copilot", "codex", "opencode"]),
+    provider: ProviderIdSchema,
     providerSessionId: z.string().min(1).max(128),
     title: z.string().max(200).optional(),
   }),
@@ -39,6 +41,12 @@ export const ProviderEventSchema = z.discriminatedUnion("type", [
     requestId: z.string(),
     state: z.enum(["waiting", "retrying"]),
     message: z.string().max(300),
+  }),
+  z.object({
+    /** What the CLI offers to change for this session (a mode, for example), as it reports it at the start of a turn and after a change. */
+    type: z.literal("provider_options"),
+    requestId: z.string(),
+    options: z.array(ProviderOptionSchema).max(20),
   }),
   z.object({
     type: z.literal("turn_started"),

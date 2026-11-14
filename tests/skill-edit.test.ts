@@ -5,8 +5,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { strToU8, zipSync } from "fflate";
 import { UserSkills } from "../bridge/src/skill-upload.js";
 import { SkillStore } from "../bridge/src/skills.js";
-import { SessionManager } from "../bridge/src/session-manager.js";
-import { OfficeRuntime } from "../runtime/src/office-runtime.js";
+import { WorkbookSessions } from "../bridge/src/workbook-sessions.js";
+import { OfficeRuntime } from "../bridge/src/office-runtime.js";
 
 let root: string;
 let uploads: UserSkills;
@@ -58,7 +58,7 @@ describe("installed skill editing", () => {
   });
 
   it("lets the AI read exact file revisions and saves only after permission, rechecking for concurrent changes", async () => {
-    const sessions = new SessionManager({ ttlMs: 60_000 });
+    const sessions = new WorkbookSessions({ ttlMs: 60_000 });
     const session = sessions.create("workbook", null);
     session.beginTurn("request");
     const gateway = new OfficeRuntime(sessions, { maxReadCells: 100, maxWriteCells: 100, maxSheets: 10, maxSelectionCells: 10 }, 1000,

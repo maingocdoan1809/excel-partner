@@ -1,7 +1,7 @@
 import type http from "node:http";
 import path from "node:path";
 import { AttachmentError } from "./attachments.js";
-import type { SessionManager } from "./session-manager.js";
+import type { WorkbookSessions } from "./workbook-sessions.js";
 import type { WorkbookSession } from "./session.js";
 
 export const MAX_BODY_BYTES = 8 * 1024 * 1024;
@@ -23,7 +23,7 @@ export function bearerToken(header: string | undefined): string | null {
 }
 
 /** The connected task-pane session whose token the request carries, or null (the caller answers 401). */
-export function connectedSession(sessions: SessionManager, req: http.IncomingMessage): WorkbookSession | null {
+export function connectedSession(sessions: WorkbookSessions, req: http.IncomingMessage): WorkbookSession | null {
   const session = sessions.getByToken(bearerToken(req.headers.authorization) ?? "");
   return session?.isConnected ? session : null;
 }

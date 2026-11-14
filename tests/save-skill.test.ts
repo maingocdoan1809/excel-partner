@@ -2,15 +2,15 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { SessionManager } from "../bridge/src/session-manager.js";
-import { OfficeRuntime } from "../runtime/src/office-runtime.js";
+import { WorkbookSessions } from "../bridge/src/workbook-sessions.js";
+import { OfficeRuntime } from "../bridge/src/office-runtime.js";
 import { SkillStore } from "../bridge/src/skills.js";
 import { UserSkills } from "../bridge/src/skill-upload.js";
-import { ALL_TOOL_DEFINITIONS } from "../runtime/src/tool-definitions.js";
+import { ALL_TOOL_DEFINITIONS } from "../shared/src/tool-definitions.js";
 import { SERVER_TOOLS } from "../protocol/src/index.js";
 
 let folder: string;
-let sessions: SessionManager;
+let sessions: WorkbookSessions;
 let gateway: OfficeRuntime;
 let sessionId: string;
 let uploads: UserSkills;
@@ -19,7 +19,7 @@ const args = { name: "monthly-report", description: "Monthly report: \"format\"\
 beforeEach(() => {
   folder = fs.mkdtempSync(path.join(os.tmpdir(), "save-skill-"));
   uploads = new UserSkills(path.join(folder, "skills"));
-  sessions = new SessionManager({ ttlMs: 60_000 });
+  sessions = new WorkbookSessions({ ttlMs: 60_000 });
   sessionId = sessions.create("test-connection", null).id;
   gateway = new OfficeRuntime(sessions, { maxReadCells: 100, maxWriteCells: 100, maxSheets: 10, maxSelectionCells: 10 }, 1000,
     undefined, false, new SkillStore([uploads.root]), null, uploads);

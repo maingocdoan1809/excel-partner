@@ -1,145 +1,119 @@
-import { EventEmitter } from "node:events";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { ProviderLoginManager } from "../bridge/src/provider-login.js";
+import type { ProviderLoginStatus } from "../protocol/src/provider-login.js";
+import type { ProviderId } from "../protocol/src/index.js";
+import type { ProviderRegistry } from "../providers/src/registry.js";
 
-const { spawnMock } = vi.hoisted(() => ({ spawnMock: vi.fn() }));
-vi.mock("cross-spawn", () => ({ default: spawnMock }));
-
-function fakeChild() {
-  return Object.assign(new EventEmitter(), {
-    stdout: new EventEmitter(), stderr: new EventEmitter(), stdin: Object.assign(new EventEmitter(), { write: vi.fn() }),
-    exitCode: null as number | null, signalCode: null, kill: vi.fn(),
-  });
+/** A sign-in attempt the test controls: the manager only sees the interface every provider implements. */
+function fakeAttempt(provider: ProviderId) {
+  let current: ProviderLoginStatus = { state: "starting", provider, userCode: null, verificationUri: null, expiresAt: null, message: "Getting a sign-in link…" };
+  const attempt = {
+    status: () => ({ ...current }), submitCode: vi.fn(),
+    cancel: vi.fn(() => attempt.set({ state: "cancelled", message: "Sign-in cancelled." })),
+    set(next: Partial<ProviderLoginStatus>) { current = { ...current, ...next }; },
+  };
+  return attempt;
 }
 
-describe("Copilot device-code login", () => {
-  let manager: ProviderLoginManager;
-  let child: ReturnType<typeof fakeChild>;
+function setup() {
+  const attempts: ReturnType<typeof fakeAttempt>[] = [];
+  const kinds: Partial<Record<ProviderId, "device" | "account">> = { opencode: "account" };
+  const adapters = new Map<ProviderId, { capabilities: { loginKind: string }; startLogin: ReturnType<typeof vi.fn>; logout: ReturnType<typeof vi.fn>; loginAccounts?: ReturnType<typeof vi.fn> }>();
+  const lookup = (id: ProviderId) => {
+    if (!adapters.has(id)) {
+      adapters.set(id, {
+        capabilities: { loginKind: kinds[id] ?? "device" },
+        startLogin: vi.fn(() => { const attempt = fakeAttempt(id); attempts.push(attempt); return attempt; }),
+        logout: vi.fn(async () => {}),
+        ...(id === "opencode" ? { loginAccounts: vi.fn(async () => [{ id: "openai", name: "OpenAI", connected: false, methods: [] }]) } : {}),
+      });
+    }
+    return adapters.get(id)!;
+  };
+  const registry = { get: lookup, require: lookup } as unknown as ProviderRegistry;
+  return { manager: new ProviderLoginManager(registry), attempts, adapters };
+}
 
-  beforeEach(() => {
-    vi.useFakeTimers();
-    child = fakeChild();
-    spawnMock.mockReset().mockReturnValue(child);
-    manager = new ProviderLoginManager("copilot-test");
+describe("the bridge's sign-in manager", () => {
+  it("starts the provider's own sign-in and reports its status", () => {
+    const { manager, attempts } = setup();
+    expect(manager.start("window", "codex").state).toBe("starting");
+    attempts[0]!.set({ state: "waiting", userCode: "AB12-CD34", verificationUri: "https://example.com/device" });
+    expect(manager.status("window", "codex")).toMatchObject({ state: "waiting", userCode: "AB12-CD34" });
   });
 
-  afterEach(() => { manager.dispose(); vi.useRealTimers(); });
-
-  it("parses split ANSI output without returning raw CLI output or credentials", () => {
-    expect(manager.start("workbook").state).toBe("starting");
-    expect(spawnMock).toHaveBeenCalledWith("copilot-test", ["login", "--device-code"], expect.objectContaining({ windowsHide: true }));
-    child.stderr.emit("data", Buffer.from("\x1b[32mTo authenticate, visit https://github.com/login/"));
-    child.stderr.emit("data", Buffer.from("device and enter code AB12-CD34\x1b[0m\nprivate-token-value"));
-    expect(manager.status("workbook")).toMatchObject({ state: "waiting", userCode: "AB12-CD34", verificationUri: "https://github.com/login/device" });
-    expect(JSON.stringify(manager.status("workbook"))).not.toContain("private-token-value");
-    child.exitCode = 0;
-    child.emit("close", 0);
-    expect(manager.status("workbook")).toMatchObject({ state: "success", userCode: null, verificationUri: null, expiresAt: null });
-  });
-
-  it("isolates workbook sessions and prevents competing login processes", () => {
-    manager.start("first");
-    manager.start("first");
-    expect(spawnMock).toHaveBeenCalledTimes(1);
-    expect(() => manager.start("second")).toThrow("Another Excel window");
-    expect(manager.status("second").state).toBe("idle");
+  it("lets only one window sign in at a time, and answers a repeated start with the running one", () => {
+    const { manager, adapters } = setup();
+    manager.start("first", "copilot");
+    manager.start("first", "copilot");
+    expect(adapters.get("copilot")!.startLogin).toHaveBeenCalledTimes(1);
+    expect(() => manager.start("second", "copilot")).toThrow("Another window");
+    expect(manager.status("second", "copilot").state).toBe("idle");
     manager.cancel("second");
-    expect(manager.status("first").state).toBe("starting");
+    expect(manager.status("first", "copilot").state).toBe("starting");
+    expect(manager.isBusy).toBe(true);
   });
 
-  it("cancels a process and ignores late output and exit events", () => {
-    manager.start("workbook");
-    expect(manager.cancel("workbook").state).toBe("cancelled");
-    expect(child.kill).toHaveBeenCalledOnce();
-    child.stdout.emit("data", Buffer.from("https://github.com/login/device enter code AB12-CD34"));
-    child.emit("close", 0);
-    expect(manager.status("workbook")).toMatchObject({ state: "cancelled", userCode: null });
+  it("cancels the earlier attempt of the same window when it switches provider or picks an account", () => {
+    const { manager, attempts } = setup();
+    manager.start("window", "copilot");
+    expect(manager.start("window", "codex").provider).toBe("codex");
+    expect(attempts[0]!.cancel).toHaveBeenCalledOnce();
+    manager.start("window", "opencode", { accountId: "openai", method: 0 });
+    manager.start("window", "opencode", { accountId: "poe", method: 0 });
+    expect(attempts[2]!.cancel).toHaveBeenCalledOnce();
   });
 
-  it("times out a CLI that never produces a code", () => {
-    manager.start("workbook");
-    vi.advanceTimersByTime(30_000);
-    expect(manager.status("workbook").state).toBe("error");
-    expect(child.kill).toHaveBeenCalledOnce();
+  it("does not replay a finished sign-in when the screen is opened again, but keeps one still running", () => {
+    const { manager, attempts } = setup();
+    manager.start("window", "codex");
+    attempts[0]!.set({ state: "success", message: "Signed in." });
+    expect(manager.status("window", "codex").state).toBe("success");
+    expect(manager.status("window", "codex", true)).toMatchObject({ state: "idle", provider: "codex" });
+    expect(manager.status("window", "codex").state).toBe("idle");
+
+    manager.start("window", "codex");
+    attempts[1]!.set({ state: "waiting", userCode: "ABCD-EFGH" });
+    expect(manager.status("window", "codex", true)).toMatchObject({ state: "waiting", userCode: "ABCD-EFGH" });
   });
 
-  it("expires waiting sessions and permits a fresh attempt", () => {
-    manager.start("workbook");
-    child.stdout.emit("data", Buffer.from("Enter one-time code: AB12-CD34 at https://github.com/login/device"));
-    vi.advanceTimersByTime(30_000);
-    expect(manager.status("workbook").state).toBe("waiting");
-    vi.advanceTimersByTime(10 * 60_000);
-    expect(manager.status("workbook")).toMatchObject({ state: "expired", userCode: null });
-    expect(manager.start("workbook").state).toBe("starting");
+  it("says what to do first according to how the provider signs in", () => {
+    const { manager } = setup();
+    expect(manager.status("window", "codex").message).toBe("Connect your account to get started.");
+    expect(manager.status("window", "opencode").message).toBe("Choose the account you want to use.");
   });
 
-  it("handles missing or unsupported CLIs without exposing their output", () => {
-    manager.start("workbook");
-    child.emit("error", new Error("ENOENT private details"));
-    expect(manager.status("workbook").state).toBe("error");
-    expect(manager.status("workbook").message).not.toContain("private details");
+  it("hands the code to the attempt, and refuses one when nothing is waiting for it", () => {
+    const { manager, attempts } = setup();
+    expect(() => manager.submitCode("window", "abcd1234")).toThrow("no sign-in waiting");
+    manager.start("window", "claude");
+    attempts[0]!.set({ state: "waiting" });
+    manager.submitCode("window", "abcd1234");
+    expect(attempts[0]!.submitCode).toHaveBeenCalledWith("abcd1234");
   });
 
-  it("does not treat an exit without a device code as successful authentication", () => {
-    manager.start("workbook");
-    child.exitCode = 0;
-    child.emit("close", 0);
-    expect(manager.status("workbook").state).toBe("error");
+  it("lists the accounts of a provider that has them, and none for one that does not", async () => {
+    const { manager } = setup();
+    expect(await manager.accounts("opencode")).toMatchObject([{ id: "openai" }]);
+    expect(await manager.accounts("codex")).toEqual([]);
   });
 
-  it("forgets login codes and kills pending processes on disconnect", () => {
-    manager.start("workbook");
-    child.stdout.emit("data", Buffer.from("https://github.com/login/device enter code AB12-CD34"));
-    manager.forget("workbook");
-    expect(manager.status("workbook").state).toBe("idle");
-    expect(child.kill).toHaveBeenCalledOnce();
-    expect(vi.getTimerCount()).toBe(0);
+  it("signs a provider out, but not while someone is signing in", async () => {
+    const { manager, adapters } = setup();
+    await manager.logout("codex");
+    expect(adapters.get("codex")!.logout).toHaveBeenCalledWith(undefined);
+    await manager.logout("opencode", "openai");
+    expect(adapters.get("opencode")!.logout).toHaveBeenCalledWith("openai");
+    manager.start("window", "copilot");
+    await expect(manager.logout("codex")).rejects.toThrow("Finish or cancel");
   });
 
-  it("reads the Codex page and one-time code from the CLI output", () => {
-    manager.start("workbook", "codex");
-    expect(spawnMock).toHaveBeenCalledWith("copilot-test", ["login", "--device-auth"], expect.objectContaining({ stdio: ["ignore", "pipe", "pipe"] }));
-    child.stdout.emit("data", Buffer.from("1. Open this link\n   https://auth.openai.com/codex/device\n\n2. Enter this one-time code (expires in 15 minutes)\n   DVU8-YTCH4\n"));
-    expect(manager.status("workbook", "codex")).toMatchObject({ state: "waiting", provider: "codex", userCode: "DVU8-YTCH4", verificationUri: "https://auth.openai.com/codex/device" });
-    expect(manager.status("workbook", "copilot").state).toBe("idle");
-    child.exitCode = 0;
-    child.emit("close", 0);
-    expect(manager.status("workbook", "codex").state).toBe("success");
-  });
-
-  it("waits for the full Claude link, then passes the pasted code to the CLI", () => {
-    manager.start("workbook", "claude");
-    expect(spawnMock).toHaveBeenCalledWith("copilot-test", ["auth", "login"], expect.objectContaining({ stdio: ["pipe", "pipe", "pipe"] }));
-    child.stdout.emit("data", Buffer.from("Opening browser\nIf the browser didn't open, visit: https://claude.com/cai/oauth/authorize?code=true&sta"));
-    expect(manager.status("workbook", "claude").state).toBe("starting");
-    child.stdout.emit("data", Buffer.from("te=abc\nPaste code here if prompted > "));
-    expect(manager.status("workbook", "claude")).toMatchObject({ state: "waiting", needsCode: true, userCode: null, verificationUri: "https://claude.com/cai/oauth/authorize?code=true&state=abc" });
-    expect(() => manager.submitCode("workbook", "bad code!")).toThrow("sign-in code");
-    expect(manager.submitCode("workbook", " abc123#xyz ")).toMatchObject({ state: "waiting", needsCode: false });
-    expect(child.stdin.write).toHaveBeenCalledWith("abc123#xyz\n");
-    expect(() => manager.submitCode("workbook", "abc123#xyz")).toThrow("no sign-in waiting");
-    child.emit("close", 1);
-    expect(manager.status("workbook", "claude")).toMatchObject({ state: "error", message: expect.stringContaining("not accepted") });
-    manager.start("workbook", "claude");
-    child.stdout.emit("data", Buffer.from("visit https://claude.com/cai/oauth/authorize?x=1\n"));
-    child.exitCode = 0;
-    child.emit("close", 0);
-    expect(manager.status("workbook", "claude").state).toBe("success");
-  });
-
-  it("refuses a code for a provider that does not ask for one and a provider without in-app sign-in", () => {
-    manager.start("workbook", "copilot");
-    child.stdout.emit("data", Buffer.from("https://github.com/login/device enter code AB12-CD34"));
-    expect(() => manager.submitCode("workbook", "abcd1234")).toThrow("no sign-in waiting");
-    expect(() => manager.start("workbook", "opencode")).toThrow("terminal");
-  });
-
-  it("switching provider cancels the earlier attempt of the same window", () => {
-    manager.start("workbook", "copilot");
-    const first = child;
-    child = fakeChild();
-    spawnMock.mockReturnValue(child);
-    expect(manager.start("workbook", "codex").provider).toBe("codex");
-    expect(first.kill).toHaveBeenCalledOnce();
+  it("cancels what a closed window was signing in", () => {
+    const { manager, attempts } = setup();
+    manager.start("window", "codex");
+    manager.forget("window");
+    expect(attempts[0]!.cancel).toHaveBeenCalledOnce();
+    expect(manager.status("window", "codex").state).toBe("idle");
+    manager.dispose();
   });
 });

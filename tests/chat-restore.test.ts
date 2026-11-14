@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { reloadKeepingChat, takeChatRestore } from "../addin/taskpane/ui/chat-restore.js";
+import { reloadKeepingChat, takeChatRestore } from "../frontend/taskpane/ui/chat-restore.js";
 
 function memory() {
   const data = new Map<string, string>();

@@ -5,9 +5,9 @@ import { strToU8, zipSync } from "fflate";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ReferenceError_, ReferenceFiles, toLocalPath, workbookFolderFromUrl } from "../bridge/src/reference-files.js";
 import { readSheetDetails, readWorkbookOverview } from "../bridge/src/xlsx-reader.js";
-import { SessionManager } from "../bridge/src/session-manager.js";
-import { OfficeRuntime } from "../runtime/src/office-runtime.js";
-import { executeTool } from "../addin/taskpane/executor/index.js";
+import { WorkbookSessions } from "../bridge/src/workbook-sessions.js";
+import { OfficeRuntime } from "../bridge/src/office-runtime.js";
+import { executeTool } from "../frontend/taskpane/executor/index.js";
 import { parseToolInput } from "../protocol/src/index.js";
 import { MockWorkbook, installOfficeMock } from "./support/office-mock.js";
 
@@ -134,7 +134,7 @@ describe("xlsx reader", () => {
 
 describe("gateway file tools", () => {
   function setup(roots = [root]) {
-    const sessions = new SessionManager({ ttlMs: 60_000 });
+    const sessions = new WorkbookSessions({ ttlMs: 60_000 });
     const session = sessions.create("0123456789abcdef", null);
     const limits = { maxReadCells: 1, maxWriteCells: 1, maxSheets: 1, maxSelectionCells: 1 };
     const gateway = new OfficeRuntime(sessions, limits, 1000, undefined, false, null, new ReferenceFiles(roots));
@@ -249,7 +249,7 @@ describe("gateway file tools", () => {
   });
 
   it("asks for one file, reads it after approval, and never grants its folder", async () => {
-    const sessions = new SessionManager({ ttlMs: 60_000 });
+    const sessions = new WorkbookSessions({ ttlMs: 60_000 });
     const session = sessions.create("0123456789abcdef", null);
     const gateway = new OfficeRuntime(sessions, { maxReadCells: 1, maxWriteCells: 1, maxSheets: 1, maxSelectionCells: 1 }, 1000, undefined, false, null, new ReferenceFiles([]));
     const requests: unknown[] = [];
@@ -270,7 +270,7 @@ describe("gateway file tools", () => {
   });
 
   it("does not read an outside file when the user denies access", async () => {
-    const sessions = new SessionManager({ ttlMs: 60_000 });
+    const sessions = new WorkbookSessions({ ttlMs: 60_000 });
     const session = sessions.create("0123456789abcdef", null);
     session.requestTool = async () => ({ ok: true, data: { approved: false } });
     const gateway = new OfficeRuntime(sessions, { maxReadCells: 1, maxWriteCells: 1, maxSheets: 1, maxSelectionCells: 1 }, 1000, undefined, false, null, new ReferenceFiles([]));

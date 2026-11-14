@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { executeOfficeJs } from "../addin/taskpane/executor/office-js.js";
+import { executeOfficeJs } from "../frontend/taskpane/executor/office-js.js";
 import { installOfficeMock, MockWorkbook } from "./support/office-mock.js";
 
 afterEach(() => vi.unstubAllGlobals());

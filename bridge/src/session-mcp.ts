@@ -1,8 +1,9 @@
+import type { ProviderCapabilities } from "../../protocol/src/index.js";
 import type { McpEndpoint } from "../../providers/src/types.js";
 import type { BridgeConfig } from "./config.js";
-import { officeToolCatalog } from "../../runtime/src/catalog.js";
-import { discoverMcpCatalog } from "../../runtime/src/mcp-catalog.js";
-import type { McpServers } from "../../runtime/src/mcp-servers.js";
+import { officeToolCatalog } from "../../shared/src/catalog.js";
+import { discoverMcpCatalog } from "../../shared/src/mcp-catalog.js";
+import type { McpServers } from "../../shared/src/mcp-servers.js";
 import type { WorkbookSession } from "./session.js";
 
 /**
@@ -19,12 +20,12 @@ export async function discoverSessionMcp(mcpServers: McpServers, allowOfficeJs: 
 }
 
 /** Provider MCP transport and native tool names for this pane. */
-export function sessionMcpEndpoint(config: BridgeConfig, session: WorkbookSession): McpEndpoint {
+export function sessionMcpEndpoint(config: BridgeConfig, session: WorkbookSession, capabilities: ProviderCapabilities): McpEndpoint {
   return {
     bridgeUrl: config.publicBaseUrl,
     sessionId: session.id,
     token: session.sessionToken,
-    ...(session.provider === "copilot" ? { toolNames: [...officeToolCatalog(session.host, config.allowOfficeJs, session.capabilities).map(tool => tool.name), ...session.externalMcpTools.keys()] } : {}),
+    ...(capabilities.explicitToolNames ? { toolNames: [...officeToolCatalog(session.host, config.allowOfficeJs, session.capabilities).map(tool => tool.name), ...session.externalMcpTools.keys()] } : {}),
     command: config.mcp.command,
     args: config.mcp.args,
     env: {

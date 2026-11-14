@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { getPptSelection, getPptSelectionLabel, readPptPresentationName } from "../addin/taskpane/executor/powerpoint/index.js";
+import { getPptSelection, getPptSelectionLabel, readPptPresentationName } from "../frontend/taskpane/executor/powerpoint/index.js";
 import { AnySelectionSnapshotSchema, PptSelectionSnapshotSchema } from "../protocol/src/index.js";
 import { useFakeDeck } from "./support/ppt-fixture.js";
 

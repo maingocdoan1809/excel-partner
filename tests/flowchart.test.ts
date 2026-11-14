@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ShapeInfo } from "../protocol/src/index.js";
-import { inspectFlowchartGeometry } from "../addin/taskpane/executor/flowchart.js";
+import { inspectFlowchartGeometry } from "../frontend/taskpane/executor/flowchart.js";
 
 function node(id: string, left: number, top: number, width = 10, height = 10): ShapeInfo {
   return { id, name: id, type: "Rectangle", text: id, left, top, width, height, rotation: 0 };

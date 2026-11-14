@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { executeWordTool, setProposalReviewer } from "../addin/taskpane/executor/word/index.js";
-import type { ProposalRequest } from "../addin/taskpane/executor/word/index.js";
+import { executeWordTool, setProposalReviewer } from "../frontend/taskpane/executor/word/index.js";
+import type { ProposalRequest } from "../frontend/taskpane/executor/word/index.js";
 import { FakeWordDoc, installWordFake, uninstallWordFake } from "./support/fake-word.js";
 
 let doc: FakeWordDoc;

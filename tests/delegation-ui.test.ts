@@ -1,10 +1,10 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { BridgeClient } from "../addin/taskpane/bridge-client.js";
+import { BridgeClient } from "../frontend/taskpane/bridge-client.js";
 import { MAX_DELEGATED_TEXT } from "../protocol/src/index.js";
-import { delegatedPrompt } from "../addin/taskpane/ui/delegation.js";
-import { renderReceivedMessage } from "../addin/taskpane/ui/received-message.js";
-import { buildContextPreface } from "../addin/taskpane/ui/sessions.js";
+import { delegatedPrompt } from "../frontend/taskpane/ui/delegation.js";
+import { renderReceivedMessage } from "../frontend/taskpane/ui/received-message.js";
+import { buildContextPreface } from "../frontend/taskpane/ui/sessions.js";
 
 afterEach(() => document.body.replaceChildren());
 

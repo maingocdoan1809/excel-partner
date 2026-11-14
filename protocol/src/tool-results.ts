@@ -9,11 +9,6 @@ export const SheetInfoSchema = z.object({
   isActive: z.boolean(),
 });
 
-export const GetSheetsResultSchema = z.object({
-  sheets: z.array(SheetInfoSchema),
-  activeSheet: z.string(),
-});
-
 export const ShapeInfoSchema = z.object({
   id: z.string().optional(),
   parentGroupId: z.string().optional(),
@@ -111,47 +106,6 @@ export const AnySelectionSnapshotSchema = z.preprocess(
 );
 export type AnySelectionSnapshot = z.infer<typeof AnySelectionSnapshotSchema>;
 
-export const GetSelectionResultSchema = SelectionSnapshotSchema;
-
-export const ReadRangeResultSchema = z.object({
-  sheet: z.string(),
-  address: z.string(),
-  rowCount: z.number().int().nonnegative(),
-  columnCount: z.number().int().nonnegative(),
-  values: z.array(z.array(CellValueSchema)),
-  formulas: z.array(z.array(z.string())).nullable().optional(),
-  /** Present instead of `values` when `format: "csv"` was requested. */
-  csv: z.string().optional(),
-  truncated: z.boolean(),
-});
-
-export const WriteRangeResultSchema = z.object({
-  sheet: z.string(),
-  address: z.string(),
-  rowsWritten: z.number().int().nonnegative(),
-  columnsWritten: z.number().int().nonnegative(),
-  notesWritten: z.number().int().nonnegative().optional(),
-});
-
-export const SetFormulaResultSchema = z.object({
-  sheet: z.string(),
-  address: z.string(),
-  formula: z.string(),
-});
-
-export const FormatRangeResultSchema = z.object({
-  sheet: z.string(),
-  address: z.string(),
-  applied: z.array(z.string()),
-});
-
-export const InsertRowsResultSchema = z.object({
-  sheet: z.string(),
-  at: z.string(),
-  count: z.number().int().positive(),
-  shiftedRange: z.string(),
-});
-
 export const ToolErrorSchema = z.object({
   code: z.enum([
     "invalid_arguments",
@@ -182,11 +136,6 @@ export const ToolResultSchema = z.discriminatedUnion("ok", [
 export type ToolResult = z.infer<typeof ToolResultSchema>;
 
 /** Office.js executor returns this shape for every tool call. */
-export const ExecutedToolResultSchema = z.object({
-  callId: z.string().min(1),
-  result: ToolResultSchema,
-});
-
 /**
  * A selection as handed to a provider: any host's snapshot, or an Excel snapshot that has no `host` tag
  * (an `ExcelSelectionSnapshot` is assignable to `SelectionSnapshot`, so only the untagged form needs naming).

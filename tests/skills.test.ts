@@ -3,8 +3,8 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { SkillError, SkillStore, defaultSkillDirs, expandSkillPrompt, parseFrontmatter, projectTemplateReminder, skillTemplateUri } from "../bridge/src/skills.js";
-import { OfficeRuntime } from "../runtime/src/office-runtime.js";
-import { SessionManager } from "../bridge/src/session-manager.js";
+import { OfficeRuntime } from "../bridge/src/office-runtime.js";
+import { WorkbookSessions } from "../bridge/src/workbook-sessions.js";
 import { skillFile } from "../bridge/src/skill-runner.js";
 
 let root: string;
@@ -176,7 +176,7 @@ describe("optional user-installed skills", () => {
 
 describe("gateway skill tools", () => {
   it("answers list_skills and read_skill without touching the task pane", async () => {
-    const sessions = new SessionManager({ ttlMs: 60_000 });
+    const sessions = new WorkbookSessions({ ttlMs: 60_000 });
     const session = sessions.create("0123456789abcdef", null);
     const skillStore = new SkillStore([root], path.join(root, "user-templates"));
     skillStore.addTemplate("alpha", "sample.md", Buffer.from("Example style"));

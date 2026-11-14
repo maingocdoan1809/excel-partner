@@ -132,7 +132,6 @@ Choose explicitly with `--providers copilot,codex` or `--providers none`.
 ```powershell
 office-partner providers list
 office-partner providers install copilot
-office-partner providers login copilot
 office-partner providers remove copilot
 office-partner versions
 ```
@@ -142,7 +141,8 @@ The release manifest pins Claude Code `2.1.294`, Copilot CLI `1.0.95` with SDK
 baseline pins, not a claim of production live certification. Installation checks
 the package/version, full file inventory, exact SDK dependency and native adapter
 initialization before activation. Preflight also checks sign-in (Copilot uses its
-SDK's authenticated-status RPC rather than config-file presence). Native preflight never sends a model prompt.
+SDK's authenticated-status RPC rather than config-file presence); a provider that is not signed in
+yet cannot be checked, which is not a reason to refuse its CLI. Native preflight never sends a model prompt.
 It verifies the adapter's initialization path, which can differ by provider;
 it does not prove model access or successful model-driven Office tool execution.
 
@@ -150,15 +150,16 @@ Full distributions are installed under `%LOCALAPPDATA%\Excel Partner\runtimes`.
 Adapter code and dependencies live in the app release. Private CLIs
 use absolute paths and child-only update suppression, with no global npm install
 or PATH registration. Their configuration/history directories live separately
-under `provider-data`, per provider version and platform. No tokens are copied
+under `provider-data`, one folder per provider that is kept from one CLI version to the
+next, so an update never signs anyone out. No tokens are copied
 by Office Partner. A provider may require sign-in to its private CLI. Supported
 OS credential stores or inherited provider authentication may remain shared.
 
-Existing system CLIs are captured as legacy profiles when opting into managed
-mode. A download, integrity, policy or login failure does not activate the staged
-CLI. Sign in, then verify again; Copilot sign-in in Settings also verifies the
-pending profile. Updating the system CLI does not select it for managed chats.
-Legacy external profiles still depend on the user's external installation.
+A provider runs the CLI the product installed for it, or the system CLI when it installed none.
+A release that ships the same CLI version reuses the install instead of downloading it again. A download,
+integrity or policy failure leaves the CLI that was running in place and is recorded for `doctor`; it never
+stops the update of the product itself. Updating the system CLI does not change a provider that runs a
+private one.
 
 For the first migration from an older package, install this Office Partner build
 and run `office-partner setup` while responses are finished. This establishes the
@@ -167,111 +168,21 @@ controls cannot participate in a transactional switch; an update refuses that
 switch and keeps the running copy. Run setup from the existing installation to
 migrate it, then use the managed update flow for later releases.
 
-New workers use the selected profile; running workers keep theirs. Native
-conversation IDs are hashed in a profile sidecar so saved chats resume with the
-same adapter/SDK/CLI and state directory. Older chats without a mapping use the
-captured legacy CLI. Missing saved runtimes produce a repair error, never a
-silent replacement chat. There is no automatic conversion of old provider history.
-
-Fallback is limited to a new session's initial transport/protocol startup, or a
-missing/modified active entrypoint. It selects another verified profile of the same provider.
-Authentication, policy and model failures are reported. Once a prompt has been
-sent, no runtime switch or automatic replay occurs.
-
-The private CLI is isolated from ordinary user CLI updates, not protected from
-the same Windows user's deliberate access. That user can locate and execute its
-files. This is version isolation, not an OS security boundary.
-
-Provider controls are documented by [GitHub](https://docs.github.com/en/copilot/reference/copilot-cli-reference/cli-command-reference),
-[Claude Code](https://code.claude.com/docs/en/settings), and
-[OpenCode](https://opencode.ai/docs/cli/). They supplement exact private installs;
-they do not freeze provider services, models or organization policy.
-
-## Update, going back and repair
-
-```powershell
-office-partner update
-office-partner update --from office-partner@0.1.22
-office-partner update --from C:\packages\office-partner-release.tgz
-office-partner rollback 0.1.22
-office-partner repair
-office-partner debug on
-office-partner debug off
-office-partner diagnostics export partner-support.json
-```
-
-Updates prepare a complete app release with dependencies and selected provider
-profiles alongside the running copy. Published dependencies are locked with
-`npm-shrinkwrap.json`. Downloads and native preflight finish before draining
-services. Authenticated service controls reject active turns, login attempts,
-model probes and pending gateway tool results. Partial drain is undone on failure.
-The gateway's official-client Office calls still execute in the official client;
-none are redirected to the Office Partner pane.
-
-An update never goes back to the older release by itself. If the new release fails to
-start, the update reports the error, closes what started halfway and leaves the new
-release selected; run `office-partner update` again or `office-partner rollback <version>`.
-A damaged active release is not replaced from disk: no older release is kept.
-Starting reports `RELEASE_DAMAGED`, and `repair` (or Start > Office Partner - Fix
-connection) installs the same version again from npm.
-Only the running release is kept. Once a new release is running, the older one and the
-runtimes made only for it are deleted. Going back to an older version is
-`office-partner rollback <version>`, which installs that version from npm like
-`update --from office-partner@<version>`; it runs only when someone asks for it and needs
-a network connection.
-
-Saved chats: a runtime profile made by a retired release is dropped when it
-duplicates the current CLI (same version and data folder) and its chats move to the
-current profile. A profile for an older CLI version that chats were created with is
-kept, together with its CLI folder and data, and is served by the current release's
-adapter; it goes away only when those chats no longer need it. Folders left behind by
-an earlier cleanup that could not delete them are removed at the next update.
-
-Repair validates the active release and managed CLI inventories, including
-inactive profiles needed by old chats. It replaces damaged CLI distributions
-while services are stopped; downloading replacements needs npm/network access.
-A damaged app is installed again from npm. Missing backups or unrecoverable
-historical adapter files require reinstalling that release; diagnostics does not
-manufacture a compatible conversation runtime.
-
-Settings > App & storage > System & recovery offers provider selection, system
-and host-specific MCP checks, JSON export, repair and
-debug logging. Destructive document actions are not part of these controls.
-Debug expires after 15 minutes. Bridge event logs rotate at approximately 5 MiB
-with three retained files. Raw local logs can contain provider error details;
-diagnostic exports omit them and do not upload anything automatically.
-
-## Recovery when the package cannot load
-
-Setup retains a dependency-free management copy outside the npm package.
-With Node.js still installed, run in PowerShell:
-
-```powershell
-$recovery = Join-Path $env:LOCALAPPDATA 'Excel Partner\recovery\recovery.mjs'
-node $recovery versions
-node $recovery repair
-node $recovery fix
-node $recovery start all
-node $recovery diagnostics export partner-recovery.json
-```
-
-The stable launcher points to a complete immutable recovery toolset. Startup
-registration uses this launcher. Metadata writes are atomic and retain a previous
-copy; `repair` can restore valid metadata backups. A lost data directory or Node
-installation still requires reinstallation. Use `office-partner uninstall all`
+Every chat, new or saved, runs the CLI the provider is using now. A running session keeps the process it
+started with until it ends. Removing a release on its own still requires reinstallation. Use `office-partner uninstall all`
 before `npm uninstall -g office-partner` to remove owned releases and CLIs. User
 history, credentials, external CLIs and provider-data are retained deliberately.
 
 ## Validation boundary
 
 Default automated checks use mock installers/providers and local MCP schema discovery.
-They cover version isolation, pending login, dependency corruption, initial-only
-fallback, saved native resume, busy services, failed activation, interrupted
+They cover reusing and switching CLI installs, a provider that is not signed in, dependency corruption,
+busy services, failed activation, interrupted
 updates, rollback by reinstalling and owner-aware uninstall. Separate opt-in Windows
 checks installed real private CLIs and verified Copilot native registration,
 real model-driven MCP execution in Chrome, continuation and History resume.
 OpenCode's compatible pin was updated after live initialization checks. Private
-Claude and Codex profiles without a sign-in remained pending as intended.
+Claude and Codex installs without a sign-in could not be checked further, as expected.
 No Excel/Word/PowerPoint document write was performed. Before a broad rollout,
 validate each signed-in profile on disposable Office documents. See the
 [validation report](managed-runtime-validation.md) for exact coverage and limits.

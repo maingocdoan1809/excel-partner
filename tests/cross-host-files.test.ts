@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { WebSocket } from "ws";
-import { SessionManager } from "../bridge/src/session-manager.js";
-import { OfficeRuntime } from "../runtime/src/office-runtime.js";
+import { WorkbookSessions } from "../bridge/src/workbook-sessions.js";
+import { OfficeRuntime } from "../bridge/src/office-runtime.js";
 import type { WorkbookSession } from "../bridge/src/session.js";
 import { CONNECTED_READ_TOOLS_BY_HOST, ConnectedFileSchema, WORKBOOK_NAME_REQUEST, parseToolInput, type HostId, type ToolResult } from "../protocol/src/index.js";
 
@@ -31,7 +31,7 @@ function attachPane(session: WorkbookSession, options: { approve?: boolean; repl
 
 /** One open file per Office app, each with its own pane. */
 function office() {
-  const sessions = new SessionManager({ ttlMs: 60_000 });
+  const sessions = new WorkbookSessions({ ttlMs: 60_000 });
   const made = {} as Record<HostId, { session: WorkbookSession; sent: Sent[] }>;
   const names: Record<HostId, string> = { excel: "Budget.xlsx", word: "Plan.docx", powerpoint: "Review.pptx" };
   const data: Record<HostId, unknown> = {
@@ -117,7 +117,7 @@ describe("files of different Office apps", () => {
   });
 
   it("declines when the person says no, for any kind of file", async () => {
-    const sessions = new SessionManager({ ttlMs: 60_000 });
+    const sessions = new WorkbookSessions({ ttlMs: 60_000 });
     const doc = sessions.create("conn-word-87654321", { host: "word" });
     const deck = sessions.create("conn-ppt-87654321", { host: "powerpoint" });
     doc.workbookName = "Plan.docx"; deck.workbookName = "Review.pptx";

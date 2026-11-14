@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { SelectionSnapshotSchema } from "../protocol/src/index.js";
 import { AsyncQueue } from "../providers/src/async-queue.js";
 import { compareVersions, extractVersion } from "../providers/src/base.js";
-import { ClaudeStreamTranslator } from "../providers/src/claude.js";
+import { ClaudeStreamTranslator } from "../providers/src/claude/adapter.js";
 import { JsonRpcPeer } from "../providers/src/jsonrpc.js";
 import { buildTurnPrompt } from "../providers/src/prompt.js";
 
@@ -177,9 +177,11 @@ describe("JsonRpcPeer", () => {
   it("lets a long request run while the peer keeps working, and only times it out for silence", async () => {
     const peer = spawnPeer({ onNotification: () => undefined });
     try {
-      // 200 ms would end a 400 ms job if it were a total limit; the peer is never silent for that long.
-      expect(await peer.request("chatty", {}, 200, { idle: true })).toBe("done");
-      await expect(peer.request("chatty", {}, 200)).rejects.toThrow(/timed out after 200ms$/);
+      // Starting the child process can take longer than the short limits below, so wait for it before measuring.
+      await peer.request("echo", {}, 30_000);
+      // 300 ms would end a 420 ms job if it were a total limit; the peer is never silent for that long (it speaks every 60 ms).
+      expect(await peer.request("chatty", {}, 300, { idle: true })).toBe("done");
+      await expect(peer.request("chatty", {}, 300)).rejects.toThrow(/timed out after 300ms$/);
       await expect(peer.request("silent", {}, 100, { idle: true })).rejects.toThrow(/timed out after 100ms without any activity/);
     } finally {
       await peer.close();

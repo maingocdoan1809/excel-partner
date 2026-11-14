@@ -1,10 +1,10 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import fs from "node:fs";
-import { setupConnectedFiles } from "../addin/taskpane/ui/connected-files.js";
+import { setupConnectedFiles } from "../frontend/taskpane/ui/connected-files.js";
 
 beforeEach(() => {
-  const html = fs.readFileSync("addin/taskpane/index.html", "utf8");
+  const html = fs.readFileSync("frontend/taskpane/index.html", "utf8");
   document.body.innerHTML = html.split("<body>")[1]!.split("</body>")[0]!;
 });
 afterEach(() => document.body.replaceChildren());

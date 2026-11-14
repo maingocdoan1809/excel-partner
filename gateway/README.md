@@ -169,7 +169,7 @@ twice. Expired, mismatched or lost continuations return an error without replay.
 Pending continuations remain in memory until completion, timeout or shutdown;
 they do not survive a gateway restart.
 
-The add-in and API use the same `providers/src/session-manager.ts` lifecycle.
+The add-in and API use the same `shared/src/session-manager.ts` lifecycle.
 A completed generation keeps its worker alive. Claude Office's
 `metadata.user_id` contains a JSON string with its stable `session_id`
 (`historyChatId`). The gateway hashes authentication identity, provider and that

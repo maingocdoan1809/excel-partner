@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { executePptTool, getPptSelection, getPptSelectionLabel } from "../addin/taskpane/executor/powerpoint/index.js";
+import { executePptTool, getPptSelection, getPptSelectionLabel } from "../frontend/taskpane/executor/powerpoint/index.js";
 import { buildDeck } from "./support/ppt-fixture.js";
 import { installFakePowerPoint } from "./support/fake-powerpoint.js";
 

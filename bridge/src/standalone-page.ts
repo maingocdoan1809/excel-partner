@@ -25,9 +25,9 @@ window.Office = {
 };
 </script>`;
 
-/** `html` is `addin/taskpane/index.html`. Its relative links keep pointing at the add-in folder through <base>. */
+/** `html` is `frontend/taskpane/index.html`. Its relative links keep pointing at the add-in folder through <base>. */
 export function standalonePage(html: string): string {
-  if (!html.includes(OFFICE_SCRIPT)) throw new Error("addin/taskpane/index.html no longer loads office.js in the expected way");
+  if (!html.includes(OFFICE_SCRIPT)) throw new Error("frontend/taskpane/index.html no longer loads office.js in the expected way");
   return html
     .replace("<head>", '<head>\n    <base href="/addin/taskpane/" />')
     .replace(OFFICE_SCRIPT, STAND_IN)

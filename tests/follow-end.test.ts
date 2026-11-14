@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, expect, it, vi } from "vitest";
-import { FollowEnd, steadyVisibility } from "../addin/taskpane/ui/follow-end.js";
+import { FollowEnd, steadyVisibility } from "../frontend/taskpane/ui/follow-end.js";
 
 /** A list with a given content height; scrolling is simulated the way a browser reports it. */
 function list(clientHeight = 300) {

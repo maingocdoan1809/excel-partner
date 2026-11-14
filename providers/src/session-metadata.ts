@@ -21,7 +21,7 @@ export async function copilotTitle(id: string, env: NodeJS.ProcessEnv): Promise<
     if ((await fs.stat(file)).size > 64 * 1024) return undefined;
     const metadata = parse(await fs.readFile(file, "utf8"), { maxAliasCount: 0 });
     if (metadata?.id && metadata.id !== id) return undefined;
-    return cleanSessionTitle("copilot", nativeTitle(metadata?.name));
+    return cleanSessionTitle(nativeTitle(metadata?.name));
   } catch { return undefined; }
 }
 

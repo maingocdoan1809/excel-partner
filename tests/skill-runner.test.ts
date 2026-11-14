@@ -4,8 +4,8 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SkillStore } from "../bridge/src/skills.js";
 import { resolveSkillScript, runSkillScript, windowsBash } from "../bridge/src/skill-runner.js";
-import { SessionManager } from "../bridge/src/session-manager.js";
-import { OfficeRuntime } from "../runtime/src/office-runtime.js";
+import { WorkbookSessions } from "../bridge/src/workbook-sessions.js";
+import { OfficeRuntime } from "../bridge/src/office-runtime.js";
 import { parseToolInput, SERVER_TOOLS } from "../protocol/src/index.js";
 
 let root: string;
@@ -103,7 +103,7 @@ describe("skill script execution", () => {
 
 describe("gateway script permission and results", () => {
   function setup(approved: boolean) {
-    const sessions = new SessionManager({ ttlMs: 60_000 });
+    const sessions = new WorkbookSessions({ ttlMs: 60_000 });
     const session = sessions.create("script-test", null);
     vi.spyOn(session, "isConnected", "get").mockReturnValue(true);
     const permission = vi.spyOn(session, "requestTool").mockResolvedValue({ ok: true, data: { approved } });

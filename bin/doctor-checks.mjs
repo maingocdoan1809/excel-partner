@@ -45,10 +45,7 @@ export function resolveCommands(command, env, platform = process.platform) {
 }
 
 function adapterMinimum(root, provider) {
-  for (const candidate of [path.join(root, "dist", "providers", "src", `${provider}.js`), path.join(root, "providers", "src", `${provider}.ts`)]) {
-    try { return /MIN_VERSION\s*=\s*["']([0-9.]+)["']/.exec(fs.readFileSync(candidate, "utf8"))?.[1] ?? null; } catch { /* next */ }
-  }
-  return null;
+  try { return JSON.parse(fs.readFileSync(path.join(root, "bin", "runtime-manifest.json"), "utf8")).providers?.[provider]?.minVersion ?? null; } catch { return null; }
 }
 
 function expectedProtocol(root) {
@@ -88,7 +85,7 @@ export async function collectDoctor(options) {
         catch { add(`integrity.release.${release.id.slice(0, 16)}`, "fail", "RELEASE_INTEGRITY_FAILED", "A retained release has missing or changed files.", "Use recovery repair or restore a verified cached release.", { version: version(release.version) }); }
       }
       for (const profile of Object.values(runtimeState.profiles)) {
-        if (profile.mode !== "managed" || provider && provider !== profile.provider) continue;
+        if (provider && provider !== profile.provider) continue;
         try { verifyRuntime(profile, dataDir); add(`integrity.runtime.${profile.id.slice(0, 16)}`, "pass", "RUNTIME_INTEGRITY_OK", "Managed CLI file inventory matches.", undefined, { provider: profile.provider, version: version(profile.version) }); }
         catch { add(`integrity.runtime.${profile.id.slice(0, 16)}`, "fail", "RUNTIME_INTEGRITY_FAILED", "A managed CLI has missing or changed files.", "office-partner repair", { provider: profile.provider, version: version(profile.version) }); }
       }
@@ -217,9 +214,9 @@ export async function collectDoctor(options) {
 
   for (const id of provider ? [provider] : PROVIDERS) {
     const failed = runtimeState?.failures?.[id];
-    if (failed && /^(NATIVE_PREFLIGHT_[A-Z_]+|INSTALL_FAILED|INSTALL_TIMEOUT|CLI_PREFLIGHT_FAILED|RUNTIME_INSTALL_FAILED|RUNTIME_INTEGRITY_FAILED|ACTIVATION_CANCELLED)$/.test(failed.code)) {
-      add(`provider.${id}.activation`, "warn", failed.code, `${id}: the private runtime has not been activated; its previous selection was retained.`,
-        failed.code === "NATIVE_PREFLIGHT_AUTH_REQUIRED" ? `office-partner providers login ${id}` : `office-partner providers install ${id}`, { version: version(failed.version) });
+    if (failed && /^(NATIVE_PREFLIGHT_[A-Z_]+|INSTALL_FAILED|INSTALL_TIMEOUT|CLI_PREFLIGHT_FAILED|INSTALLED_VERSION_MISMATCH|RUNTIME_INSTALL_FAILED|RUNTIME_INTEGRITY_FAILED)$/.test(failed.code)) {
+      add(`provider.${id}.activation`, "warn", failed.code, `${id}: the last installation of the private CLI did not finish; the one that was running is still in use.`,
+        `office-partner providers install ${id}`, { version: version(failed.version) });
     }
     let profile;
     try { profile = runtimeStore?.selectProfile(dataDir, id); }
@@ -228,9 +225,8 @@ export async function collectDoctor(options) {
       add(`provider.${id}.profile`, disabled ? "skip" : "fail", disabled ? "PROVIDER_DISABLED" : "RUNTIME_PROFILE_UNAVAILABLE",
         disabled ? `${id}: provider is disabled.` : `${id}: recorded runtime is missing, changed, or invalid.`, `office-partner providers install ${id}`); continue;
     }
-    if (profile?.fallbackFrom) add(`provider.${id}.fallback`, "warn", "RUNTIME_FALLBACK_ACTIVE", `${id}: a retained CLI is being used because the selected entrypoint is missing or changed.`, "office-partner repair");
     const override = envValue(env, `${id.toUpperCase()}_BIN`, platform);
-    const matches = resolveCommands(profile?.command ?? override ?? id, env, platform), minimum = adapterMinimum(profile?.adapterRoot ?? root, id);
+    const matches = resolveCommands(profile?.command ?? override ?? id, env, platform), minimum = adapterMinimum(root, id);
     const required = Boolean(provider) || target !== "addin" && (gatewayConfig.enabledProviders ?? ["copilot"]).includes(id);
     if (!matches.length) {
       add(`provider.${id}.executable`, required ? "fail" : "warn", "CLI_NOT_FOUND", `${id}: CLI executable not found.`, "Check the CLI installation and executable override in the service environment.", { source: override ? "override" : "PATH" });
@@ -238,7 +234,7 @@ export async function collectDoctor(options) {
     }
     add(`provider.${id}.executable`, matches.length > 1 ? "warn" : "pass", matches.length > 1 ? "CLI_MULTIPLE" : "CLI_FOUND",
       `${id}: ${matches.length > 1 ? "multiple executable candidates found" : "executable found"}.`, matches.length > 1 ? "Check which installation appears first on PATH." : undefined,
-      { source: profile ? profile.fallbackFrom ? "fallback" : profile.mode : override ? "override" : "PATH", candidates: matches.length, executableHash: hash(matches[0]), extension: [".exe", ".cmd", ".bat", ".com", ".js", ".mjs"].includes(path.extname(matches[0]).toLowerCase()) ? path.extname(matches[0]).toLowerCase() : "other", minimum });
+      { source: profile ? "managed" : override ? "override" : "PATH", candidates: matches.length, executableHash: hash(matches[0]), extension: [".exe", ".cmd", ".bat", ".com", ".js", ".mjs"].includes(path.extname(matches[0]).toLowerCase()) ? path.extname(matches[0]).toLowerCase() : "other", minimum });
     if (!probe) {
       add(`provider.${id}.probe`, "skip", "CLI_NOT_PROBED", `${id}: version and authentication have not been verified.`, `${command} doctor --provider ${id} --probe`); continue;
     }

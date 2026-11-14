@@ -9,7 +9,7 @@ import {
   parseXml,
   unpackSlideFile,
   validateSlideXml,
-} from "../addin/taskpane/executor/powerpoint/ooxml.js";
+} from "../frontend/taskpane/executor/powerpoint/ooxml.js";
 import { call, fails, ok, useFakeDeck } from "./support/ppt-fixture.js";
 
 const fx = useFakeDeck();

@@ -22,11 +22,11 @@ vi.mock("../providers/src/jsonrpc.js", () => ({
   },
 }));
 import * as base from "../providers/src/base.js";
-import { CopilotAdapter } from "../providers/src/copilot.js";
-import { OpencodeAdapter } from "../providers/src/opencode.js";
-import { CodexAdapter } from "../providers/src/codex.js";
-import { ClaudeAdapter } from "../providers/src/claude.js";
-vi.mock("../providers/src/claude-process.js", () => ({
+import { CopilotAdapter } from "../providers/src/copilot/adapter.js";
+import { OpencodeAdapter } from "../providers/src/opencode/adapter.js";
+import { CodexAdapter } from "../providers/src/codex/adapter.js";
+import { ClaudeAdapter } from "../providers/src/claude/adapter.js";
+vi.mock("../providers/src/claude/process.js", () => ({
   ClaudeProcess: class {
     async request() { return {}; }
     async close() {}
@@ -46,7 +46,7 @@ beforeEach(() => {
   rpc.calls = [];
   rpc.launches = [];
   rpc.reply = async () => ({});
-  vi.spyOn(OpencodeAdapter.prototype, "detect").mockResolvedValue({ provider: "opencode", installed: true, version: "1.19.3", status: "ready", hint: null, capabilities: { streaming: true, cancel: true, sessionResume: true, mcp: true, acp: true } });
+  vi.spyOn(OpencodeAdapter.prototype, "detect").mockResolvedValue({ provider: "opencode", installed: true, version: "1.19.3", status: "ready", hint: null, capabilities: OpencodeAdapter.capabilities });
 });
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllEnvs(); fs.rmSync(dir, { recursive: true, force: true }); });
 async function turn(adapter: CopilotAdapter | OpencodeAdapter | CodexAdapter, internalId: string) {
@@ -174,7 +174,7 @@ describe("each provider resumes its native session independently", () => {
   });
 
   it.each([false, true])("OpenCode loads its ACP session and uses exported totals including cache and reasoning (v2=%j)", async v2 => {
-    if (v2) vi.mocked(OpencodeAdapter.prototype.detect).mockResolvedValue({ provider: "opencode", installed: true, version: "2.0.32", status: "ready", hint: null, capabilities: { streaming: true, cancel: true, sessionResume: true, mcp: true, acp: true } });
+    if (v2) vi.mocked(OpencodeAdapter.prototype.detect).mockResolvedValue({ provider: "opencode", installed: true, version: "2.0.32", status: "ready", hint: null, capabilities: OpencodeAdapter.capabilities });
     let exports = 0;
     vi.spyOn(base, "execCli").mockImplementation(async (_command, args) => {
       if (v2 ? args[0] === "session" && args[1] === "export" : args[0] === "export") {

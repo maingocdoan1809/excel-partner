@@ -4,7 +4,8 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { SystemPromptStore } from "../bridge/src/system-prompt.js";
 import { EXCEL_TOOL_NAMES, isExcelToolName } from "../protocol/src/index.js";
-import { RECOMMENDED_SYSTEM_PROMPT, SYSTEM_PROMPT } from "../providers/src/prompt.js";
+import { SYSTEM_PROMPT } from "../providers/src/prompt.js";
+import { RECOMMENDED_SYSTEM_PROMPT, hostSystemPrompt, recommendedPromptFor } from "../protocol/src/system-prompts.js";
 
 describe("system prompt settings", () => {
   it("persists a full override, detects conflicting edits and restores the shipped default", () => {
@@ -25,6 +26,42 @@ describe("system prompt settings", () => {
       expect(store.read()).toEqual(initial);
       expect(again.customized).toBe(true);
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  });
+
+  it("keeps each Office application's instructions apart, so PowerPoint's never reach Excel", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "system-prompt-"));
+    try {
+      const file = path.join(dir, "system-prompt.txt");
+      const excel = new SystemPromptStore(file);
+      const powerpoint = excel.forHost("powerpoint");
+      powerpoint.update("Only for decks", powerpoint.read().revision);
+      expect(fs.existsSync(path.join(dir, "system-prompt-powerpoint.txt"))).toBe(true);
+      expect(excel.read()).toMatchObject({ content: SYSTEM_PROMPT, customized: false });
+      expect(new SystemPromptStore(file).forHost("powerpoint").read().content).toBe("Only for decks");
+      expect(excel.forHost("word").read().customized).toBe(false);
+      expect(excel.forHost("excel")).toBe(excel);
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  });
+
+  it("ignores a PowerPoint or Word preset that an earlier version saved as Excel's prompt", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "system-prompt-"));
+    try {
+      const file = path.join(dir, "system-prompt.txt");
+      for (const host of ["powerpoint", "word"] as const) {
+        fs.writeFileSync(file, hostSystemPrompt(host, ""));
+        expect(new SystemPromptStore(file).read()).toMatchObject({ content: SYSTEM_PROMPT, customized: false });
+      }
+      fs.writeFileSync(file, hostSystemPrompt("powerpoint", "") + "\nMy own rule.");
+      expect(new SystemPromptStore(file).read().customized).toBe(true);
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  });
+
+  it("offers Word and PowerPoint only their introduction as the preset, because their rules are added to whatever is saved", () => {
+    for (const host of ["word", "powerpoint"] as const) {
+      expect(recommendedPromptFor(host)).not.toContain("# Working in");
+      expect(hostSystemPrompt(host, recommendedPromptFor(host))).toBe(hostSystemPrompt(host, ""));
+    }
+    expect(recommendedPromptFor("excel")).toBe(RECOMMENDED_SYSTEM_PROMPT);
   });
 
   it("defaults to no add-in prompt and persists an explicitly cleared override", () => {

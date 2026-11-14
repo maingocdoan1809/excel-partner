@@ -1,14 +1,14 @@
 import { describe, expect, it } from "vitest";
 import type { WebSocket } from "ws";
-import { SessionManager } from "../bridge/src/session-manager.js";
-import { OfficeRuntime } from "../runtime/src/office-runtime.js";
+import { WorkbookSessions } from "../bridge/src/workbook-sessions.js";
+import { OfficeRuntime } from "../bridge/src/office-runtime.js";
 import type { ToolResult } from "../protocol/src/index.js";
 
 const limits = { maxReadCells: 100, maxWriteCells: 100, maxSheets: 10, maxSelectionCells: 10 };
 
 /** A workbook whose pane answers every tool request with `reply`; returns what the assistant gets back. */
 function ask(tool: string, args: unknown, reply: ToolResult): Promise<ToolResult> {
-  const sessions = new SessionManager({ ttlMs: 60_000 });
+  const sessions = new WorkbookSessions({ ttlMs: 60_000 });
   const session = sessions.create("range-link-connection", null);
   session.attachSocket({
     readyState: 1, close() {},

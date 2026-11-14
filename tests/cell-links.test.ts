@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from "vitest";
-import { findCellRefs, isRefList, linkifyCells, mentionsFile, mentionsSheet } from "../addin/taskpane/ui/cell-links.js";
+import { findCellRefs, isRefList, linkifyCells, mentionsFile, mentionsSheet } from "../frontend/taskpane/ui/cell-links.js";
 import { cellLinkMarkdown } from "../protocol/src/index.js";
-import { renderMarkdown } from "../addin/taskpane/ui/markdown.js";
+import { renderMarkdown } from "../frontend/taskpane/ui/markdown.js";
 
 const refs = (text: string, context: "text" | "code" = "text") => findCellRefs(text, context).map((r) => `${r.sheet ?? ""}|${r.address}`);
 

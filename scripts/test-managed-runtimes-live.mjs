@@ -36,7 +36,7 @@ for (const provider of providers) {
     return result;
   };
   try {
-    const profile = await installRuntime(root, provider, { dataDir, adapterRoot: baseline.root, run });
+    const profile = await installRuntime(root, provider, { dataDir, run });
     checks.push({ provider, version: profile.version, ok: true, nativePreflight: true, operations });
     console.log(`PASS ${provider}: exact CLI, integrity and native adapter preflight verified.`);
   } catch (error) {

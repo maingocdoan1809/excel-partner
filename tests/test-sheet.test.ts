@@ -1,12 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { executeTool, WRITE_TOOLS } from "../addin/taskpane/executor/index.js";
-import { describeTestBrowserApproval } from "../addin/taskpane/permissions.js";
-import { describeChange } from "../addin/taskpane/ui/changes.js";
-import { SessionManager } from "../bridge/src/session-manager.js";
-import { OfficeRuntime } from "../runtime/src/office-runtime.js";
+import { executeTool, WRITE_TOOLS } from "../frontend/taskpane/executor/index.js";
+import { describeTestBrowserApproval } from "../frontend/taskpane/permissions.js";
+import { describeChange } from "../frontend/taskpane/ui/changes.js";
+import { WorkbookSessions } from "../bridge/src/workbook-sessions.js";
+import { OfficeRuntime } from "../bridge/src/office-runtime.js";
 import { TestSessions } from "../bridge/src/test-sessions.js";
 import { SiteKnowledge, siteKey } from "../bridge/src/site-knowledge.js";
-import { describeSiteKnowledgeApproval } from "../addin/taskpane/permissions.js";
+import { describeSiteKnowledgeApproval } from "../frontend/taskpane/permissions.js";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -95,7 +95,7 @@ describe("record_test_results", () => {
 
 describe("open_test_browser", () => {
   function fixture(store: TestSessions | null = null, knowledge: SiteKnowledge | null = null) {
-    const sessions = new SessionManager({ ttlMs: 60_000 });
+    const sessions = new WorkbookSessions({ ttlMs: 60_000 });
     const session = sessions.create("test-browser", null);
     session.capabilities.playwright = true;
     Object.defineProperty(session, "isConnected", { get: () => true, configurable: true });
@@ -202,7 +202,7 @@ describe("saved knowledge about a system", () => {
   const setup = () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ep-knowledge-"));
     const knowledge = new SiteKnowledge(dir);
-    const sessions = new SessionManager({ ttlMs: 60_000 });
+    const sessions = new WorkbookSessions({ ttlMs: 60_000 });
     const session = sessions.create("knowledge", null);
     session.capabilities.playwright = true;
     Object.defineProperty(session, "isConnected", { get: () => true, configurable: true });

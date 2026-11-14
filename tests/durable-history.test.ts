@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { DurableHistory } from "../addin/taskpane/ui/durable-history.js";
-import { MAX_STORED_TEXT } from "../addin/taskpane/ui/sessions.js";
+import { DurableHistory } from "../frontend/taskpane/ui/durable-history.js";
+import { MAX_STORED_TEXT } from "../frontend/taskpane/ui/sessions.js";
 import type { StoredSession, HistorySave } from "../protocol/src/history.js";
 const session = (): StoredSession => ({ id: "chat", title: "hello", provider: "copilot", startedAt: 1, updatedAt: 2, messages: [{ kind: "user", text: "hello" }], changes: [] });
 afterEach(() => { localStorage.clear(); vi.useRealTimers(); vi.restoreAllMocks(); });

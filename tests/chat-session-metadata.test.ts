@@ -1,81 +1,89 @@
-import { describe, expect, it, vi } from "vitest";
-import fs from "node:fs";
-import vm from "node:vm";
-import ts from "typescript";
-import { bindProviderSession, newSession, type StoredSession } from "../addin/taskpane/ui/sessions.js";
+// @vitest-environment jsdom
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { handleEvent } from "../frontend/taskpane/chat/events.js";
+import { app } from "../frontend/taskpane/chat/state.js";
+import { newSession, type StoredSession } from "../frontend/taskpane/ui/sessions.js";
 
-// Exercise the task pane's actual event handler without starting Office or the DOM.
-const main = fs.readFileSync(new URL("../addin/taskpane/main.ts", import.meta.url), "utf8").replace(/\r\n/g, "\n");
-const start = main.indexOf("function handleEvent(");
-const handler = ts.transpileModule(main.slice(start, main.indexOf("\n}\n", start) + 3), {
-  compilerOptions: { target: ts.ScriptTarget.ES2020 },
-}).outputText;
+// Exercise the task pane's real event handler. Only what draws on the page or talks to the bridge is replaced.
+const fakes = vi.hoisted(() => {
+  const saved = new Map<string, unknown>();
+  return {
+    saved,
+    // Stands in for DurableHistory: a chat is kept once it has a user message, and a saved chat is returned as a copy.
+    store: {
+      save: (chat: { id: string; messages: { kind: string }[] }) => { if (chat.messages.some(m => m.kind === "user")) saved.set(chat.id, structuredClone(chat)); },
+      get: (id: string) => saved.get(id) ?? null,
+      flush: async () => {},
+    },
+    usagePanel: { rebind: vi.fn() },
+    thinking: { clear: vi.fn(), show: vi.fn(), setLabel: vi.fn() },
+  };
+});
+vi.mock("../frontend/taskpane/chat/services.js", () => ({ store: fakes.store, usagePanel: fakes.usagePanel, thinking: fakes.thinking, renderChanges: vi.fn() }));
+vi.mock("../frontend/taskpane/chat/messages.js", () => ({ renderMessage: vi.fn() }));
+vi.mock("../frontend/taskpane/chat/turn.js", () => ({}));
+vi.mock("../frontend/taskpane/ui/elements.js", () => ({ els: { messages: { replaceChildren: vi.fn() } } }));
+vi.mock("../frontend/taskpane/chat/chats.js", async () => {
+  const { app } = await import("../frontend/taskpane/chat/state.js");
+  return { persistNow: () => fakes.store.save(app.session), schedulePersist: () => {} };
+});
 
 function setup() {
-  // Stands in for DurableHistory: a chat is kept once it has a user message, and a saved chat is returned as a copy.
-  const saved = new Map<string, StoredSession>();
-  const store = {
-    save: (chat: StoredSession) => { if (chat.messages.some(m => m.kind === "user")) saved.set(chat.id, structuredClone(chat)); },
-    get: (id: string) => saved.get(id) ?? null,
-    flush: async () => {},
-  };
+  fakes.saved.clear();
+  fakes.usagePanel.rebind.mockClear();
   const session = newSession("claude");
   session.messages.push({ kind: "user", text: "Keep this conversation" });
-  const context = vm.createContext({
-    session, requestSession: session, currentRequestId: "request", store, bindProviderSession,
-    requestMessageIndex: 0, requestChangeIndex: 0, requestStartedAt: 1,
-    usagePanel: { rebind: vi.fn() },
-    clearThinking: vi.fn(), showThinking: vi.fn(), renderChanges: vi.fn(), renderMessage: vi.fn(),
-    els: { messages: { replaceChildren: vi.fn() } },
-  });
-  vm.runInContext(handler + "\nfunction persistNow() { store.save(session); }", context);
-  const metadata = (title?: string, requestId = "request") => context.handleEvent({
+  Object.assign(app, { session, requestSession: session, currentRequestId: "request", requestMessageIndex: 0, requestChangeIndex: 0, requestStartedAt: 1 });
+  const metadata = (title?: string, requestId = "request") => handleEvent({
     type: "session_info", requestId, provider: "claude", providerSessionId: "native", title,
   });
-  return { context, store, metadata };
+  const saved = (id: string) => fakes.store.get(id) as StoredSession | null;
+  return { store: { ...fakes.store, get: saved }, usagePanel: fakes.usagePanel, metadata };
 }
 
 describe("task pane session metadata ownership", () => {
+  beforeEach(() => { app.session = newSession("claude"); });
+
   it("ignores the first metadata if a new chat was opened before provider initialization", () => {
-    const { context, store, metadata } = setup();
-    const original = context.session;
+    const { store, usagePanel, metadata } = setup();
+    const original = app.session;
     store.save(original);
     const next = newSession("claude", 2);
-    context.session = next;
+    app.session = next;
     metadata();
-    store.save(context.session);
-    expect(context.session).toBe(next);
+    store.save(app.session);
+    expect(app.session).toBe(next);
     expect(store.get(original.id)?.messages).toEqual(original.messages);
     expect(store.get("claude:native")).toBeNull();
-    expect(context.usagePanel.rebind).not.toHaveBeenCalled();
+    expect(usagePanel.rebind).not.toHaveBeenCalled();
   });
 
   it("ignores late metadata after switching to a new or saved chat, preserving native history", () => {
     for (const useSavedChat of [false, true]) {
-      const { context, store, metadata } = setup();
+      const { store, usagePanel, metadata } = setup();
       metadata("Original title");
       const original = store.get("claude:native");
       const next = newSession("claude", 2);
       if (useSavedChat) next.messages.push({ kind: "user", text: "Another chat" });
-      context.session = next;
+      app.session = next;
       metadata("Late title");
-      store.save(context.session);
-      expect(context.session).toBe(next);
+      store.save(app.session);
+      expect(app.session).toBe(next);
       expect(next.providerSessionId).toBeUndefined();
       expect(store.get("claude:native")).toEqual(original);
-      expect(context.usagePanel.rebind).toHaveBeenCalledTimes(1);
+      expect(usagePanel.rebind).toHaveBeenCalledTimes(1);
     }
   });
 
   it("accepts subsequent metadata after the active request binds its native ID", () => {
-    const { context, store, metadata } = setup();
+    const { store, usagePanel, metadata } = setup();
     metadata();
-    expect(context.requestSession).toBe(context.session);
+    expect(app.requestSession).toBe(app.session);
     metadata("Confirmed title");
     expect(store.get("claude:native")?.title).toBe("Confirmed title");
     metadata("Stale title", "older-request");
     expect(store.get("claude:native")?.title).toBe("Confirmed title");
-    expect(context.usagePanel.rebind).toHaveBeenCalledTimes(1);
-    expect(context.usagePanel.rebind).toHaveBeenCalledWith("request");
+    expect(usagePanel.rebind).toHaveBeenCalledTimes(1);
+    expect(usagePanel.rebind).toHaveBeenCalledWith("request");
   });
 });

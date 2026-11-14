@@ -1,0 +1,417 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="addin-build-id" content="__ADDIN_BUILD_ID__" />
+    <title>Excel Partner</title>
+    <script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
+    <link rel="stylesheet" href="./styles.css" />
+    <link rel="stylesheet" href="./workspace.css" />
+  </head>
+  <body>
+    <header class="app-header">
+      <button id="files-button" type="button" class="icon-button files-button" aria-haspopup="dialog" aria-expanded="false" aria-controls="files-popover" aria-label="Connected files" title="Connected files" data-connected="false">
+        <svg viewBox="0 0 20 20" aria-hidden="true"><rect x="3.5" y="4.5" width="13" height="11" rx="1.6" fill="none" stroke="currentColor" stroke-width="1.2"/><path d="M3.5 8.5h13M3.5 12h13M8 4.5v11" fill="none" stroke="currentColor" stroke-width="1.2"/></svg>
+        <span class="files-dot" aria-hidden="true"></span>
+      </button>
+      <div class="brand">
+        <img class="logo" src="../assets/icon-32.png?v=4" alt="" />
+        <div class="brand-text"><strong>Excel Partner</strong><span id="connection-status" class="status" data-state="idle"><i class="dot"></i><span id="connection-label">Waiting for Excel</span></span></div>
+      </div>
+      <div class="header-actions">
+        <button id="changes-button" type="button" class="icon-button" aria-label="Changes" title="Changes"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 7a6.5 6.5 0 1 1-.3 5M4 3.5V7h3.5"/></svg></button>
+        <button id="history-button" aria-haspopup="dialog" aria-controls="panel-history" aria-expanded="false" type="button" class="icon-button" aria-label="Chat history" title="Chat history"><svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="6.5" fill="none" stroke="currentColor" stroke-width="1.2"/><path d="M10 6v4l3 2" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg></button>
+        <button id="new-chat-button" type="button" class="icon-button" aria-label="New chat" title="New chat"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 3.5v13M3.5 10h13"/></svg></button>
+        <button id="menu-button" type="button" class="icon-button" aria-haspopup="menu" aria-expanded="false" aria-label="Settings" title="Settings">
+          <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="4" r="1" fill="currentColor"/><circle cx="10" cy="10" r="1" fill="currentColor"/><circle cx="10" cy="16" r="1" fill="currentColor"/></svg>
+          <span id="menu-dot" class="menu-dot" hidden></span>
+        </button>
+      </div>
+
+      <div id="files-popover" class="files-popover" role="dialog" aria-label="Connected files" hidden>
+        <div class="files-title">Connected files</div>
+        <ul id="files-list" class="files-list"></ul>
+        <p id="files-hint" class="files-hint"></p>
+      </div>
+
+      <div id="settings-menu" class="menu" role="menu" aria-label="Settings" hidden>
+        <button id="menu-settings" type="button" class="menu-item" role="menuitem">Settings</button>
+        <div class="menu-sep"></div>
+        <button id="menu-changes" type="button" class="menu-item" role="menuitem">Changes <span id="changes-count" class="badge" hidden>0</span></button>
+        <button id="menu-browser" type="button" class="menu-item" role="menuitem" hidden>Assistant's browser <span id="browser-count" class="badge">0</span></button>
+        <button id="menu-history" type="button" class="menu-item" role="menuitem">History</button>
+        <button id="menu-new" type="button" class="menu-item" role="menuitem">New chat</button>
+      </div>
+    </header>
+
+    <nav class="pane-tabs" aria-label="Navigation">
+      <button id="tab-chat" type="button" aria-pressed="true">Chat</button>
+      <button id="tab-changes" type="button" aria-pressed="false">Changes <span id="tab-changes-count" class="badge" hidden>0</span></button>
+      <button id="tab-history" type="button" aria-pressed="false">History</button>
+    </nav>
+
+    <aside id="auth-notice" class="auth-notice" hidden aria-label="AI provider sign-in">
+      <div><strong id="auth-notice-title">Connect your AI account</strong><span id="auth-notice-detail"></span></div>
+      <button id="provider-login-button" type="button">Sign in ↗</button>
+    </aside>
+
+    <main class="layout" id="layout">
+      <section id="messages" class="messages" aria-live="polite"></section>
+
+      <section id="panel-settings" class="panel settings-panel" hidden aria-label="Settings">
+        <header class="panel-head"><button type="button" class="back" data-close="settings" aria-label="Back to chat">←</button><div class="settings-heading"><h2 id="settings-heading" tabindex="-1">Settings</h2><p>Make Office Partner work your way.</p></div></header>
+        <div class="settings-body">
+          <div class="settings-group" role="group" aria-labelledby="settings-assistant-title">
+            <h3 id="settings-assistant-title" class="settings-group-title">Your assistant</h3>
+            <div class="settings-card">
+              <section class="settings-section" aria-labelledby="settings-provider-title">
+                <div class="settings-row"><div><label id="settings-provider-title" class="settings-title" for="provider-select">AI provider</label><p class="settings-description">The account used for new chats.</p></div>
+                  <select id="provider-select" class="theme-select"><option value="claude">Claude Code</option><option value="copilot">GitHub Copilot</option><option value="codex">Codex</option><option value="opencode">OpenCode</option></select>
+                </div>
+                <p id="provider-hint" class="settings-description"></p>
+                <p id="provider-status" class="provider-status" role="status" aria-live="polite"></p>
+                <button id="menu-login" type="button" class="secondary settings-account">Sign in to GitHub Copilot</button>
+                <button id="menu-logout" type="button" class="secondary settings-account" hidden>Sign out</button>
+              </section>
+              <section class="settings-section">
+                <label class="settings-title" for="settings-instructions">Instructions</label>
+                <p class="settings-description">Tell Office Partner how to help you in <span class="host-app">Excel</span>.</p>
+                <textarea id="settings-instructions" rows="4" aria-describedby="settings-instructions-status" placeholder="e.g. Reply in Vietnamese. Keep existing formatting. Explain changes briefly."></textarea>
+                <div class="settings-save-row"><button id="settings-recommended-instructions" type="button" class="secondary" title="Fill with recommended instructions, then save to apply">Use recommended</button><button id="settings-save-instructions" type="button" class="settings-primary">Save instructions</button></div>
+                <p id="settings-instructions-status" role="status" aria-live="polite"></p>
+              </section>
+            </div>
+          </div>
+          <div class="settings-group" role="group" aria-labelledby="settings-appearance-title">
+            <h3 id="settings-appearance-title" class="settings-group-title">Appearance</h3>
+            <div class="settings-card">
+              <section class="settings-section settings-row">
+                <div><label class="settings-title" for="theme-select">Theme</label><p class="settings-description">Light, dark, or follow <span class="host-app">Excel</span>.</p></div>
+                <select id="theme-select" class="theme-select" aria-label="Appearance"><option value="auto" data-host-label="Follow {app}">Follow Excel</option><option value="light">Light</option><option value="dark">Dark</option></select>
+              </section>
+              <section class="settings-section settings-row">
+                <div><h3>Text size</h3><p class="settings-description">Conversation text size.</p></div>
+                <div class="text-size-control"><button id="text-size-decrease" type="button" aria-label="Decrease text size">−</button><button id="text-size-reset" type="button" title="Reset text size to 100%" aria-label="Reset text size to 100%">100%</button><button id="text-size-increase" type="button" aria-label="Increase text size">+</button></div>
+              </section>
+            </div>
+          </div>
+          <div class="settings-group" role="group" aria-labelledby="settings-tools-title">
+            <h3 id="settings-tools-title" class="settings-group-title">Tools &amp; workspace</h3>
+            <div class="settings-card">
+              <section id="settings-tools-section" class="settings-section">
+                <div id="tools-menu" class="settings-tools" aria-label="AI tools">
+                  <label class="settings-toggle" for="tool-web-search"><span>Web search</span><input id="tool-web-search" type="checkbox" role="switch" aria-describedby="tool-web-search-description" /></label>
+                  <p id="tool-web-search-description">Use the selected AI provider’s built-in web search. No separate search service is added.</p>
+                  <label class="settings-toggle" for="tool-playwright"><span>Playwright browser</span><input id="tool-playwright" type="checkbox" role="switch" aria-describedby="tool-playwright-description" /></label>
+                  <p id="tool-playwright-description">Let your assistant use a separate browser. Ask/Auto controls browser actions. First use may download Playwright MCP; Chrome must be installed.</p>
+                  <span class="settings-footnote">Changes apply to your next message.</span>
+                </div>
+              </section>
+              <section class="settings-section settings-links" aria-label="Workspace settings">
+                <button type="button" data-settings-panel="changes"><span class="settings-link-copy"><strong data-host-label="{app} changes">Excel changes</strong><small>Review edits</small></span><span aria-hidden="true">›</span></button>
+                <button id="menu-references" type="button"><span class="settings-link-copy"><strong>References</strong><small>Files and folders your assistant can use</small></span><span aria-hidden="true">›</span></button>
+                <button id="menu-skills" type="button"><span class="settings-link-copy"><strong>Manage skills</strong><small>Reusable instructions and workflows</small></span><span aria-hidden="true">›</span></button>
+                <button id="menu-templates" type="button"><span class="settings-link-copy"><strong>Skill templates</strong><small>Starting points for your work</small></span><span aria-hidden="true">›</span></button>
+                <button id="menu-testing" type="button"><span class="settings-link-copy"><strong>Testing</strong><small>Sign-ins, notes and saved scripts</small></span><span aria-hidden="true">›</span></button>
+              </section>
+            </div>
+          </div>
+          <div class="settings-group" role="group" aria-labelledby="settings-app-title">
+            <h3 id="settings-app-title" class="settings-group-title">App &amp; storage</h3>
+            <div class="settings-card">
+              <section id="settings-update-section" class="settings-section">
+                <div class="settings-row"><div><h3>Updates</h3><p id="update-version" class="settings-description">Version …</p></div><button id="update-check" type="button" class="secondary">Check for updates</button></div>
+                <p id="update-status" class="settings-description" role="status" aria-live="polite"></p>
+                <button id="update-run" type="button" class="settings-primary" hidden>Update now</button>
+              </section>
+              <section class="settings-section settings-row">
+                <div><h3>System &amp; recovery</h3><p class="settings-description">Check the installation and manage private CLIs. To go back to an older version, run office-partner update --from office-partner@&lt;version&gt;.</p></div>
+              </section>
+              <section id="settings-system-section" class="settings-section">
+                <p id="system-version" class="settings-description"></p>
+                <div id="system-providers" aria-label="Provider runtimes"></div>
+                <div class="settings-actions"><button id="system-check" type="button" class="secondary">Check system</button><button id="system-export" type="button" class="secondary" hidden>Export diagnostics</button></div>
+                <div class="settings-actions"><button id="system-repair" type="button" class="secondary">Repair installation</button><button id="system-debug" type="button" class="secondary">Debug for 15 min</button></div>
+                <p id="system-status" class="settings-description" role="status" aria-live="polite"></p>
+                <pre id="system-report" class="settings-description" style="white-space:pre-wrap;max-height:16rem;overflow:auto"></pre>
+              </section>
+              <section class="settings-section" id="history-storage-section">
+                <div class="settings-row"><div><h3>Chat history</h3><p id="settings-history-count" class="settings-description">Saved on this computer.</p></div>
+                  <button id="settings-clear-history" type="button" class="secondary settings-danger">Delete all</button>
+                </div>
+                <p id="history-storage-info" class="settings-description"></p>
+                <div class="settings-actions"><button id="history-export" type="button" class="secondary">Export history</button><button id="history-recover-pending" type="button" class="secondary" hidden>Recover unsaved chats</button></div>
+                <p id="history-storage-status" class="settings-description" role="status" aria-live="polite"></p>
+              </section>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="panel-testing" class="panel testing-panel" hidden aria-label="Testing">
+        <header class="panel-head"><button type="button" class="back" data-close="testing" aria-label="Back to chat">←</button><div class="settings-heading"><h2>Testing</h2><p>Sign-ins and resources for your test runs.</p></div></header>
+        <p id="testing-status" class="template-help" role="status" aria-live="polite"></p>
+        <div class="panel-body">
+          <section class="testing-section settings-card" aria-labelledby="testing-signins-heading">
+            <h3 id="testing-signins-heading" class="testing-heading">Sign-ins</h3>
+            <p class="template-help">Save a browser session so your assistant can test a system you’re signed in to. Your password is never stored.</p>
+            <div id="testing-signins" class="testing-list"></div>
+            <form id="testing-signin-form" class="testing-form">
+              <div class="testing-field"><label for="testing-signin-name">Sign-in name</label><input id="testing-signin-name" type="text" maxlength="32" placeholder="e.g. staging-admin" aria-label="Name for this sign-in" autocomplete="off" required /></div>
+              <div class="testing-field"><label for="testing-signin-url">System address</label><input id="testing-signin-url" type="url" placeholder="https://staging.example.com" aria-label="System address" autocomplete="off" required /></div>
+              <p class="settings-footnote">A browser opens for you to sign in. Return here when you’re done.</p>
+              <button id="testing-signin-start" type="submit">Open browser to sign in <span aria-hidden="true">↗</span></button>
+            </form>
+            <div id="testing-signin-wait" class="reference-row" hidden>
+              <p id="testing-signin-wait-text"></p>
+              <div class="reference-actions"><button id="testing-signin-cancel" type="button" class="secondary">Cancel</button><button id="testing-signin-done" type="button">I'm signed in</button></div>
+            </div>
+          </section>
+          <section class="testing-section settings-card" aria-labelledby="testing-notes-heading">
+            <h3 id="testing-notes-heading" class="testing-heading">What the assistant learned</h3>
+            <p class="template-help">Notes about each system: how to sign in, navigate and prepare test data. Review or delete them here.</p>
+            <div id="testing-notes" class="testing-list"></div>
+          </section>
+          <section class="testing-section settings-card" aria-labelledby="testing-scripts-heading">
+            <h3 id="testing-scripts-heading" class="testing-heading">Regression scripts</h3>
+            <p class="template-help">Saved Playwright scripts for cases that passed or exposed an application defect.</p>
+            <div id="testing-scripts" class="testing-list"></div>
+          </section>
+          <div class="testing-folder-section"><h3 class="settings-group-title">Local folders</h3><div class="reference-actions testing-folders">
+            <button type="button" class="secondary" data-testing-folder="sessions">Sign-ins <span aria-hidden="true">↗</span></button>
+            <button type="button" class="secondary" data-testing-folder="knowledge">Notes <span aria-hidden="true">↗</span></button>
+            <button type="button" class="secondary" data-testing-folder="scripts">Scripts <span aria-hidden="true">↗</span></button>
+          </div></div>
+        </div>
+      </section>
+
+      <section id="panel-skills" class="panel" hidden aria-label="Manage skills">
+        <header class="panel-head"><button type="button" class="back" data-close="skills" aria-label="Back to chat">←</button><h2>Your skills</h2></header>
+        <p class="template-help">Upload a Markdown skill or a ZIP containing SKILL.md. ZIP files can include any file type.</p>
+        <p class="template-help">Use a lowercase name in SKILL.md frontmatter. Maximum upload: 5 MB. Type / in chat to use an installed skill.</p>
+        <div class="skill-upload-actions"><button id="skill-upload-button" type="button">Upload skill</button><input id="skill-upload-input" type="file" accept=".md,.zip" hidden /></div>
+        <p id="user-skills-status" class="template-help" role="status" aria-live="polite"></p>
+        <div id="user-skills-list" class="panel-body"></div>
+      </section>
+
+      <section id="panel-login" class="panel login-panel" hidden aria-label="Sign in to GitHub Copilot">
+        <header class="panel-head"><button type="button" class="back" data-close="login" aria-label="Back">←</button><h2>Connect account</h2></header>
+        <div class="panel-body login-body">
+          <img class="hero-mark" src="../assets/excel-partner-mark.png" alt="" />
+          <h2 id="login-heading">Sign in to GitHub Copilot</h2>
+          <p id="login-description">Finish signing in through your browser, then return to <span class="host-app">Excel</span>.</p>
+          <div id="login-device" class="login-card">
+            <strong><span id="login-card-title">GitHub Copilot</span> <span id="login-badge" class="badge">DEVICE CODE</span></strong>
+            <p id="login-status" role="status" aria-live="polite">Connect your GitHub Copilot account to get started.</p>
+            <div id="login-accounts" class="login-accounts" hidden>
+              <p id="login-account-loading" role="status">Loading accounts…</p>
+              <button id="login-account-retry" type="button" class="secondary" hidden>Try again</button>
+              <div id="login-account-form" hidden>
+                <label for="login-account-search">Account</label>
+                <input id="login-account-search" type="search" placeholder="Search accounts" autocomplete="off" spellcheck="false" />
+                <select id="login-account-provider" size="6" aria-label="Account"></select>
+                <label for="login-account-method" id="login-account-method-label">Sign-in method</label>
+                <select id="login-account-method"></select>
+                <div id="login-account-prompts"></div>
+                <div id="login-account-key-row" hidden>
+                  <label for="login-account-key">API key</label>
+                  <input id="login-account-key" type="password" autocomplete="off" spellcheck="false" />
+                  <p class="login-help">The key goes straight to the provider's CLI on the bridge machine. Office Partner does not keep it.</p>
+                </div>
+                <button id="login-account-go" type="button">Continue →</button>
+                <button id="login-account-logout" type="button" class="secondary" hidden>Sign out of this account</button>
+              </div>
+            </div>
+            <div id="login-code-card" hidden><p>1. Copy the device code</p><code id="login-code" class="device-code"></code><button id="login-copy" type="button" class="secondary">Copy code</button><p>2. Open the sign-in page and enter the code, then return to <span class="host-app">Excel</span>.</p></div>
+            <a id="login-browser" class="login-primary" target="_blank" rel="noopener noreferrer" hidden>Open sign-in page ↗</a>
+            <div id="login-paste-card" hidden><p>Paste the code shown on the sign-in page</p><input id="login-paste" type="text" autocomplete="off" spellcheck="false" aria-label="Sign-in code" /><button id="login-paste-submit" type="button">Submit code →</button></div>
+            <p id="login-timer" class="login-timer"></p>
+            <button id="login-start" type="button">Get device code →</button>
+            <button id="login-cancel" type="button" class="secondary" hidden>Cancel sign-in</button>
+            <button id="login-continue" type="button" hidden>Start chatting →</button>
+          </div>
+          <div id="login-manual" class="login-card" hidden><p id="login-manual-hint"></p><button id="login-install" type="button" hidden>Install</button><p id="login-install-status" role="status" aria-live="polite"></p></div>
+          <p class="login-help">Your credentials are managed by the CLI on the bridge machine.</p>
+        </div>
+      </section>
+
+      <section id="panel-preview" class="panel preview-panel" hidden aria-label="File preview">
+        <header class="panel-head">
+          <button type="button" class="back" data-close="preview" aria-label="Back to chat">←</button>
+          <h2 id="preview-title">Preview</h2>
+          <button id="preview-toggle" type="button" class="ghost" aria-pressed="false" title="Switch between the rendered file and its source">Source</button>
+          <button id="preview-copy" type="button" class="ghost" title="Copy the file contents">Copy</button>
+        </header>
+        <iframe id="preview-frame" class="preview-frame" title="File preview" sandbox="allow-scripts" referrerpolicy="no-referrer"></iframe>
+        <pre id="preview-source" class="preview-source" hidden></pre>
+      </section>
+
+      <section id="panel-browser" class="panel browser-panel" hidden aria-label="The assistant's browser">
+        <header class="panel-head">
+          <button type="button" class="back" data-close="browser" aria-label="Back to chat">←</button>
+          <h2>Assistant's browser</h2>
+          <button id="browser-prev" type="button" class="ghost" aria-label="Previous step" title="Previous step">‹</button>
+          <span id="browser-panel-step" class="browser-dock-step"></span>
+          <button id="browser-next" type="button" class="ghost" aria-label="Next step" title="Next step">›</button>
+        </header>
+        <p id="browser-panel-label" class="browser-panel-label" role="status" aria-live="polite"></p>
+        <p id="browser-panel-url" class="browser-dock-url"></p>
+        <div class="browser-panel-view"><img id="browser-panel-image" alt="" title="Click for actual size" /></div>
+        <p class="template-help">Click the picture for actual size, click again to fit. Pictures stay in memory while this chat is open. They are not saved in history and are not sent to the AI.</p>
+      </section>
+
+      <section id="panel-changes" class="panel compact-popover" popover="auto" hidden aria-label="Changes">
+        <header class="panel-head">
+          <button type="button" class="back" data-close="changes" aria-label="Back to chat">←</button>
+          <h2>Changes</h2>
+        </header>
+        <div id="changes-list" class="panel-body"></div>
+      </section>
+
+      <section id="panel-history" class="panel history-popover" popover="auto" role="dialog" hidden aria-label="History">
+        <header class="panel-head">
+          <button type="button" class="back" data-close="history" aria-label="Close history">×</button>
+          <h2>History</h2>
+          <button id="history-clear" type="button" class="ghost">Delete all</button>
+        </header>
+        <div id="history-list" class="panel-body"></div>
+      </section>
+
+      <section id="panel-references" class="panel" hidden aria-label="References">
+        <header class="panel-head">
+          <button type="button" class="back" data-close="references" aria-label="Back to chat">←</button>
+          <h2>References</h2>
+        </header>
+        <p class="template-help">Register shared common or knowledge files or folders for any skill. Only the name, path and description are saved. The assistant reads the original when needed; a folder lets it list and read what is inside.</p>
+        <button id="reference-add" type="button" class="secondary">Add Reference</button>
+        <p id="reference-status" class="template-help" role="status" aria-live="polite"></p>
+        <div id="reference-list" class="panel-body"></div>
+      </section>
+      <dialog id="reference-dialog" class="reference-dialog" aria-labelledby="reference-heading">
+        <form id="reference-form">
+          <h2 id="reference-heading">Reference</h2>
+          <label for="reference-name">Name</label>
+          <input id="reference-name" maxlength="200" required />
+          <label for="reference-path">File or folder path</label>
+          <input id="reference-path" placeholder="C:\\Folder\\file.xlsx or C:\\Folder" autocomplete="off" spellcheck="false" required />
+          <p class="template-help">Paste the full path of a file or a folder. In Explorer: select it, then Shift + right-click &gt; Copy as path. Nothing is copied or uploaded. For a folder, the assistant can read every file inside it, and nothing outside it.</p>
+          <label for="reference-description">Description</label>
+          <textarea id="reference-description" maxlength="4000" rows="4" placeholder="What does it contain, and when should it be used?"></textarea>
+          <p id="reference-dialog-status" class="template-help" role="status" aria-live="polite"></p>
+          <div class="reference-actions">
+            <button id="reference-cancel" type="button" class="secondary">Cancel</button>
+            <button id="reference-save" type="submit">Save</button>
+          </div>
+        </form>
+      </dialog>
+      <section id="panel-templates" class="panel" hidden aria-label="Skill templates">
+        <header class="panel-head">
+          <button type="button" class="back" data-close="templates" aria-label="Back to chat">←</button>
+          <h2>Skill templates</h2>
+        </header>
+        <p class="template-help">Add example files to a skill. The assistant can inspect them when that skill is used.</p>
+        <div class="template-controls">
+          <select id="template-skill" aria-label="Skill"></select>
+          <button id="template-add" type="button" class="secondary">Add file</button>
+          <input id="template-input" type="file" accept=".xlsx,.xlsm,.xltx,.xltm,.docx,.docm,.pptx,.pptm,.png,.jpg,.jpeg,.gif,.webp,.md,.txt,.json,.csv,.yaml,.yml" hidden />
+        </div>
+        <div id="template-list" class="panel-body"></div>
+      </section>
+
+      <section id="panel-session" class="panel" hidden aria-label="Past chat">
+        <header class="panel-head">
+          <button type="button" class="back" id="session-back" aria-label="Back to history">←</button>
+          <h2 id="session-title">Chat</h2>
+        </header>
+        <div class="session-meta" id="session-meta"></div>
+        <div id="session-transcript" class="panel-body messages"></div>
+        <footer class="session-actions">
+          <button id="session-delete" type="button" class="secondary">Delete</button>
+          <button id="session-continue" type="button">Continue this chat</button>
+        </footer>
+      </section>
+    </main>
+
+    <footer class="composer">
+      <section id="browser-dock" class="browser-dock" hidden aria-label="The assistant's browser">
+        <header class="browser-dock-head">
+          <span class="browser-dock-dot" aria-hidden="true"></span>
+          <span id="browser-dock-label" class="browser-dock-label" role="status" aria-live="polite">Browser</span>
+          <span id="browser-dock-step" class="browser-dock-step"></span>
+          <button id="browser-dock-expand" type="button" class="ghost" title="Open the larger view" aria-label="Open the larger browser view">⤢</button>
+          <button id="browser-dock-close" type="button" class="ghost" title="Hide" aria-label="Hide the browser view">×</button>
+        </header>
+        <button id="browser-dock-open" type="button" class="browser-dock-shot" aria-label="Open the larger browser view"><img id="browser-dock-image" alt="" /></button>
+        <p id="browser-dock-url" class="browser-dock-url"></p>
+      </section>
+      <p id="history-save-status" class="settings-description" role="status" aria-live="polite" hidden></p>
+      <div id="question-dock" hidden aria-label="Assistant question"></div>
+      <div id="composer-resizer" class="resizer" role="separator" aria-orientation="horizontal" tabindex="0" title="Drag to resize the input">
+        <span></span>
+      </div>
+      <div class="composer-card">
+        <div id="slash-menu" class="slash-menu" role="listbox" aria-label="Skills and commands" hidden></div>
+        <div id="mention-menu" class="slash-menu workspace-menu" aria-label="Workspace files" hidden></div>
+        <div id="selection-chip" class="chip" role="status" aria-live="polite" aria-atomic="true" title="Current selection (sent with your message)">No selection</div>
+        <div class="composer-input-wrap">
+          <div id="prompt-display" class="prompt-display" aria-hidden="true"></div>
+          <textarea
+            id="prompt-input"
+            rows="3"
+            placeholder="Reply or / to use a skill"
+          ></textarea>
+        </div>
+        <div class="composer-actions">
+          <button id="attach-button" type="button" class="attach-button" title="Attach a file or image" aria-label="Attach a file or image"><svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="6.5"/><path d="M10 6.5v7M6.5 10h7"/></svg></button>
+          <div class="composer-picker model-picker">
+            <select id="model-select" hidden aria-label="Model" title="AI model"></select>
+            <button id="model-button" type="button" class="picker-button" aria-haspopup="listbox" aria-expanded="false" aria-controls="model-menu" aria-label="Choose an AI model"><span class="picker-label">Default</span><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m5 6.5 3 3 3-3"/></svg></button>
+            <div id="model-menu" class="picker-menu" role="listbox" aria-label="AI model" hidden></div>
+          </div>
+            <div class="composer-picker effort-picker">
+              <select id="effort-select" hidden aria-label="Reasoning effort"><option value="low">Low</option><option value="medium" selected>Medium</option><option value="high">High</option></select>
+              <button id="effort-button" type="button" class="picker-button" aria-haspopup="listbox" aria-expanded="false" aria-controls="effort-menu" aria-label="Reasoning effort: Medium" data-effort="medium"><span class="picker-label">Medium</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 18a9 9 0 1 1 16 0M5 10l2 1m10 0 2-1M12 5v2"/><path class="effort-needle" d="M12 14V9"/><circle cx="12" cy="14" r="1.5"/></svg></button>
+              <div id="effort-menu" class="picker-menu" role="listbox" aria-label="Reasoning effort" hidden></div>
+            </div>
+            <div class="composer-picker permission-picker">
+            <select id="permission-mode" hidden aria-label="Permissions" title="Ask: request approval before overwriting or deleting. Auto: approve these operations."><option value="ask">Ask</option><option value="auto">Auto</option></select>
+            <button id="permission-button" type="button" class="picker-button" aria-haspopup="listbox" aria-expanded="false" aria-controls="permission-menu" aria-label="Permissions" data-value="ask"><svg class="perm-icon" data-mode="ask" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.8 3 3.6v3.7c0 3 2.1 5.2 5 6.4 2.9-1.2 5-3.4 5-6.4V3.6z"/></svg><svg class="perm-icon" data-mode="auto" viewBox="0 0 16 16" aria-hidden="true"><path d="M9 1.8 3.8 9H8l-1 5.2L12.2 7H8z"/></svg><span class="picker-label">Ask</span><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m5 6.5 3 3 3-3"/></svg></button>
+            <div id="permission-menu" class="picker-menu" role="listbox" aria-label="Permissions" hidden></div>
+          </div>
+          <div class="composer-picker tools-picker">
+            <button id="tools-button" type="button" class="picker-button" aria-label="Tools" aria-controls="settings-tools-section"><span class="picker-label">Tools</span><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 5h14M3 10h14M3 15h14"/><circle cx="7" cy="5" r="2"/><circle cx="13" cy="10" r="2"/><circle cx="7" cy="15" r="2"/></svg></button>
+
+          </div>
+          <div class="composer-picker usage-picker">
+            <button id="usage-button" type="button" class="picker-button usage-button" aria-label="Session usage" title="Session usage" aria-haspopup="dialog" aria-expanded="false" aria-controls="usage-popover">
+              <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="7"/><path d="M10 9v5M10 6.2v.2"/></svg>
+            </button>
+            <div id="usage-popover" class="picker-menu usage-popover" role="dialog" aria-label="Session usage" hidden>
+              <strong>Session usage</strong>
+              <p id="usage-stats">Session tokens: 0 · AI time: 0m 0s</p>
+              <p id="usage-breakdown">Input: 0 · Cache read: 0 · Output: 0</p>
+              <p id="usage-cache-split">Uncached input / cache write: not reported</p>
+              <p id="usage-credits">Copilot credits: not reported yet</p>
+              <p id="usage-source"></p>
+              <p class="usage-explanation">History and reports follow each provider's CLI session. Reconnecting resumes the same session. Input includes cache read and cache write; cache is not added again. Each provider's original usage is normalised separately. Credits are separate from tokens.</p>
+              <button id="usage-export" type="button" class="secondary">Export CSV</button>
+            </div>
+          </div>
+          <button id="stop-button" type="button" aria-label="Stop response" title="Stop response" hidden>■</button>
+          <button id="send-button" type="button" data-mode="send" aria-label="Send message" disabled>
+            <svg class="send-icon" viewBox="0 0 20 20" aria-hidden="true"><path d="M10 15V5m-4 4 4-4 4 4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" /></svg>
+            <svg class="stop-icon" viewBox="0 0 20 20" aria-hidden="true"><rect x="4" y="4" width="12" height="12" rx="2" fill="currentColor" /></svg>
+            <span class="label">Send</span>
+          </button>
+        </div>
+      </div>
+      <p class="composer-disclaimer">AI can make mistakes. Review changes before relying on them.</p>
+      <div class="composer-hint"><span><b>/</b> skills &nbsp; <b>@</b> attachments</span><span>Enter to send · Ctrl+Enter for new line</span></div>
+    </footer>
+
+  <div id="composer-settings-menu" class="compact-popover composer-options" popover="auto"><button id="composer-skills" type="button">Skills <span>›</span></button><button id="composer-tools" type="button">Tools <span>›</span></button><div id="provider-options" class="provider-options" hidden></div></div>
+<div id="composer-tools-popover" class="compact-popover" popover="auto"><h2>Tools</h2></div>
+    <script src="../dist/taskpane.js"></script>
+</body>
+</html>

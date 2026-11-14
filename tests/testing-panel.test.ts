@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 import fs from "node:fs";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { describeSavedAge, setupTestingPanel } from "../addin/taskpane/ui/testing-panel.js";
-import type { TestingOverview } from "../addin/taskpane/bridge-client.js";
+import { describeSavedAge, setupTestingPanel } from "../frontend/taskpane/ui/testing-panel.js";
+import type { TestingOverview } from "../frontend/taskpane/bridge-client.js";
 
 const overview = (extra: Partial<TestingOverview> = {}): TestingOverview => ({
   signIns: [{ name: "admin", origins: ["https://staging.example.com"], savedAt: "2026-10-29T10:00:00.000Z", url: "https://staging.example.com" }],
@@ -14,7 +14,7 @@ const overview = (extra: Partial<TestingOverview> = {}): TestingOverview => ({
 });
 
 function setup(data = overview()) {
-  document.body.innerHTML = fs.readFileSync("addin/taskpane/index.html", "utf8").match(/<body[^>]*>([\s\S]*)<\/body>/)![1]!;
+  document.body.innerHTML = fs.readFileSync("frontend/taskpane/index.html", "utf8").match(/<body[^>]*>([\s\S]*)<\/body>/)![1]!;
   const client = {
     testingOverview: vi.fn(async () => data),
     testingView: vi.fn(async () => "// the script text"),

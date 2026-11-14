@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { Bridge } from "../bridge/src/server.js";
 import { loadConfig } from "../bridge/src/config.js";
 import { MockAdapter } from "../providers/src/mock.js";
+import { adapterClass } from "./support/adapter-class.js";
 import { ProviderRegistry } from "../providers/src/registry.js";
 import { PaneClient, getFreePort } from "./helpers.js";
 
@@ -21,12 +22,15 @@ async function fixture(profiled = false) {
   let adapter = new MockAdapter({ id: "copilot", delayMs: 10 });
   const runtimeStore = createRequire(import.meta.url)(path.resolve("bin/runtime-store.cjs"));
   if (profiled) {
-    const command = path.join(directory, "fake-cli.js"); fs.writeFileSync(command, "fixture");
-    const id = runtimeStore.digest("fixture");
-    runtimeStore.changeState(directory, (state: any) => { state.profiles[id] = { id, provider: "copilot", mode: "external", command, adapterRoot: path.resolve(".") }; state.active.copilot = id; });
-    runtimeStore.bindConversation(directory, "copilot", "saved", id);
+    const id = runtimeStore.digest("fixture"), command = path.join(directory!, "runtimes", id, "fake-cli.js");
+    fs.mkdirSync(path.dirname(command), { recursive: true }); fs.writeFileSync(command, "fixture");
+    runtimeStore.changeState(directory, (state: any) => {
+      state.profiles[id] = { id, provider: "copilot", version: "1", command, stateHome: path.join(directory!, "provider-data", "copilot", "home"),
+        fingerprint: runtimeStore.fileDigest(command), platform: process.platform, arch: process.arch };
+      state.active.copilot = id;
+    });
   }
-  const registered = profiled ? new ProfiledAdapter("copilot", { env: { ...process.env }, bridgeUrl: "", mcp: { command: "", args: [] }, logger: { debug() {}, warn() {} } }, () => adapter) : new MockAdapter({ id: "copilot", delayMs: 1000 });
+  const registered = profiled ? new ProfiledAdapter("copilot", { env: { ...process.env }, bridgeUrl: "", mcp: { command: "", args: [] }, logger: { debug() {}, warn() {} } }, adapterClass(() => adapter)) : new MockAdapter({ id: "copilot", delayMs: 1000 });
   bridge = new Bridge(config, { usageFile: null, systemPromptFile: null, savedReferencesFile: null, updater: null, onShutdown: shutdown,
     registry: new ProviderRegistry().register(registered) });
   const { url } = await bridge.listen();
@@ -40,7 +44,7 @@ async function fixture(profiled = false) {
   return { url, headers, action, control, shutdown };
 }
 describe("authenticated recovery service controls", () => {
-  it("R08 disabled providers allow current/saved chats while refusing a new chat", async () => {
+  it("R08 a disabled provider keeps the chat that is running but refuses new and saved chats", async () => {
     const w = await fixture(true);
     pane!.send({ type: "set_provider", provider: "copilot" }); await pane!.waitFor(m => m.type === "provider_status");
     const turn = async (id: string, extra = {}) => { pane!.send({ type: "prompt", requestId: id, prompt: "hello", selection: null, chatSessionId: "chat", ...extra }); return pane!.waitFor(m => m.type === "turn_finished" && m.requestId === id); };
@@ -48,7 +52,7 @@ describe("authenticated recovery service controls", () => {
     expect((await w.action("remove")).status).toBe(200);
     expect(await turn("current")).toMatchObject({ reason: "completed" });
     expect(await turn("new", { chatSessionId: "other" })).toMatchObject({ reason: "error" });
-    expect(await turn("saved", { resumeSessionId: "saved" })).toMatchObject({ reason: "completed" });
+    expect(await turn("saved", { resumeSessionId: "saved" })).toMatchObject({ reason: "error" });
   });
 
   it("requires a connected pane token for system metadata and actions", async () => {

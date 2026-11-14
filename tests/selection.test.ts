@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { monitorSelection, type SelectionLabel } from "../addin/taskpane/ui/selection.js";
+import { monitorSelection, type SelectionLabel } from "../frontend/taskpane/ui/selection.js";
 
 const label = (name: string): SelectionLabel => ({ label: name, title: `Selected ${name}` });
 afterEach(() => { vi.clearAllTimers(); vi.useRealTimers(); });

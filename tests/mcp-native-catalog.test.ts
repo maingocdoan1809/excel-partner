@@ -6,9 +6,9 @@ import { ListToolsResultSchema } from "@modelcontextprotocol/sdk/types.js";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { createExcelMcpServer } from "../excel_mcp/src/server.js";
-import { McpServers } from "../runtime/src/mcp-servers.js";
-import { discoverMcpCatalog } from "../runtime/src/mcp-catalog.js";
-import { officeToolCatalog } from "../runtime/src/catalog.js";
+import { McpServers } from "../shared/src/mcp-servers.js";
+import { discoverMcpCatalog } from "../shared/src/mcp-catalog.js";
+import { officeToolCatalog } from "../shared/src/catalog.js";
 
 it("a normal MCP client sees and calls actual server tools, then loses them when disabled", async () => {
  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'direct-mcp-'));

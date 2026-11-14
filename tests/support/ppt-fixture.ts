@@ -1,5 +1,5 @@
 import { afterEach, beforeEach } from "vitest";
-import { executePptTool } from "../../addin/taskpane/executor/powerpoint/index.js";
+import { executePptTool } from "../../frontend/taskpane/executor/powerpoint/index.js";
 import { FakeDeck, installFakePowerPoint, type Installed } from "./fake-powerpoint.js";
 
 export interface Fixture {

@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it } from "vitest";
 import { UserInputRequestSchema } from "../protocol/src/index.js";
-import { showUserInput } from "../addin/taskpane/ui/user-input.js";
+import { showUserInput } from "../frontend/taskpane/ui/user-input.js";
 
 afterEach(() => document.body.replaceChildren());
 const request = (multiSelect = false) => UserInputRequestSchema.parse({ questions: [{ id: "q", question: "Where?",

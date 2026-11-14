@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { FakeWordDoc, installWordFake, uninstallWordFake } from "./support/fake-word.js";
 import { FakeDeck, installFakePowerPoint } from "./support/fake-powerpoint.js";
 
-const html = fs.readFileSync(path.join(__dirname, "..", "addin", "taskpane", "index.html"), "utf8");
+const html = fs.readFileSync(path.join(__dirname, "..", "frontend", "taskpane", "index.html"), "utf8");
 const g = globalThis as Record<string, any>;
 
 class FakeSocket {
@@ -58,7 +58,7 @@ async function boot(host: "Excel" | "Word" | "PowerPoint", connected = false) {
     }
     return new Response(JSON.stringify(data), { status: 200 });
   });
-  await import("../addin/taskpane/main.js");
+  await import("../frontend/taskpane/main.js");
   expect(ready, "main.ts must register Office.onReady").toBeTypeOf("function");
   ready!({ host });
   await new Promise((resolve) => setTimeout(resolve, 20));
@@ -143,7 +143,7 @@ describe("task pane start-up in each Office application", () => {
     g.Office = { HostType: { Excel: "Excel" }, onReady: (callback: any) => { ready = callback; }, context: { document: { settings: { get: () => null } } } };
     g.WebSocket = FakeSocket;
     FakeSocket.instances = [];
-    await import("../addin/taskpane/main.js");
+    await import("../frontend/taskpane/main.js");
     ready?.({ host: "Outlook" });
     await new Promise((resolve) => setTimeout(resolve, 10));
     expect(FakeSocket.instances).toHaveLength(0);

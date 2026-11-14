@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { guardResultSize } from "../addin/taskpane/executor/powerpoint/index.js";
-import type { ShapeInfo } from "../addin/taskpane/executor/powerpoint/model.js";
-import { analyzeSlide, contrastRatio, estimateTextHeight } from "../addin/taskpane/executor/powerpoint/verify.js";
+import { guardResultSize } from "../frontend/taskpane/executor/powerpoint/index.js";
+import type { ShapeInfo } from "../frontend/taskpane/executor/powerpoint/model.js";
+import { analyzeSlide, contrastRatio, estimateTextHeight } from "../frontend/taskpane/executor/powerpoint/verify.js";
 import { call, fails, ok, useFakeDeck } from "./support/ppt-fixture.js";
 
 const fx = useFakeDeck();

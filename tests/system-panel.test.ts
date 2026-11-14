@@ -1,17 +1,17 @@
 // @vitest-environment jsdom
 import fs from "node:fs";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { setupSystemPanel, type SystemInfo } from "../addin/taskpane/ui/system-panel.js";
+import { setupSystemPanel, type SystemInfo } from "../frontend/taskpane/ui/system-panel.js";
 
 const el = (id: string) => document.getElementById(id)!;
 const flush = async () => { for (let i = 0; i < 30; i++) await Promise.resolve(); };
 afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); });
 function fixture(busy = false) {
-  document.body.innerHTML = fs.readFileSync("addin/taskpane/index.html", "utf8").match(/<body[^>]*>([\s\S]*)<\/body>/)![1]!;
+  document.body.innerHTML = fs.readFileSync("frontend/taskpane/index.html", "utf8").match(/<body[^>]*>([\s\S]*)<\/body>/)![1]!;
   el("panel-settings").hidden = false;
   const info: SystemInfo = { version: "1.1.0",
-    providers: [{ provider: "copilot", selected: true, mode: "managed", version: "1.0.95", pendingVersion: null, available: true },
-      { provider: "codex", selected: false, mode: "external", version: null, pendingVersion: "0.162.1", available: null }] };
+    providers: [{ provider: "copilot", selected: true, disabled: false, managed: true, version: "1.0.95", failure: null, available: true },
+      { provider: "codex", selected: false, disabled: false, managed: false, version: null, failure: "NATIVE_PREFLIGHT_POLICY_DENIED", available: null }] };
   const client = { systemInfo: vi.fn(async () => info), systemAction: vi.fn(async (_action: string, _provider?: string, _version?: string) => {}),
     systemDiagnostics: vi.fn(async () => ({ diagnosticId: "fixture", status: "warn", checks: [{ id: "mcp", status: "pass", code: "MCP_CATALOG_OK", message: "Schemas verified" }] })),
     updateInfo: vi.fn(async () => ({ status: { state: "done" } })) };
@@ -23,7 +23,7 @@ describe("Settings system and recovery controls", () => {
     expect(el("system-version").textContent).toContain("Installed: 1.1.0");
     expect(el("system-version").textContent).not.toContain("Previous");
     expect(el("system-providers").textContent).toContain("private CLI 1.0.95");
-    expect(el("system-providers").textContent).toContain("office-partner providers login codex");
+    expect(el("system-providers").textContent).toContain("last installation did not finish");
   });
   it("prevents management actions while the current turn is active", async () => {
     const w = fixture(true); await w.panel.refresh(); el("system-repair").click(); await flush();

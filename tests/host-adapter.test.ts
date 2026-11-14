@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { detectHost } from "../addin/taskpane/host/detect.js";
-import { activeHost, hostAdapterFor, initHost } from "../addin/taskpane/host/index.js";
-import { HOST_BASELINE, isSupported, requireSupport } from "../addin/taskpane/host/requirements.js";
-import { describeChange } from "../addin/taskpane/ui/changes.js";
+import { detectHost } from "../frontend/taskpane/host/detect.js";
+import { activeHost, hostAdapterFor, initHost } from "../frontend/taskpane/host/index.js";
+import { HOST_BASELINE, isSupported, requireSupport } from "../frontend/taskpane/host/requirements.js";
+import { describeChange } from "../frontend/taskpane/ui/changes.js";
 import { PPT_WRITE_TOOLS, PptSelectionSnapshotSchema, WORD_WRITE_TOOLS, WordSelectionSnapshotSchema, exposedToolNamesForHost } from "../protocol/src/index.js";
 import { FakeWordDoc, installWordFake, uninstallWordFake } from "./support/fake-word.js";
 import { FakeDeck, installFakePowerPoint } from "./support/fake-powerpoint.js";

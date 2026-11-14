@@ -1,10 +1,14 @@
 import { describe, expect, it, vi } from "vitest";
-import { SessionManager } from "../bridge/src/session-manager.js";
-import { OfficeRuntime } from "../runtime/src/office-runtime.js";
-import { exposedToolNames, parseToolInput, supportsNativeWebSearch } from "../protocol/src/index.js";
+import { WorkbookSessions } from "../bridge/src/workbook-sessions.js";
+import { OfficeRuntime } from "../bridge/src/office-runtime.js";
+import { exposedToolNames, parseToolInput } from "../protocol/src/index.js";
+import { ClaudeAdapter } from "../providers/src/claude/adapter.js";
+import { CodexAdapter } from "../providers/src/codex/adapter.js";
+import { CopilotAdapter } from "../providers/src/copilot/adapter.js";
+import { OpencodeAdapter } from "../providers/src/opencode/adapter.js";
 
 function fixture() {
-  const sessions = new SessionManager({ ttlMs: 60_000 });
+  const sessions = new WorkbookSessions({ ttlMs: 60_000 });
   const session = sessions.create("external-tools", null);
   const gateway = new OfficeRuntime(sessions, { maxReadCells: 100, maxWriteCells: 100, maxSheets: 10, maxSelectionCells: 10 }, 1000);
   const call = (tool: string, args: unknown) => gateway.invoke({ sessionId: session.id, tool, args });
@@ -13,8 +17,8 @@ function fixture() {
 
 describe("optional external tools", () => {
   it("only exposes opted-in Playwright and never adds a search MCP", () => {
-    expect((["claude", "codex", "copilot"] as const).every(supportsNativeWebSearch)).toBe(true);
-    expect(supportsNativeWebSearch("opencode")).toBe(false);
+    expect([ClaudeAdapter, CodexAdapter, CopilotAdapter].every(adapter => adapter.capabilities.nativeWebSearch)).toBe(true);
+    expect(OpencodeAdapter.capabilities.nativeWebSearch).toBe(false);
     expect(exposedToolNames(true)).not.toContain("web_search");
     expect(exposedToolNames(true)).not.toContain("playwright_browser");
     expect(exposedToolNames(false, { webSearch: true })).not.toContain("web_search");

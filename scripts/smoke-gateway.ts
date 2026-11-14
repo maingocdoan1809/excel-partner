@@ -1,4 +1,4 @@
-import { executeOfficeJs } from "../addin/taskpane/executor/office-js.js";
+import { executeOfficeJs } from "../frontend/taskpane/executor/office-js.js";
 import { installOfficeMock, MockWorkbook, OfficeError } from "../tests/support/office-mock.js";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";

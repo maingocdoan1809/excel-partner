@@ -2,11 +2,11 @@ import { sessionMcpEndpoint } from "./session-mcp.js";
 import { createHash } from "node:crypto";
 import path from "node:path";
 import { parseNativeCommand, type NativeCommand } from "../../protocol/src/commands.js";
-import { providerSessionKey, supportsNativeWebSearch, type AnySelectionSnapshot, type ProviderId, type ServerMessage, type ToolCapabilities } from "../../protocol/src/index.js";
-import { hostSystemPrompt } from "../../providers/src/host-prompts.js";
+import { providerSessionKey, type AnySelectionSnapshot, type ProviderId, type ServerMessage, type ToolCapabilities } from "../../protocol/src/index.js";
+import { hostSystemPrompt } from "../../protocol/src/system-prompts.js";
 import type { ProviderRegistry } from "../../providers/src/registry.js";
-import type { ProviderSessionManager } from "../../providers/src/session-manager.js";
-import type { OfficeRuntime } from "../../runtime/src/office-runtime.js";
+import type { ProviderSessionManager } from "../../shared/src/session-manager.js";
+import type { OfficeRuntime } from "./office-runtime.js";
 import { attachmentPath } from "./attachments.js";
 import type { BridgeConfig } from "./config.js";
 import type { Delegations } from "./delegations.js";
@@ -142,13 +142,13 @@ export class TurnRunner {
       ).join("\n") + "\n</user_attached_files>";
     }
 
-    capabilities = { ...capabilities, webSearch: capabilities.webSearch && supportsNativeWebSearch(session.provider) };
+    const adapter = this.deps.providers.require(session.provider);
+    capabilities = { ...capabilities, webSearch: capabilities.webSearch && adapter.capabilities.nativeWebSearch };
     const selectedModel = model ?? null;
-    const stored = this.deps.systemPrompt.read();
+    const stored = this.deps.systemPrompt.forHost(session.host).read();
     // Excel keeps the user's prompt as it is; Word and PowerPoint add their own rules (and a new revision, so a running session restarts with them).
     const promptSettings = session.host === "excel" ? stored
       : { ...stored, content: hostSystemPrompt(session.host, stored.content), revision: createHash("sha256").update(`${stored.revision}:${session.host}:${hostSystemPrompt(session.host, stored.content)}`).digest("hex") };
-    const adapter = this.deps.providers.require(session.provider);
     if (delegationId && !delegations.accept(session, delegationId, requestId)) {
       // Nobody waits for this any more (it timed out, the asker stopped, or it was never asked): do not change the file for no one.
       session.send({ type: "error", requestId, code: "cancelled", message: "The other file's request is no longer waiting for an answer, so it was not run." });
@@ -199,7 +199,7 @@ export class TurnRunner {
         model: selectedModel,
         effort,
         resumeSessionId,
-        mcp: sessionMcpEndpoint(this.deps.config, session),
+        mcp: sessionMcpEndpoint(this.deps.config, session, adapter.capabilities),
         signal: controller.signal,
         systemPrompt: promptSettings.content,
       }), () => session.send({ type: "session_starting", requestId }));

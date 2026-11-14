@@ -18,7 +18,7 @@ vi.mock("../providers/src/jsonrpc.js", () => ({ JsonRpcPeer: class {
   }
   notify() {} onExit() {} async close() {}
 } }));
-import { CodexAdapter } from "../providers/src/codex.js";
+import { CodexAdapter } from "../providers/src/codex/adapter.js";
 let adapter: CodexAdapter, id: string;
 beforeEach(async () => {
   rpc.calls = [];

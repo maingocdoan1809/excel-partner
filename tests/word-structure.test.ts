@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { executeWordTool } from "../addin/taskpane/executor/word/index.js";
+import { executeWordTool } from "../frontend/taskpane/executor/word/index.js";
 import { FakeWordDoc, installWordFake, uninstallWordFake } from "./support/fake-word.js";
 
 let doc: FakeWordDoc;

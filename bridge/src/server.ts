@@ -5,10 +5,11 @@ import os from "node:os";
 import path from "node:path";
 import { createReadStream, readFileSync, statSync } from "node:fs";
 import { PROTOCOL_VERSION, ProviderIdSchema } from "../../protocol/src/index.js";
-import { MockAdapter, ProviderRegistry, ProviderSessionManager, createDefaultRegistry } from "../../providers/src/index.js";
-import { officeToolCatalog } from "../../runtime/src/catalog.js";
-import { McpServers } from "../../runtime/src/mcp-servers.js";
-import { OfficeRuntime } from "../../runtime/src/office-runtime.js";
+import { MockAdapter, ProviderRegistry, createDefaultRegistry } from "../../providers/src/index.js";
+import { ProviderSessionManager } from "../../shared/src/session-manager.js";
+import { officeToolCatalog } from "../../shared/src/catalog.js";
+import { McpServers } from "../../shared/src/mcp-servers.js";
+import { OfficeRuntime } from "./office-runtime.js";
 import { PROJECT_ROOT, type BridgeConfig } from "./config.js";
 import { Delegations } from "./delegations.js";
 import { bearerToken, connectedSession, contentType, readBody, sendJson } from "./http-util.js";
@@ -25,7 +26,7 @@ import { WorkspaceRoutes } from "./routes/workspaces.js";
 import { HistoryRoutes } from "./routes/history.js";
 import { SystemRoutes } from "./routes/system.js";
 import { SavedReferences } from "./saved-references.js";
-import { SessionManager } from "./session-manager.js";
+import { WorkbookSessions } from "./workbook-sessions.js";
 import { discoverSessionMcp } from "./session-mcp.js";
 import { WorkbookSession } from "./session.js";
 import { SiteKnowledge } from "./site-knowledge.js";
@@ -72,7 +73,7 @@ export interface BridgeOptions {
 export class Bridge {
   readonly config: BridgeConfig;
   readonly logger: Logger;
-  readonly sessions: SessionManager;
+  readonly sessions: WorkbookSessions;
   readonly gateway: OfficeRuntime;
   readonly providers: ProviderRegistry;
 
@@ -84,7 +85,7 @@ export class Bridge {
   private readonly history: HistoryRoutes;
   private readonly onShutdown?: () => void;
   private readonly skills: SkillStore;
-  private readonly logins = new ProviderLoginManager();
+  private readonly logins: ProviderLoginManager;
   private readonly mcpServers: McpServers;
   private readonly updater: UpdateService | null;
   private readonly panes: PaneSockets;
@@ -99,7 +100,7 @@ export class Bridge {
     const usage = new UsageStore(options.usageFile === undefined
       ? process.env.BRIDGE_USAGE_FILE ?? path.join(PROJECT_ROOT, "run", "usage.jsonl") : options.usageFile);
     this.logger = options.logger ?? new Logger("bridge", config.logLevel);
-    this.sessions = new SessionManager({
+    this.sessions = new WorkbookSessions({
       ttlMs: config.sessionTtlMs,
       logger: this.logger.child("sessions"),
     });
@@ -153,6 +154,7 @@ export class Bridge {
       mcp: config.mcp,
       logger: this.logger.child("providers"),
     });
+    this.logins = new ProviderLoginManager(this.providers);
     const providerSessions = new ProviderSessionManager<WorkbookSession>(this.providers,
       session => this.gateway.externalTools.closeSession(session.id), this.logger);
     const mockProvider = process.env.BRIDGE_MOCK_PROVIDER;
@@ -338,6 +340,8 @@ export class Bridge {
 
     if (url.pathname === "/session/testing") return testing.handle(req, res, url);
     if (url.pathname === "/session/provider-login") return providers.login(req, res);
+    if (url.pathname === "/session/provider-logout") return providers.logout(req, res);
+    if (url.pathname === "/session/provider-option") return providers.option(req, res);
 
     if (method === "GET" && url.pathname.startsWith("/addin/")) return this.serveAddin(url.pathname, res);
 
@@ -347,7 +351,7 @@ export class Bridge {
   /** The task pane for a browser tab: the add-in's page with a stand-in for Office.js (see standalone-page.ts). */
   private serveStandalonePage(res: http.ServerResponse): void {
     try {
-      const html = readFileSync(path.join(PROJECT_ROOT, "addin", "taskpane", "index.html"), "utf8").replace("__ADDIN_BUILD_ID__", this.addinBuildId());
+      const html = readFileSync(path.join(PROJECT_ROOT, "frontend", "taskpane", "index.html"), "utf8").replace("__ADDIN_BUILD_ID__", this.addinBuildId());
       res.writeHead(200, { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" });
       res.end(standalonePage(html));
     } catch (error) {
@@ -363,7 +367,7 @@ export class Bridge {
   private serveAddin(pathname: string, res: http.ServerResponse): void {
     if (pathname === "/addin/build-id") return sendJson(res, 200, { id: this.addinBuildId() });
 
-    const root = path.join(PROJECT_ROOT, "addin");
+    const root = path.join(PROJECT_ROOT, "frontend");
     const relative = pathname.slice("/addin/".length);
     const target = path.resolve(root, relative);
     if (!target.startsWith(root + path.sep) && target !== root) {
@@ -398,7 +402,7 @@ export class Bridge {
   private addinBuildId(): string {
     try {
       // Version and size too: packages installed from npm carry one fixed file date, so the date alone never changes.
-      const bundle = statSync(path.join(PROJECT_ROOT, "addin", "dist", "taskpane.js"));
+      const bundle = statSync(path.join(PROJECT_ROOT, "frontend", "dist", "taskpane.js"));
       return `${this.updater?.version ?? "0"}-${Math.round(bundle.mtimeMs)}-${bundle.size}`;
     } catch {
       return "none";

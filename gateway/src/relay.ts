@@ -28,7 +28,7 @@ async function call(route: string, body: unknown) {
     req.end(JSON.stringify({ session, ...body as object }));
   });
 }
-const server = new Server({ name: "agent-gateway-client-tools", version: "0.1.0" }, { capabilities: { tools: {} }, instructions: gatewayToolInstructions(process.env.AGENT_GATEWAY_PROVIDER, process.env.AGENT_GATEWAY_OFFICE_JS === "1", isHostId(process.env.AGENT_GATEWAY_OFFICE_HOST) ? process.env.AGENT_GATEWAY_OFFICE_HOST : undefined) });
+const server = new Server({ name: "agent-gateway-client-tools", version: "0.1.0" }, { capabilities: { tools: {} }, instructions: gatewayToolInstructions(process.env.AGENT_GATEWAY_TOOL_NOTES, process.env.AGENT_GATEWAY_OFFICE_JS === "1", isHostId(process.env.AGENT_GATEWAY_OFFICE_HOST) ? process.env.AGENT_GATEWAY_OFFICE_HOST : undefined) });
 server.setRequestHandler(ListToolsRequestSchema, async () => call("/internal/tools", {}));
 server.setRequestHandler(CallToolRequestSchema, async request => call("/internal/tool", { name: request.params.name, arguments: request.params.arguments ?? {} }));
 await server.connect(new StdioServerTransport());

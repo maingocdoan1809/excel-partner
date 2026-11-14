@@ -1,7 +1,7 @@
-import type { ExternalMcpCatalog } from "../../runtime/src/mcp-catalog.js";
+import type { ExternalMcpCatalog } from "../../shared/src/mcp-catalog.js";
 import { randomBytes, randomUUID } from "node:crypto";
 import type { WebSocket } from "ws";
-import type { ProviderSessionState } from "../../providers/src/session-manager.js";
+import type { ProviderSessionState } from "../../shared/src/session-manager.js";
 import type { SessionAttachment } from "./attachments.js";
 import {
   encodeMessage,

@@ -3,7 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { claudeTitle, codexTokenBaseline, copilotTitle } from "../providers/src/session-metadata.js";
-import { parseOpencodeExport } from "../providers/src/opencode-usage.js";
+import { parseOpencodeExport } from "../providers/src/opencode/usage.js";
 
 const dirs: string[] = [];
 afterEach(() => { for (const dir of dirs.splice(0)) fs.rmSync(dir, { recursive: true, force: true }); });

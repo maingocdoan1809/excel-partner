@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { ClaudeAdapter, ClaudeStreamTranslator } from "../providers/src/claude.js";
+import { ClaudeAdapter, ClaudeStreamTranslator } from "../providers/src/claude/adapter.js";
 import type { StartSessionContext } from "../providers/src/types.js";
-import { CodexAdapter } from "../providers/src/codex.js";
-import { CopilotAdapter } from "../providers/src/copilot.js";
-import { OpencodeAdapter } from "../providers/src/opencode.js";
+import { CodexAdapter } from "../providers/src/codex/adapter.js";
+import { CopilotAdapter } from "../providers/src/copilot/adapter.js";
+import { OpencodeAdapter } from "../providers/src/opencode/adapter.js";
 import type { ProviderEvent } from "../protocol/src/index.js";
 
 const runtime = { bridgeUrl: "", mcp: { command: "", args: [] }, logger: { debug() {}, warn() {} } };

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { resolveTheme } from "../addin/taskpane/ui/theme-mode.js";
+import { resolveTheme } from "../frontend/taskpane/ui/theme-mode.js";
 
 describe("Excel Partner appearance", () => {
   it("follows the Excel theme rather than the operating-system theme", () => {

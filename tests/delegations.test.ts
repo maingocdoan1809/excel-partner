@@ -1,11 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 import type { WebSocket } from "ws";
 import { Delegations } from "../bridge/src/delegations.js";
-import { SessionManager } from "../bridge/src/session-manager.js";
+import { WorkbookSessions } from "../bridge/src/workbook-sessions.js";
 import type { WorkbookSession } from "../bridge/src/session.js";
 import type { ProviderEvent, ServerMessage } from "../protocol/src/index.js";
 
-function connected(sessions: SessionManager, id: string) {
+function connected(sessions: WorkbookSessions, id: string) {
   const session = sessions.create(id, null);
   const sent: ServerMessage[] = [];
   session.attachSocket({ readyState: 1, close() {}, send: (raw: string) => sent.push(JSON.parse(raw)) } as unknown as WebSocket);
@@ -13,7 +13,7 @@ function connected(sessions: SessionManager, id: string) {
 }
 
 function setup(limits = { startMs: 1000, runMs: 1000 }) {
-  const sessions = new SessionManager({ ttlMs: 60_000 });
+  const sessions = new WorkbookSessions({ ttlMs: 60_000 });
   const cancelled: Array<[string, string]> = [];
   const delegations = new Delegations((session: WorkbookSession, requestId) => cancelled.push([session.fileId, requestId]), limits);
   const target = connected(sessions, "target");

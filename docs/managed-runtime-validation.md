@@ -35,8 +35,8 @@ Real private CLI installation and native initialization checks cover:
 | Provider | Exact CLI | Result |
 | --- | --- | --- |
 | Copilot | 1.0.95 | Version, integrity, sign-in, SDK and native registration passed; browser model/tool flow passed. |
-| Claude | 2.1.294 | Installed and version checked; private sign-in required. Staged profile stayed pending. |
-| Codex | 0.162.1 | Installed and version checked; private sign-in required. Staged profile stayed pending. |
+| Claude | 2.1.294 | Installed and version checked; private sign-in required. Sign-in could not be checked until the person signs in. |
+| Codex | 0.162.1 | Installed and version checked; private sign-in required. Sign-in could not be checked until the person signs in. |
 | OpenCode | 1.19.5 | Version, integrity and native session/MCP registration passed. Paid-model access was not established. |
 
 Source-keyed test caches avoid reusing an adapter snapshot after its manifest or

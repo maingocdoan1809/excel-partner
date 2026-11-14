@@ -13,17 +13,7 @@ export const CLIENT_TOOL_INSTRUCTIONS = [
   "Only report a remote action as successful after the client tool result confirms it. On errors, correct the call or report the failure.",
 ].join("\n");
 
-/** A provider may wrap MCP calls in its own tool protocol. Keep that translation
- * here rather than teaching API clients about CLI-specific calling conventions. */
-export function clientToolInstructions(provider?: string): string {
-  if (provider !== "opencode") return CLIENT_TOOL_INSTRUCTIONS;
-  return [CLIENT_TOOL_INSTRUCTIONS,
-    "OpenCode V2 Code Mode routing: use a targeted search for the exact excel tool needed, then reuse its discovered schema.",
-    "Do not repeatedly dump the full tool catalog. If inventory is requested, list paths and short descriptions once, then look up full schemas only for the tools you will call.",
-    "Inside the built-in execute tool, call await tools.excel.<remote_tool_name>(arguments) and return the remote result.",
-    "Discover the remote input schema and pass exactly those arguments; do not assume a parameter name from another tool.",
-    "If the client's remote tool is named execute, call tools.excel.execute(arguments), not the local execute sandbox with those arguments.",
-    "Office code belongs in the code argument of that remote call. Never evaluate Office.js directly inside OpenCode's JavaScript sandbox.",
-    "Older OpenCode versions expose prefixed MCP tools directly; use those instead of Code Mode when present.",
-  ].join("\n");
+/** The contract every client-tool transport shares, plus the notes a provider adds for its own way of calling MCP tools. */
+export function clientToolInstructions(notes?: string): string {
+  return notes ? [CLIENT_TOOL_INSTRUCTIONS, notes].join("\n") : CLIENT_TOOL_INSTRUCTIONS;
 }

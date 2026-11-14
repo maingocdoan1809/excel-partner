@@ -2,8 +2,8 @@ import {afterEach,expect,it,vi} from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import {McpServers} from '../runtime/src/mcp-servers.js';
-import {discoverMcpCatalog,invokeRegisteredMcpTool} from '../runtime/src/mcp-catalog.js';
+import {McpServers} from '../shared/src/mcp-servers.js';
+import {discoverMcpCatalog,invokeRegisteredMcpTool} from '../shared/src/mcp-catalog.js';
 const cleanup:Array<()=>Promise<unknown>>=[];
 afterEach(async()=>{for(const fn of cleanup.splice(0).reverse())await fn();});
 async function setup(callTimeoutMs=60000){

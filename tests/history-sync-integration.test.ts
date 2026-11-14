@@ -3,7 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
-import { DurableHistory } from "../addin/taskpane/ui/durable-history.js";
+import { DurableHistory } from "../frontend/taskpane/ui/durable-history.js";
 import { HistoryStore } from "../bridge/src/history-store.js";
 import type { HistorySave, StoredSession } from "../protocol/src/history.js";
 const stores: HistoryStore[] = [], dirs: string[] = [];

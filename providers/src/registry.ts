@@ -1,10 +1,10 @@
 import type { ProviderAdapter, ProviderModelCatalog, ProviderRuntime } from "./types.js";
 import { PROVIDER_IDS, type ProviderId } from "../../protocol/src/index.js";
-import { ClaudeAdapter } from "./claude.js";
-import { CopilotAdapter } from "./copilot.js";
-import { CodexAdapter } from "./codex.js";
-import { OpencodeAdapter } from "./opencode.js";
-import { ProfiledAdapter } from "./profiled.js";
+import { ClaudeAdapter } from "./claude/adapter.js";
+import { CopilotAdapter } from "./copilot/adapter.js";
+import { CodexAdapter } from "./codex/adapter.js";
+import { OpencodeAdapter } from "./opencode/adapter.js";
+import { ProfiledAdapter, type AdapterClass } from "./profiled.js";
 
 export class ProviderRegistry {
   private readonly adapters = new Map<ProviderId, ProviderAdapter>();
@@ -62,16 +62,21 @@ export class ProviderRegistry {
   }
 }
 
-/** Exhaustive against the shared protocol catalog: adding an ID requires a factory. */
-const factories: Record<ProviderId, (runtime: ProviderRuntime) => ProviderAdapter> = {
-  claude: runtime => new ClaudeAdapter(runtime),
-  copilot: runtime => new CopilotAdapter(runtime),
-  codex: runtime => new CodexAdapter(runtime),
-  opencode: runtime => new OpencodeAdapter(runtime),
+/** Exhaustive against the shared protocol catalog: adding an ID requires an adapter. */
+const adapters: Record<ProviderId, AdapterClass> = {
+  claude: ClaudeAdapter,
+  copilot: CopilotAdapter,
+  codex: CodexAdapter,
+  opencode: OpencodeAdapter,
 };
+
+/** One adapter that uses the given environment as it is, with no runtime profile in between (checks run by the installer). */
+export function createAdapter(id: ProviderId, runtime: ProviderRuntime): ProviderAdapter {
+  return new adapters[id](runtime);
+}
 
 export function createDefaultRegistry(runtime: ProviderRuntime): ProviderRegistry {
   const registry = new ProviderRegistry();
-  for (const id of PROVIDER_IDS) registry.register(new ProfiledAdapter(id, runtime, factories[id]));
+  for (const id of PROVIDER_IDS) registry.register(new ProfiledAdapter(id, runtime, adapters[id]));
   return registry;
 }

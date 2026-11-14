@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { WebSocket } from "ws";
-import { SessionManager } from "../bridge/src/session-manager.js";
-import { OfficeRuntime } from "../runtime/src/office-runtime.js";
+import { WorkbookSessions } from "../bridge/src/workbook-sessions.js";
+import { OfficeRuntime } from "../bridge/src/office-runtime.js";
 import type { WorkbookSession } from "../bridge/src/session.js";
 import { ClientMessageSchema, MAX_DELEGATED_TEXT, ServerMessageSchema, UNNAMED_WORKBOOK, WORKBOOK_NAME_REQUEST, parseToolInput, type ToolResult } from "../protocol/src/index.js";
 
@@ -35,7 +35,7 @@ function attachPane(session: WorkbookSession, options: { approve?: boolean; repl
 }
 
 function setup(options: { approve?: boolean } = {}) {
-  const sessions = new SessionManager({ ttlMs: 60_000 });
+  const sessions = new WorkbookSessions({ ttlMs: 60_000 });
   const here = sessions.create("conn-here", null);
   const there = sessions.create("conn-there", null);
   here.workbookName = "Budget 2026.xlsx";
@@ -136,7 +136,7 @@ describe("connected files", () => {
   });
 
   it("names the file in an error from the other workbook", async () => {
-    const sessions = new SessionManager({ ttlMs: 60_000 });
+    const sessions = new WorkbookSessions({ ttlMs: 60_000 });
     const here = sessions.create("a", null);
     const there = sessions.create("b", null);
     there.workbookName = "Actuals.xlsx";
@@ -239,7 +239,7 @@ describe("reading a workbook's name when it is needed", () => {
   }
 
   it("takes the new name and says it changed, then says nothing changed", async () => {
-    const sessions = new SessionManager({ ttlMs: 60_000 });
+    const sessions = new WorkbookSessions({ ttlMs: 60_000 });
     const file = sessions.create("a", null);
     file.workbookName = "Budget.xlsx";
     pane(file, () => ({ ok: true, data: { name: "  Budget (final).xlsx " } }));
@@ -249,7 +249,7 @@ describe("reading a workbook's name when it is needed", () => {
   });
 
   it("keeps the name it has when the pane gives none, gives nonsense, or does not answer in time", async () => {
-    const sessions = new SessionManager({ ttlMs: 60_000 });
+    const sessions = new WorkbookSessions({ ttlMs: 60_000 });
     const file = sessions.create("a", null);
     file.workbookName = "Kept.xlsx";
     for (const data of [{ name: null }, { name: "   " }, { name: 42 }, {}, null]) {
@@ -266,7 +266,7 @@ describe("reading a workbook's name when it is needed", () => {
   });
 
   it("does not wait behind a long call of that pane", async () => {
-    const sessions = new SessionManager({ ttlMs: 60_000 });
+    const sessions = new WorkbookSessions({ ttlMs: 60_000 });
     const file = sessions.create("a", null);
     file.workbookName = "Busy.xlsx";
     pane(file, () => ({ ok: true, data: { name: "Busy (renamed).xlsx" } }));

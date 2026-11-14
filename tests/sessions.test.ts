@@ -11,7 +11,7 @@ import {
   inferHost,
   type StoredMessage,
   type StoredSession,
-} from "../addin/taskpane/ui/sessions.js";
+} from "../frontend/taskpane/ui/sessions.js";
 
 const user = (text: string): StoredMessage => ({ kind: "user", text });
 const bot = (text: string): StoredMessage => ({ kind: "assistant", text });

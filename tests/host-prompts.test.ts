@@ -1,9 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { hostSystemPrompt, recommendedPromptFor } from "../providers/src/host-prompts.js";
-import { RECOMMENDED_SYSTEM_PROMPT } from "../providers/src/prompt.js";
+import { hostSystemPrompt, recommendedPromptFor, RECOMMENDED_SYSTEM_PROMPT } from "../protocol/src/system-prompts.js";
 import { ALL_TOOL_NAMES, toolsForHost } from "../protocol/src/index.js";
-import { definitionForHost } from "../runtime/src/host-overrides.js";
-import { ALL_TOOL_DEFINITIONS } from "../runtime/src/tool-definitions.js";
+import { definitionForHost } from "../shared/src/host-overrides.js";
+import { ALL_TOOL_DEFINITIONS } from "../shared/src/tool-definitions.js";
 
 describe("host system prompts", () => {
   it("leave Excel's prompt exactly as the user has it", () => {
@@ -15,7 +14,8 @@ describe("host system prompts", () => {
   it("give Word and PowerPoint a self-contained prompt when the user has none", () => {
     expect(hostSystemPrompt("word", "")).toMatch(/^You are an AI assistant working inside the user's open Word document/);
     expect(hostSystemPrompt("powerpoint", "  ")).toMatch(/^You are an AI assistant working inside the user's open PowerPoint presentation/);
-    expect(recommendedPromptFor("word")).toBe(hostSystemPrompt("word", ""));
+    // The preset is the introduction only: the rules are added when the prompt is sent, so saving it changes nothing.
+    expect(hostSystemPrompt("word", recommendedPromptFor("word"))).toBe(hostSystemPrompt("word", ""));
   });
 
   it("append the host rules to the user's own prompt", () => {

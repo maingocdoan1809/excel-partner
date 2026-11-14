@@ -1,4 +1,6 @@
 import spawn from "cross-spawn";
+import type { ChildProcess } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import type {
   ProviderCapabilities,
   ProviderConnectionStatus,
@@ -6,19 +8,19 @@ import type {
   ProviderEvent,
   ProviderId,
 } from "../../protocol/src/index.js";
-import type { ProviderAdapter, ProviderRuntime, SendTurnInput, StartSessionContext } from "./types.js";
+import { CliLoginAttempt, ProviderLoginError, type CliLoginSpec } from "./login.js";
+import { installProvider, minimumVersion, uninstallProvider } from "./profiled.js";
+import type { McpEndpoint, ProviderAdapter, ProviderLoginAttempt, ProviderRuntime, SendTurnInput, StartSessionContext } from "./types.js";
 
 export const cliEnvironment = (): string => process.platform === "win32" ? "Windows" : "WSL/Linux";
 
-/** Raised by adapters whose CLI handshake has not been verified yet. */
-export class ProviderNotImplementedError extends Error {
-  constructor(provider: ProviderId, operation: string) {
-    super(
-      `provider '${provider}' does not implement ${operation} yet; ` +
-        `wire it against a real CLI install (see PLAN milestone 3)`,
-    );
-    this.name = "ProviderNotImplementedError";
-  }
+/** Stops a child process and everything it started. */
+export function killProcessTree(child: ChildProcess | null | undefined): void {
+  if (!child || child.exitCode !== null || child.signalCode !== null) return;
+  if (process.platform === "win32" && child.pid) {
+    const killer = spawn("taskkill", ["/pid", String(child.pid), "/t", "/f"], { windowsHide: true, stdio: "ignore" });
+    killer.on("error", () => child.kill());
+  } else child.kill();
 }
 
 export interface CliProbe {
@@ -87,9 +89,9 @@ export abstract class BaseCliAdapter implements ProviderAdapter {
     return detection;
   }
 
-  /** Oldest CLI version this adapter has been verified against, if enforced. */
+  /** Oldest CLI version the release has been verified against: `minVersion` in the runtime manifest. */
   protected get minVersion(): string | null {
-    return null;
+    return minimumVersion(this.id);
   }
 
   /** Adapters override this to verify the CLI session is logged in. */
@@ -99,21 +101,48 @@ export abstract class BaseCliAdapter implements ProviderAdapter {
     return { status: "ready", hint: null };
   }
 
+  install(): Promise<void> { return installProvider(this.id, this.runtime.env ?? process.env); }
+  uninstall(): Promise<void> { return uninstallProvider(this.id, this.runtime.env ?? process.env); }
+
+  /** Signs out by running the CLI named by the adapter's static `logoutArgs`. */
+  async logout(): Promise<void> {
+    const args = (this.constructor as { logoutArgs?: string[] }).logoutArgs;
+    if (!args) throw new ProviderLoginError(`${this.id} has no way to sign out from here.`);
+    const result = await execCli(this.probe().command, args, this.env, 15_000);
+    if (result.code !== 0) throw new ProviderLoginError("Could not sign out. Try again, or sign out in the provider's own settings.");
+    this.invalidateDetection();
+  }
+
+  /** Asks whether the CLI is installed and signed in; adapters that can ask the provider more directly override this. */
+  protected async verifySignedIn(): Promise<void> {
+    const detection = await this.detect(true);
+    if (detection.status === "login_required") throw new ProviderLoginError("authentication required");
+    if (!detection.installed || detection.status !== "ready") throw new Error("provider initialization failed");
+  }
+
+  async verifyReady(mcp: McpEndpoint): Promise<void> {
+    await this.verifySignedIn();
+    const id = await this.startSession({
+      signal: AbortSignal.timeout(60_000), sessionId: "preflight-" + randomUUID(), workbookConnectionId: "preflight", model: null, effort: "medium",
+      requestUserInput: async () => ({ cancelled: true, answers: {} }), authorizeTool: async () => false, systemPrompt: "", mcp,
+    });
+    await this.closeSession(id);
+  }
+
+  /** Signs in by running the CLI named by the adapter's static `login` spec. Adapters that sign in another way override this. */
+  startLogin(): ProviderLoginAttempt {
+    const spec = (this.constructor as { login?: CliLoginSpec }).login;
+    if (!spec) throw new ProviderLoginError(`${this.id} cannot sign in from here.`);
+    return new CliLoginAttempt(this.id, this.probe().command, this.env, spec);
+  }
+
   async connectionStatus(): Promise<ProviderConnectionStatus> {
     return (await this.detect()).status;
   }
 
-  async startSession(_ctx: StartSessionContext): Promise<string> {
-    throw new ProviderNotImplementedError(this.id, "startSession");
-  }
-
-  async *sendTurn(_input: SendTurnInput): AsyncIterable<ProviderEvent> {
-    throw new ProviderNotImplementedError(this.id, "sendTurn");
-  }
-
-  async cancelTurn(_providerSessionId: string): Promise<void> {
-    throw new ProviderNotImplementedError(this.id, "cancelTurn");
-  }
+  abstract startSession(ctx: StartSessionContext): Promise<string>;
+  abstract sendTurn(input: SendTurnInput): AsyncIterable<ProviderEvent>;
+  abstract cancelTurn(providerSessionId: string): Promise<void>;
 
   async closeSession(_providerSessionId: string): Promise<void> {
     /* nothing to release until a CLI process is spawned */

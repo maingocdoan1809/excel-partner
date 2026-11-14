@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import type { WebSocket } from "ws";
 import { Delegations } from "../bridge/src/delegations.js";
-import { SessionManager } from "../bridge/src/session-manager.js";
-import { OfficeRuntime } from "../runtime/src/office-runtime.js";
+import { WorkbookSessions } from "../bridge/src/workbook-sessions.js";
+import { OfficeRuntime } from "../bridge/src/office-runtime.js";
 import type { WorkbookSession } from "../bridge/src/session.js";
 import { WORKBOOK_NAME_REQUEST } from "../protocol/src/index.js";
 
@@ -10,7 +10,7 @@ const limits = { maxReadCells: 100, maxWriteCells: 100, maxSheets: 10, maxSelect
 
 /** Source pane: answers approvals. Target pane: runs a delegated request and ends it with `reply`. */
 function setup(options: { approve?: boolean; reply?: string; targetProvider?: "claude" | null; sourceHost?: "excel" | "word" | "powerpoint"; targetHost?: "excel" | "word" | "powerpoint" } = {}) {
-  const sessions = new SessionManager({ ttlMs: 60_000 });
+  const sessions = new WorkbookSessions({ ttlMs: 60_000 });
   const source = sessions.create("source", options.sourceHost ? { host: options.sourceHost } : null);
   const target = sessions.create("target", options.targetHost ? { host: options.targetHost } : null);
   source.workbookName = "Budget.xlsx";
@@ -106,7 +106,7 @@ describe("send_to_connected_file", () => {
   });
 
   it("names the file when the other file fails", async () => {
-    const sessions = new SessionManager({ ttlMs: 60_000 });
+    const sessions = new WorkbookSessions({ ttlMs: 60_000 });
     const source = sessions.create("a", null);
     const target = sessions.create("b", null);
     target.workbookName = "Actuals.xlsx";

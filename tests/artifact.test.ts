@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { CreateArtifactInputSchema, isExcelToolName } from "../protocol/src/index.js";
-import { artifactKind, buildPreviewDocument, parseCsv } from "../addin/taskpane/ui/artifact.js";
+import { artifactKind, buildPreviewDocument, parseCsv } from "../frontend/taskpane/ui/artifact.js";
 
 describe("create_artifact input", () => {
   it("is a known tool", () => expect(isExcelToolName("create_artifact")).toBe(true));

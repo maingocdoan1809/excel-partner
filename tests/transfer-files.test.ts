@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from "vitest";
-import { filesFromClipboard, filesFromDrop, isFileDrag } from "../addin/taskpane/ui/transfer-files.js";
+import { filesFromClipboard, filesFromDrop, isFileDrag } from "../frontend/taskpane/ui/transfer-files.js";
 
 function clipboard(text: string, files: File[], withItems = true) {
   return {

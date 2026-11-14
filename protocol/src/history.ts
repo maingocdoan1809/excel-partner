@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { ProviderIdSchema } from "./providers.js";
 
 /** The Office application a chat belongs to. */
 export type SessionHost = "excel" | "word" | "powerpoint";
@@ -86,7 +87,7 @@ export interface HistoryAck { revision: number; generation: number }
 export interface HistoryStats { count: number; bytes: number; generation: number }
 const tool = z.object({ name: z.string(), args: z.string(), input: z.string().optional(), result: z.string().optional(), state: z.enum(["running", "ok", "error"]), error: z.string().nullable() }).passthrough();
 export const StoredSessionSchema = z.object({
-  id: z.string().min(1).max(256), title: z.string().max(1000), provider: z.enum(["claude", "copilot", "codex", "opencode"]),
+  id: z.string().min(1).max(256), title: z.string().max(1000), provider: ProviderIdSchema,
   host: z.enum(["excel", "word", "powerpoint"]).optional(), providerSessionId: z.string().max(512).optional(), providerTitle: z.string().optional(), identityVersion: z.literal(1).optional(),
   startedAt: z.number().finite(), updatedAt: z.number().finite(),
   messages: z.array(z.object({ kind: z.enum(["user", "assistant", "error", "note", "tool", "tool_group", "artifact"]), text: z.string(), tool: tool.optional(), tools: z.array(tool).optional(), artifact: z.object({ name: z.string(), content: z.string() }).optional() }).passthrough()),

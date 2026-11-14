@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { BridgeClient } from "../addin/taskpane/bridge-client.js";
+import { BridgeClient } from "../frontend/taskpane/bridge-client.js";
 
 afterEach(() => vi.unstubAllGlobals());
 

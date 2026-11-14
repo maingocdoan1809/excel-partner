@@ -5,6 +5,7 @@ export default defineConfig({
     include: ["tests/**/*.test.ts"],
     exclude: [...configDefaults.exclude, ...(process.env.LIVE_PROVIDERS?.trim() ? [] : ["**/*.live.test.ts"])],
     environment: "node",
+    setupFiles: ["tests/support/hermetic.ts"],
     testTimeout: 15000,
   },
 });

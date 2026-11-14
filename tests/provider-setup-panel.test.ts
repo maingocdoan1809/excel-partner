@@ -2,11 +2,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import fs from "node:fs";
 import type { ProviderConnectionStatus, ProviderId } from "../protocol/src/index.js";
-import { setupPanels, type PanelName } from "../addin/taskpane/ui/panels.js";
-import { setupProviderInstall } from "../addin/taskpane/ui/provider-install.js";
+import { setupPanels, type PanelName } from "../frontend/taskpane/ui/panels.js";
+import { MockAdapter } from "../providers/src/mock.js";
+import { setupProviderInstall } from "../frontend/taskpane/ui/provider-install.js";
 
 beforeEach(() => {
-  const html = fs.readFileSync("addin/taskpane/index.html", "utf8");
+  const html = fs.readFileSync("frontend/taskpane/index.html", "utf8");
   document.body.innerHTML = html.split("<body>")[1]!.split("</body>")[0]!;
 });
 afterEach(() => { document.body.replaceChildren(); vi.restoreAllMocks(); });
@@ -18,6 +19,7 @@ function panels(provider: ProviderId, status: ProviderConnectionStatus) {
   const api = setupPanels({
     getProvider: () => provider,
     getProviderStatus: () => status,
+    getCapabilities: () => ({ ...MockAdapter.capabilities, loginKind: provider === "claude" ? "browser" : provider === "opencode" ? "account" : "device" }),
     renderHistory: vi.fn(), renderChanges: vi.fn(), renderProviderMenu: vi.fn(), openSettings: vi.fn(), closePreview: vi.fn(),
     refreshReferences: vi.fn(async () => {}), refreshSkills: vi.fn(async () => {}), refreshTesting: vi.fn(async () => {}), loadTemplateSkills: vi.fn(async () => {}),
     loginPanel, loginInstall: { reset: vi.fn() },
@@ -37,29 +39,19 @@ describe("Setting up a provider that is not installed", () => {
     expect(element("login-heading").textContent).toMatch(/^Set up /);
     expect(element("login-device").hidden).toBe(true);
     expect(element("login-manual").hidden).toBe(false);
-    expect(element("login-command").hidden).toBe(true);
-    expect(element("login-recheck").hidden).toBe(true);
     expect(element<HTMLButtonElement>("login-install").hidden).toBe(false);
     expect(element("login-install").textContent).toMatch(/^Install /);
   });
 
-  it.each(["claude", "copilot", "codex"] as const)("still signs in to an installed %s from the pane", provider => {
+  it.each([["claude", "BROWSER"], ["copilot", "DEVICE CODE"], ["codex", "DEVICE CODE"], ["opencode", "ACCOUNT"]] as const)("signs in to an installed %s from the pane, labelled by how it signs in", (provider, badge) => {
     const { api, loginPanel } = panels(provider, "login_required");
     api.showPanel("login");
     expect(loginPanel.open).toHaveBeenCalledOnce();
     expect(element("login-heading").textContent).toMatch(/^Sign in to /);
+    expect(element("login-badge").textContent).toBe(badge);
     expect(element("login-device").hidden).toBe(false);
     expect(element("login-manual").hidden).toBe(true);
     expect(element<HTMLButtonElement>("login-install").hidden).toBe(true);
-  });
-
-  it("keeps the terminal login command for OpenCode once it is installed", () => {
-    const { api, loginPanel } = panels("opencode", "login_required");
-    api.showPanel("login");
-    expect(loginPanel.open).not.toHaveBeenCalled();
-    expect(element("login-command").textContent).toBe("office-partner providers login opencode");
-    expect(element("login-command").hidden).toBe(false);
-    expect(element("login-recheck").hidden).toBe(false);
   });
 });
 

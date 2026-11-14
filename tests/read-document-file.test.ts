@@ -5,8 +5,8 @@ import { strToU8, zipSync } from "fflate";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { attachmentPath, createAttachment } from "../bridge/src/attachments.js";
 import { ReferenceFiles } from "../bridge/src/reference-files.js";
-import { SessionManager } from "../bridge/src/session-manager.js";
-import { OfficeRuntime } from "../runtime/src/office-runtime.js";
+import { WorkbookSessions } from "../bridge/src/workbook-sessions.js";
+import { OfficeRuntime } from "../bridge/src/office-runtime.js";
 import { exposedToolNamesForHost, HOST_IDS, isToolNameForHost, parseToolInputForHost } from "../protocol/src/index.js";
 import { sampleDeck, sampleDocx } from "./support/office-files.js";
 
@@ -20,7 +20,7 @@ beforeEach(() => {
 afterEach(() => fs.rmSync(root, { recursive: true, force: true }));
 
 function setup(host: "excel" | "word" | "powerpoint", roots = [root]) {
-  const sessions = new SessionManager({ ttlMs: 60_000 });
+  const sessions = new WorkbookSessions({ ttlMs: 60_000 });
   const session = sessions.create(`conn-${host}-0000000`, { host });
   const limits = { maxReadCells: 1, maxWriteCells: 1, maxSheets: 1, maxSelectionCells: 1 };
   const gateway = new OfficeRuntime(sessions, limits, 1000, undefined, false, null, new ReferenceFiles(roots));

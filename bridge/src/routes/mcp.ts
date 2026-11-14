@@ -1,11 +1,11 @@
 import type http from "node:http";
-import type { McpServers } from "../../../runtime/src/mcp-servers.js";
+import type { McpServers } from "../../../shared/src/mcp-servers.js";
 import { connectedSession, readBody, sendJson } from "../http-util.js";
-import type { SessionManager } from "../session-manager.js";
+import type { WorkbookSessions } from "../workbook-sessions.js";
 import type { WorkbookSession } from "../session.js";
 
 export interface McpRouteDeps {
-  sessions: SessionManager;
+  sessions: WorkbookSessions;
   mcpServers: McpServers;
   /** Discovers the enabled servers' tools for a pane and records them on its session. */
   discover: (session: WorkbookSession) => Promise<unknown>;

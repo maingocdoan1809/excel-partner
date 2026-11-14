@@ -2,11 +2,11 @@ import { afterEach, describe, expect, it } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { CopilotUsageReader } from "../providers/src/copilot-usage.js";
-import { CopilotAdapter } from "../providers/src/copilot.js";
+import { CopilotUsageReader } from "../providers/src/copilot/usage.js";
+import { CopilotAdapter } from "../providers/src/copilot/adapter.js";
 import { CumulativeUsage } from "../providers/src/usage.js";
 import { UsageStore } from "../bridge/src/usage.js";
-import { formatCredits, usageCsv } from "../addin/taskpane/ui/usage.js";
+import { formatCredits, usageCsv } from "../frontend/taskpane/ui/usage.js";
 import type { ProviderEvent } from "../protocol/src/index.js";
 
 const dirs: string[] = [];

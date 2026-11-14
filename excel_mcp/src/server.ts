@@ -1,5 +1,5 @@
-import { toolResultToMcp } from "../../runtime/src/results.js";
-import { officeToolCatalog } from "../../runtime/src/catalog.js";
+import { toolResultToMcp } from "../../shared/src/results.js";
+import { officeToolCatalog } from "../../shared/src/catalog.js";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import {
   CallToolRequestSchema,

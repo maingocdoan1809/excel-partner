@@ -26,7 +26,7 @@ vi.mock("@github/copilot-sdk", () => ({
     async stop() { sdk.client.stopped = true; }
   },
 }));
-import { CopilotNativeSessions, resolveCopilotPath } from "../providers/src/copilot-native.js";
+import { CopilotNativeSessions, resolveCopilotPath } from "../providers/src/copilot/native.js";
 
 const schema = { type: "object", properties: { address: { type: "string" } }, required: ["address"] };
 const bridge = { calls: [] as Array<{ name: string; args: unknown; signal?: AbortSignal }>, closed: 0, reply: null as any, fail: null as Error | null };
@@ -349,5 +349,47 @@ describe("Copilot native question transport", () => {
     const env = { PATH: dir, PATHEXT: ".EXE;.CMD;.BAT" };
     expect(resolveCopilotPath("copilot.EXE", env)).toBe(fs.realpathSync(executable));
     expect(resolveCopilotPath("copilot", env)).toBe(fs.realpathSync(executable));
+  });
+});
+
+describe("Copilot native model and effort", () => {
+  async function turnWith(id: string, model: string | null, effort: "low" | "medium" | "high") {
+    const events: ProviderEvent[] = [];
+    for await (const event of manager.send({ providerSessionId: id, requestId: "r", prompt: "Hi", selection: null, signal: new AbortController().signal, model, effort }, process.env)) events.push(event);
+    return events;
+  }
+
+  it("changes them inside the running session with setModel, and only when they differ", async () => {
+    const setModel = vi.fn(async () => {});
+    sdk.session.setModel = setModel;
+    const id = await manager.start({ ...ctx, model: "gpt-a", effort: "medium" }, "copilot", process.env);
+    await turnWith(id, "gpt-a", "medium");
+    expect(setModel).not.toHaveBeenCalled();
+    await turnWith(id, "gpt-b", "high");
+    expect(setModel).toHaveBeenLastCalledWith("gpt-b", { reasoningEffort: "high" });
+    await turnWith(id, "gpt-b", "high");
+    expect(setModel).toHaveBeenCalledTimes(1);
+    await turnWith(id, "gpt-b", "low");
+    expect(setModel).toHaveBeenLastCalledWith("gpt-b", { reasoningEffort: "low" });
+  });
+
+  it("sends no effort with Auto, and keeps the model when it accepts none", async () => {
+    const setModel = vi.fn(async (_model: string, options?: unknown) => {
+      if (options) throw new Error("Model does not support reasoning effort configuration");
+    });
+    sdk.session.setModel = setModel;
+    const id = await manager.start({ ...ctx, model: "gpt-a", effort: "medium" }, "copilot", process.env);
+    await turnWith(id, "auto", "high");
+    expect(setModel).toHaveBeenLastCalledWith("auto", undefined);
+    await turnWith(id, "small", "high");
+    expect(setModel).toHaveBeenCalledWith("small");
+  });
+
+  it("reports a switch the CLI refuses instead of running the turn on the old model", async () => {
+    sdk.session.setModel = vi.fn(async () => { throw new Error("unknown model"); });
+    const id = await manager.start({ ...ctx, model: "gpt-a" }, "copilot", process.env);
+    const events = await turnWith(id, "nope", "medium");
+    expect(events.find(event => event.type === "error")).toMatchObject({ message: expect.stringContaining("unknown model") });
+    expect(events.at(-1)).toMatchObject({ type: "turn_finished", reason: "error" });
   });
 });

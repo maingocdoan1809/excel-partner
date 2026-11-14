@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { SEARCH_TUNING, getSelectionLabel } from "../addin/taskpane/executor/read.js";
-import { executeTool } from "../addin/taskpane/executor/index.js";
+import { SEARCH_TUNING, getSelectionLabel } from "../frontend/taskpane/executor/read.js";
+import { executeTool } from "../frontend/taskpane/executor/index.js";
 import { parseToolInput, SelectionSnapshotSchema } from "../protocol/src/index.js";
-import { BULK, inBatches, noteUserActivity, recoverCalculationMode, withManualCalculation } from "../addin/taskpane/executor/bulk.js";
+import { BULK, inBatches, noteUserActivity, recoverCalculationMode, withManualCalculation } from "../frontend/taskpane/executor/bulk.js";
 import { MockWorkbook, MockSheet, MockShape, installOfficeMock } from "./support/office-mock.js";
 
 let book: MockWorkbook;
@@ -584,7 +584,7 @@ describe("check_formula_consistency", () => {
 
 describe("relativePattern", () => {
   it("makes copied formulas compare equal and keeps absolute refs and text intact", async () => {
-    const { relativePattern } = await import("../addin/taskpane/executor/audit.js");
+    const { relativePattern } = await import("../frontend/taskpane/executor/audit.js");
     expect(relativePattern("=B2*C2", 1, 3)).toBe(relativePattern("=B3*C3", 2, 3));
     expect(relativePattern("=B2*$C$1", 1, 3)).toBe(relativePattern("=B3*$C$1", 2, 3));
     expect(relativePattern("=B2*$C$1", 1, 3)).not.toBe(relativePattern("=B3*$C$2", 2, 3));

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, expect, it, vi } from "vitest";
-import { setupHistoryPanel } from "../addin/taskpane/ui/history-panel.js";
+import { setupHistoryPanel } from "../frontend/taskpane/ui/history-panel.js";
 import type { StoredSession } from "../protocol/src/history.js";
 
 function failureFixture() {

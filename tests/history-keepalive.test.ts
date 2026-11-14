@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { BridgeClient } from "../addin/taskpane/bridge-client.js";
+import { BridgeClient } from "../frontend/taskpane/bridge-client.js";
 import type { HistorySave, StoredSession } from "../protocol/src/history.js";
 
 const save = (text: string): HistorySave => ({ baseRevision: 0, generation: 0, operationId: "op",

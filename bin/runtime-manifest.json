@@ -1,9 +1,26 @@
 {
   "schemaVersion": 1,
+  "autoUpdate": { "COPILOT_AUTO_UPDATE": "false", "DISABLE_AUTOUPDATER": "1", "DISABLE_UPDATES": "1", "OPENCODE_DISABLE_AUTOUPDATE": "true" },
   "providers": {
-    "claude": { "package": "@anthropic-ai/claude-code", "version": "2.1.294", "bin": "claude" },
-    "copilot": { "package": "@github/copilot", "version": "1.0.95", "bin": "copilot", "sdkVersion": "1.0.18" },
-    "codex": { "package": "@openai/codex", "version": "0.162.1", "bin": "codex" },
-    "opencode": { "package": "opencode-ai", "version": "1.19.5", "bin": "opencode" }
+    "claude": {
+      "package": "@anthropic-ai/claude-code", "version": "2.1.294", "minVersion": "2.1.294", "bin": "claude",
+      "env": { "state": { "CLAUDE_CONFIG_DIR": "." } }
+    },
+    "copilot": {
+      "package": "@github/copilot", "version": "1.0.95", "minVersion": "1.0.95", "bin": "copilot", "sdkVersion": "1.0.18",
+      "env": { "state": { "COPILOT_HOME": ".", "COPILOT_CACHE_HOME": "cache" }, "unset": ["COPILOT_CLI_PATH"] }
+    },
+    "codex": {
+      "package": "@openai/codex", "version": "0.162.1", "minVersion": "0.162.1", "bin": "codex",
+      "env": { "state": { "CODEX_HOME": "." } }
+    },
+    "opencode": {
+      "package": "opencode-ai", "version": "1.19.5", "minVersion": "1.0.0", "bin": "opencode",
+      "nativeBin": { "win32": "opencode-windows-{arch}/bin/opencode.exe" },
+      "env": {
+        "state": { "XDG_CONFIG_HOME": "config", "XDG_DATA_HOME": "data", "XDG_STATE_HOME": "state", "XDG_CACHE_HOME": "cache", "OPENCODE_CONFIG_DIR": "config/opencode" },
+        "unset": ["OPENCODE_BIN_PATH", "OPENCODE_DB"]
+      }
+    }
   }
 }

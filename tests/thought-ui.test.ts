@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { ThoughtView } from "../addin/taskpane/ui/thought.js";
+import { ThoughtView } from "../frontend/taskpane/ui/thought.js";
 
 let messages: HTMLElement;
 let dots: HTMLElement | null;

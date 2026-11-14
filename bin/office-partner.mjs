@@ -14,7 +14,7 @@ const cert = path.join(dataDir, "localhost.crt");
 const key = path.join(dataDir, "localhost.key");
 const pidFile = path.join(dataDir, "bridge.pid");
 const configFile = path.join(dataDir, "config.json");
-const manifest = path.join(root, "addin", "manifest.xml");
+const manifest = path.join(root, "frontend", "manifest.xml");
 const bridge = path.join(root, "dist", "bridge", "src", "index.js");
 const windowsScript = path.join(root, "scripts", "package-windows.ps1");
 
@@ -406,9 +406,9 @@ async function main() {
     if (!skipProviders && selected && selected !== "none") {
       for (const provider of selected.split(",")) {
         console.log(`Installing the private ${provider} CLI version for this release. Your system CLI is kept.`);
-        try { await installRuntime(root, provider, { dataDir, adapterRoot: baseline.root }); }
+        try { await installRuntime(root, provider, { dataDir }); }
         catch (error) {
-          console.error(`${provider}: ${String(error).includes("NATIVE_PREFLIGHT_AUTH_REQUIRED") ? `private CLI installed; sign in with office-partner providers login ${provider}` : "managed installation was not activated"}. The previous CLI configuration is retained. Retry with office-partner providers install ${provider}.`);
+          console.error(`${provider}: ${String(error).includes("NATIVE_PREFLIGHT_AUTH_REQUIRED") ? "private CLI installed; sign in from the Office Partner pane (Settings, Sign in)" : "managed installation was not activated"}. The previous CLI configuration is retained. Retry with office-partner providers install ${provider}.`);
         }
       }
     }

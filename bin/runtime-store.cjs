@@ -3,8 +3,9 @@ const fs = require('node:fs');
 const path = require('node:path');
 const os = require('node:os');
 const crypto = require('node:crypto');
+const manifest = require('./runtime-manifest.json');
 
-const ids = ['claude', 'copilot', 'codex', 'opencode'];
+const ids = Object.keys(manifest.providers);
 const digest = value => crypto.createHash('sha256').update(value).digest('hex');
 function fileDigest(file) {
   const hash = crypto.createHash('sha256'), handle = fs.openSync(file, 'r'), buffer = Buffer.allocUnsafe(1024 * 1024);
@@ -20,6 +21,20 @@ function readJson(file, limit = 8 * 1024 * 1024) {
   if (fs.statSync(file).size > limit) throw new Error('STATE_TOO_LARGE');
   return JSON.parse(fs.readFileSync(file, 'utf8'));
 }
+/**
+ * Rename a freshly written folder. On Windows the virus scanner holds new files open for a while, and the rename then fails with
+ * EPERM/EBUSY/EACCES even though nothing is wrong, so it is tried again for up to about 40 seconds before the error is let through.
+ */
+function renameFolder(from, to) {
+  const wait = new Int32Array(new SharedArrayBuffer(4));
+  for (let attempt = 0; ; attempt++) {
+    try { fs.renameSync(from, to); return; }
+    catch (error) {
+      if (!['EPERM', 'EBUSY', 'EACCES'].includes(error.code) || process.platform !== 'win32' || attempt >= 40) throw error;
+      Atomics.wait(wait, 0, 0, 500 + attempt * 50);
+    }
+  }
+}
 function atomic(file, data) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   const temporary = file + '.' + crypto.randomUUID() + '.tmp';
@@ -31,21 +46,23 @@ function atomic(file, data) {
   }
   finally { try { fs.unlinkSync(temporary); } catch {} }
 }
-const empty = () => ({ schemaVersion: 1, selected: [], profiles: {}, active: {}, previous: {}, legacy: {}, conversations: {}, owners: {} });
+
+/** `selected` lists the providers whose CLI the product installed, `profiles` the installs, `active` the one each provider runs. */
+const emptyState = () => ({ schemaVersion: 1, selected: [], profiles: {}, active: {}, owners: {}, disabled: [], failures: {} });
 function readState(dataDir = home(), suffix = '') {
   const file = path.join(dataDir, 'runtime-state.json' + suffix);
-  if (!fs.existsSync(file)) return empty();
-  const state = readJson(file);
-  if (state.schemaVersion !== 1 || !Array.isArray(state.selected) || !state.selected.every(id => ids.includes(id))) throw new Error('RUNTIME_STATE_INVALID');
-  for (const field of ['profiles', 'active', 'previous', 'legacy', 'conversations', 'owners']) {
-    if (!state[field] || typeof state[field] !== 'object' || Array.isArray(state[field])) throw new Error('RUNTIME_STATE_INVALID');
+  if (!fs.existsSync(file)) return emptyState();
+  const raw = readJson(file);
+  if (raw.schemaVersion !== 1 || !Array.isArray(raw.selected) || !raw.selected.every(id => ids.includes(id))) throw new Error('RUNTIME_STATE_INVALID');
+  for (const field of ['profiles', 'active', 'owners']) {
+    if (!raw[field] || typeof raw[field] !== 'object' || Array.isArray(raw[field])) throw new Error('RUNTIME_STATE_INVALID');
   }
+  // Older versions also kept previous CLIs, one CLI per saved chat and copies of the system CLI. Only the install in use matters now.
+  const state = { ...emptyState(), selected: raw.selected, active: raw.active, owners: raw.owners, disabled: raw.disabled ?? [], failures: raw.failures ?? {},
+    profiles: Object.fromEntries(Object.entries(raw.profiles).filter(([, profile]) => profile.mode !== 'external')) };
   for (const [id, profile] of Object.entries(state.profiles)) {
-    if (!/^[a-f0-9]{64}$/.test(id) || id !== profile.id || !ids.includes(profile.provider)
-      || !['managed', 'external'].includes(profile.mode) || typeof profile.command !== 'string' || !path.isAbsolute(profile.command)
-      || typeof profile.adapterRoot !== 'string' || !path.isAbsolute(profile.adapterRoot)) throw new Error('RUNTIME_PROFILE_INVALID');
-    if (profile.mode === 'managed' && (!inside(path.join(dataDir, 'runtimes'), profile.command)
-      || !inside(path.join(dataDir, 'releases'), profile.adapterRoot))) throw new Error('RUNTIME_PATH_INVALID');
+    if (profile.id !== id || !ids.includes(profile.provider) || typeof profile.command !== 'string' || !path.isAbsolute(profile.command)) throw new Error('RUNTIME_PROFILE_INVALID');
+    if (!inside(path.join(dataDir, 'runtimes'), profile.command)) throw new Error('RUNTIME_PATH_INVALID');
     if (profile.stateHome && (!path.isAbsolute(profile.stateHome) || !inside(path.join(dataDir, 'provider-data'), profile.stateHome))) throw new Error('RUNTIME_STATE_HOME_INVALID');
   }
   return state;
@@ -75,62 +92,36 @@ function lock(dataDir, name, operation) {
 function changeState(dataDir, change) {
   return lock(dataDir, 'runtime-state', () => { const state = readState(dataDir); const result = change(state); atomic(path.join(dataDir, 'runtime-state.json'), state); return result; });
 }
-const conversationKey = (provider, nativeId) => provider + ':' + digest(nativeId);
-function bindConversation(dataDir, provider, nativeId, profileId) {
-  if (!nativeId || !profileId) return;
-  if (readState(dataDir).conversations[conversationKey(provider, nativeId)] === profileId) return;
-  changeState(dataDir, state => {
-    const key = conversationKey(provider, nativeId), previous = state.conversations[key];
-    if (previous && previous !== profileId) throw new Error('CONVERSATION_PROFILE_CONFLICT');
-    if (Object.keys(state.conversations).length >= 10000 && !previous) throw new Error('CONVERSATION_PROFILE_LIMIT');
-    if (!state.profiles[profileId]) throw new Error('RUNTIME_PROFILE_MISSING');
-    state.conversations[key] = profileId;
-  });
+
+/** True while the CLI file is the one that was installed. A full read of a large file is only repeated when its size or time changes. */
+const checked = new Map();
+function unchanged(profile) {
+  const stat = fs.statSync(profile.command), signature = `${stat.size}:${stat.mtimeMs}:${profile.fingerprint}`;
+  if (checked.get(profile.command) === signature) return true;
+  if (fileDigest(profile.command) !== profile.fingerprint) return false;
+  checked.set(profile.command, signature);
+  return true;
 }
-function selectProfile(dataDir, provider, nativeId) {
+/** The install the provider runs, or null when it runs the system CLI. */
+function selectProfile(dataDir, provider) {
   const state = readState(dataDir);
-  if (!nativeId && state.disabled?.includes(provider)) throw new Error('PROVIDER_DISABLED');
-  const saved = nativeId ? state.conversations[conversationKey(provider, nativeId)] : undefined;
-  // An old conversation with no recorded profile stays on its captured external CLI.
-  const id = saved || (nativeId ? state.legacy[provider] : state.active[provider] || state.legacy[provider]);
-  if (!id && nativeId && state.active[provider]) throw new Error('LEGACY_RESUME_PROFILE_UNKNOWN');
+  if (state.disabled.includes(provider)) throw new Error('PROVIDER_DISABLED');
+  const id = state.active[provider];
   if (!id) return null;
   const profile = state.profiles[id];
   if (!profile) throw new Error('RUNTIME_PROFILE_MISSING');
-  if (profile.mode === 'managed' && (profile.platform !== process.platform || profile.arch !== process.arch)) throw new Error('RUNTIME_PLATFORM_MISMATCH');
-  if (!fs.existsSync(profile.command) || profile.fingerprint && fileDigest(profile.command) !== profile.fingerprint) {
-    if (nativeId) throw new Error('RESUME_RUNTIME_MISSING');
-    const fallback = fallbackProfile(dataDir, provider, id);
-    if (!fallback) throw new Error('RUNTIME_MISSING');
-    return { ...fallback, fallbackFrom: id };
-  }
+  if (profile.platform !== process.platform || profile.arch !== process.arch) throw new Error('RUNTIME_PLATFORM_MISMATCH');
+  if (!fs.existsSync(profile.command) || !unchanged(profile)) throw new Error('RUNTIME_MISSING');
   return profile;
 }
-function fallbackProfile(dataDir, provider, excluded) {
-  const state = readState(dataDir);
-  for (const id of [state.previous[provider], state.legacy[provider]]) {
-    const profile = state.profiles[id];
-    if (profile && id !== excluded && fs.existsSync(profile.command) && (!profile.fingerprint || fileDigest(profile.command) === profile.fingerprint)) return profile;
-  }
-  return null;
-}
+/** The environment a provider's CLI runs in: updates off, its own state folder, and the install the product chose. */
 function childEnvironment(env, profile) {
-  const result = { ...env, COPILOT_AUTO_UPDATE: 'false', DISABLE_AUTOUPDATER: '1', DISABLE_UPDATES: '1', OPENCODE_DISABLE_AUTOUPDATE: 'true' };
-  if (profile) {
-    if (profile.command) result[profile.provider.toUpperCase() + '_BIN'] = profile.command;
-    if (profile.mode === 'managed' && profile.stateHome) {
-      if (profile.provider === 'copilot') { result.COPILOT_HOME = profile.stateHome; result.COPILOT_CACHE_HOME = path.join(profile.stateHome, 'cache'); }
-      if (profile.provider === 'claude') result.CLAUDE_CONFIG_DIR = profile.stateHome;
-      if (profile.provider === 'codex') result.CODEX_HOME = profile.stateHome;
-      if (profile.provider === 'opencode') {
-        delete result.OPENCODE_BIN_PATH;
-        for (const [key, directory] of Object.entries({ XDG_CONFIG_HOME: 'config', XDG_DATA_HOME: 'data', XDG_STATE_HOME: 'state', XDG_CACHE_HOME: 'cache' })) result[key] = path.join(profile.stateHome, directory);
-        result.OPENCODE_CONFIG_DIR = path.join(profile.stateHome, 'config', 'opencode');
-        delete result.OPENCODE_DB;
-      }
-    }
-    if (profile.provider === 'copilot') delete result.COPILOT_CLI_PATH;
-  }
+  const result = { ...env, ...manifest.autoUpdate };
+  if (!profile) return result;
+  const spec = manifest.providers[profile.provider].env ?? {};
+  if (profile.command) result[profile.provider.toUpperCase() + '_BIN'] = profile.command;
+  if (profile.stateHome) for (const [name, relative] of Object.entries(spec.state ?? {})) result[name] = path.join(profile.stateHome, relative);
+  for (const name of spec.unset ?? []) delete result[name];
   return result;
 }
 function currentDeployment(dataDir = home(), suffix = '') {
@@ -144,4 +135,4 @@ function currentDeployment(dataDir = home(), suffix = '') {
   }
   return data;
 }
-module.exports = { ids, digest, fileDigest, home, inside, readJson, atomic, readState, changeState, lock, bindConversation, selectProfile, fallbackProfile, childEnvironment, currentDeployment, conversationKey };
+module.exports = { manifest, ids, digest, fileDigest, home, inside, readJson, atomic, renameFolder, emptyState, readState, changeState, lock, selectProfile, childEnvironment, currentDeployment };

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { runExcel } from "../addin/taskpane/executor/common.js";
+import { runExcel } from "../frontend/taskpane/executor/common.js";
 
 const editing = Object.assign(new Error("in edit mode"), { code: "InvalidOperationInCellEditMode" });
 

@@ -1,10 +1,10 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from "vitest";
-import { WRITE_TOOLS } from "../addin/taskpane/executor/index.js";
-import { describeChange } from "../addin/taskpane/ui/changes.js";
-import { renderMarkdown } from "../addin/taskpane/ui/markdown.js";
-import { filterCommands, leadingCommand, slashBadgeRange, slashQuery } from "../addin/taskpane/ui/slash.js";
-import { activeFileMention, atomicBadgeDeletion, fileMentionRanges } from "../addin/taskpane/ui/file-mentions.js";
+import { WRITE_TOOLS } from "../frontend/taskpane/executor/index.js";
+import { describeChange } from "../frontend/taskpane/ui/changes.js";
+import { renderMarkdown } from "../frontend/taskpane/ui/markdown.js";
+import { filterCommands, leadingCommand, slashBadgeRange, slashQuery } from "../frontend/taskpane/ui/slash.js";
+import { activeFileMention, atomicBadgeDeletion, fileMentionRanges } from "../frontend/taskpane/ui/file-mentions.js";
 
 describe("file mentions", () => {
   it("opens a fresh query for a second @ on the same line", () => {

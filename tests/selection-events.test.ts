@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { watchShapeSelectionEvents } from "../addin/taskpane/executor/selection-events.js";
+import { watchShapeSelectionEvents } from "../frontend/taskpane/executor/selection-events.js";
 import { installOfficeMock, MockShape, MockWorkbook } from "./support/office-mock.js";
 
 let book: MockWorkbook;

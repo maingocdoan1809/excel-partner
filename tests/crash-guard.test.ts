@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { EventEmitter } from "node:events";
 import { CrashGuard } from "../bridge/src/crash-guard.js";
-import { SessionManager } from "../bridge/src/session-manager.js";
-import { OfficeRuntime } from "../runtime/src/office-runtime.js";
+import { WorkbookSessions } from "../bridge/src/workbook-sessions.js";
+import { OfficeRuntime } from "../bridge/src/office-runtime.js";
 
 describe("CrashGuard", () => {
   it("ignores key order and expires after the block time", () => {
@@ -21,7 +21,7 @@ describe("OfficeRuntime after Excel drops mid-call", () => {
   const limits = { maxReadCells: 100, maxWriteCells: 100, maxSheets: 10, maxSelectionCells: 10 };
 
   function pane() {
-    const sessions = new SessionManager({ ttlMs: 60_000 });
+    const sessions = new WorkbookSessions({ ttlMs: 60_000 });
     const first = sessions.create("conn-1", null);
     const sent: unknown[] = [];
     const socket = Object.assign(new EventEmitter(), { readyState: 1, send: (data: string) => sent.push(JSON.parse(data)) });

@@ -7,7 +7,9 @@ import type {
   ProviderId,
   ToolResult,
 } from "../../protocol/src/index.js";
-import type { McpEndpoint, ProviderAdapter, SendTurnInput, StartSessionContext } from "./types.js";
+import { ProviderLoginError } from "./login.js";
+import { installProvider, uninstallProvider } from "./profiled.js";
+import type { McpEndpoint, ProviderAdapter, ProviderLoginAttempt, SendTurnInput, StartSessionContext } from "./types.js";
 
 export interface MockToolCall {
   tool: string;
@@ -36,12 +38,20 @@ interface MockSession {
  */
 export class MockAdapter implements ProviderAdapter {
   readonly id: ProviderId;
-  readonly capabilities: ProviderCapabilities = {
+  static readonly capabilities: ProviderCapabilities = {
     streaming: true,
     cancel: true,
     sessionResume: true,
     mcp: true,
+    nativeWebSearch: true,
+    explicitToolNames: false,
+    credits: false,
+    loginKind: "device",
+    logout: false,
+    liveModel: false,
+    liveEffort: false,
   };
+  readonly capabilities = MockAdapter.capabilities;
 
   private readonly sessions = new Map<string, MockSession>();
   private readonly options: Required<MockAdapterOptions>;
@@ -54,6 +64,19 @@ export class MockAdapter implements ProviderAdapter {
       delayMs: options.delayMs ?? 0,
     };
     this.id = this.options.id;
+  }
+
+  install(): Promise<void> { return installProvider(this.id); }
+  uninstall(): Promise<void> { return uninstallProvider(this.id); }
+
+  async logout(): Promise<void> {
+    throw new ProviderLoginError("The mock provider has nothing to sign out of.");
+  }
+
+  async verifyReady(): Promise<void> {}
+
+  startLogin(): ProviderLoginAttempt {
+    throw new ProviderLoginError("The mock provider has nothing to sign in to.");
   }
 
   async detect(): Promise<ProviderDetection> {

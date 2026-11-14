@@ -1,10 +1,10 @@
 import type http from "node:http";
 import { connectedSession, readBody, sendJson } from "../http-util.js";
-import type { SessionManager } from "../session-manager.js";
+import type { WorkbookSessions } from "../workbook-sessions.js";
 import { type FolderKind, type TestingAdmin, TestingAdminError } from "../testing-admin.js";
 
 export interface TestingRouteDeps {
-  sessions: SessionManager;
+  sessions: WorkbookSessions;
   admin: TestingAdmin;
 }
 

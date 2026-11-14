@@ -2,12 +2,12 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { EventEmitter } from "node:events";
 import { PassThrough } from "node:stream";
 import { createInterface } from "node:readline";
-import { ClaudeAdapter } from "../providers/src/claude.js";
+import { ClaudeAdapter } from "../providers/src/claude/adapter.js";
 import { ProviderRegistry } from "../providers/src/registry.js";
-import { ProviderSessionManager } from "../providers/src/session-manager.js";
+import { ProviderSessionManager } from "../shared/src/session-manager.js";
 import { WorkbookSession } from "../bridge/src/session.js";
 import type { ProviderEvent } from "../protocol/src/index.js";
-import { ClaudeProcess } from "../providers/src/claude-process.js";
+import { ClaudeProcess } from "../providers/src/claude/process.js";
 
 const cli = vi.hoisted(() => ({ spawn: vi.fn(), hold: false, interrupt: "reject", children: [] as any[] }));
 vi.mock("cross-spawn", () => ({ default: cli.spawn }));

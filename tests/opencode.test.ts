@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { acpPermissionOutcome, contentText, toolNameOf } from "../providers/src/acp.js";
 import { effortConfig } from "../providers/src/effort.js";
-import { OpencodeAdapter, isOpencodeV2, parseOpencodeModels } from "../providers/src/opencode.js";
+import { OpencodeAdapter, parseOpencodeModels } from "../providers/src/opencode/adapter.js";
 
 const PERMISSION_OPTIONS = [
   { optionId: "once", kind: "allow_once", name: "Allow once" },

@@ -1,11 +1,11 @@
 // @vitest-environment jsdom
 import fs from "node:fs";
 import { afterEach, expect, it, vi } from "vitest";
-import { setupHistoryStorage } from "../addin/taskpane/ui/history-storage.js";
+import { setupHistoryStorage } from "../frontend/taskpane/ui/history-storage.js";
 const tick = async () => { for (let i = 0; i < 30; i++) await Promise.resolve(); };
 afterEach(() => { vi.restoreAllMocks(); });
 function fixture() {
- document.body.innerHTML = fs.readFileSync("addin/taskpane/index.html", "utf8").match(/<body[^>]*>([\s\S]*)<\/body>/)![1]!;
+ document.body.innerHTML = fs.readFileSync("frontend/taskpane/index.html", "utf8").match(/<body[^>]*>([\s\S]*)<\/body>/)![1]!;
  document.getElementById("panel-settings")!.hidden = false;
  const nativeConfirm = vi.spyOn(window, "confirm").mockImplementation(() => { throw Error("Function window.confirm is not supported."); });
  const client = { historyStats: vi.fn(async () => ({ count: 1, bytes: 100, generation: 0 })) };

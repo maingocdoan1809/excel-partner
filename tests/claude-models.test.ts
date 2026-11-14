@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseClaudeModels } from "../providers/src/claude.js";
+import { parseClaudeModels } from "../providers/src/claude/adapter.js";
 
 describe("Claude model list", () => {
   it("maps the CLI model list, keeps exact versions and reads the default", () => {

@@ -3,10 +3,9 @@ import path from "node:path";
 import https from "node:https";
 import { spawnSync } from "node:child_process";
 import crypto from "node:crypto";
-import { createRequire } from "node:module";
 import store from "./runtime-store.cjs";
-import { collectDoctor, resolveCommands } from "./doctor-checks.mjs";
-import { installRuntime, repairRuntime, runtimeInventory } from "./runtime-manager.mjs";
+import { collectDoctor } from "./doctor-checks.mjs";
+import { installRuntime, repairRuntime, runtimeInventory, uninstallRuntime } from "./runtime-manager.mjs";
 import { recordStartup, startupCode } from "./startup-log.mjs";
 import { snapshotRelease, updateRelease, verifyRelease } from "./deployment.mjs";
 
@@ -118,7 +117,6 @@ function cleanupOwners(dataDir, { addin, gateway, gatewayConfigured = false }) {
   deployment.active = null;
   store.atomic(path.join(dataDir, "deployment.json"), deployment);
   for (const profile of Object.values(state.profiles)) {
-    if (profile.mode !== "managed") continue;
     const runtimeRoot = path.join(dataDir, "runtimes");
     for (const name of fs.existsSync(runtimeRoot) ? fs.readdirSync(runtimeRoot) : []) {
       if (name !== profile.id && !new RegExp("^" + profile.id + "\\.damaged-\\d+$").test(name)) continue;
@@ -132,7 +130,7 @@ function cleanupOwners(dataDir, { addin, gateway, gatewayConfigured = false }) {
     if (!store.inside(path.join(dataDir, "releases"), fs.realpathSync(release.directory)) || store.readJson(path.join(release.directory, ".release.json"), 64 * 1024 * 1024).id !== release.id) throw new Error("UNINSTALL_OWNERSHIP_MISMATCH");
     fs.rmSync(release.directory, { recursive: true, force: true });
   }
-  store.atomic(path.join(dataDir, "runtime-state.json"), { schemaVersion: 1, selected: [], profiles: {}, active: {}, previous: {}, legacy: {}, conversations: {}, owners: {} });
+  store.atomic(path.join(dataDir, "runtime-state.json"), store.emptyState());
   store.atomic(path.join(dataDir, "deployment.json"), { schemaVersion: 1, active: null, releases: {} });
 }
 export function verifiedActiveRelease(dataDir = store.home()) {
@@ -249,27 +247,13 @@ export async function managementMain(args, options = {}) {
     if (!action || action === "list") { console.log(JSON.stringify(runtimeInventory(dataDir), null, 2)); return; }
     if (!store.ids.includes(value)) throw new Error("PROVIDER_INVALID");
     if (action === "install") {
-      const baseline = ensureBaseline(root, dataDir);
-      const profile = await installRuntime(root, value, { dataDir, adapterRoot: baseline.root });
-      console.log(`Installed managed ${value} ${profile.version}. Existing workers retain their runtime.`); return;
+      ensureBaseline(root, dataDir);
+      const profile = await installRuntime(root, value, { dataDir });
+      console.log(`Installed managed ${value} ${profile.version}.`); return;
     }
     if (action === "remove") {
-      store.changeState(dataDir, state => { state.selected = state.selected.filter(id => id !== value); delete state.active[value]; delete state.pending?.[value]; state.disabled = [...new Set([...(state.disabled ?? []), value])]; });
-      console.log("Provider disabled. Retained profiles remain available to saved conversations until full uninstall."); return;
-    }
-    if (action === "login") {
-      const state = store.readState(dataDir);
-      const profile = state.profiles[state.pending?.[value]] ?? store.selectProfile(dataDir, value)
-        ?? { mode: "external", command: resolveCommands(process.env[value.toUpperCase() + "_BIN"] ?? value, process.env)[0], provider: value };
-      if (!profile.command) throw new Error("INSTALL_PROVIDER_FIRST");
-      const login = value === "copilot" ? ["login", "--device-code"] : value === "codex" ? ["login"] : value === "claude" ? ["auth", "login"] : ["auth", "login"];
-      const js = /\.[cm]?js$/i.test(profile.command);
-      let interactive = spawnSync;
-      try { interactive = createRequire(path.join(root, "package.json"))("cross-spawn").sync; } catch { /* native/JS entrypoints still work for recovery */ }
-      const result = interactive(js ? process.execPath : profile.command, js ? [profile.command, ...login] : login, { env: store.childEnvironment(process.env, profile), stdio: "inherit", windowsHide: true });
-      process.exitCode = result.status ?? 1;
-      if (result.status === 0 && state.pending?.[value]) await installRuntime(profile.adapterRoot, value, { dataDir, adapterRoot: profile.adapterRoot, activate: active?.root === profile.adapterRoot, expectedPending: profile.id });
-      return;
+      uninstallRuntime(value, { dataDir });
+      console.log("Provider disabled."); return;
     }
     throw new Error("PROVIDER_COMMAND_INVALID");
   }
@@ -295,7 +279,8 @@ export async function managementMain(args, options = {}) {
     return managementMain(["update", "--from", "office-partner@" + action], options);
   }
   const controls = options.lifecycle ?? await lifecycle(dataDir);
-  const report = options.report ?? (phase => console.log(`Deployment: ${phase}`));
+  const startedAt = Date.now();
+  const report = options.report ?? (phase => console.log(`Deployment: ${phase} (${Math.round((Date.now() - startedAt) / 1000)}s)`));
   if (command === "repair") {
     if (!active) throw new Error("INSTALLATION_NOT_INITIALIZED");
     try { verifyRelease(active, true); }
@@ -309,10 +294,7 @@ export async function managementMain(args, options = {}) {
       try {
         await controls.drain(); stopped = true;
         await controls.stop();
-        // Saved native conversations and cached rollbacks can still need inactive profiles.
-        for (const profile of Object.values(store.readState(dataDir).profiles)) {
-          if (profile.mode === "managed") await repairRuntime(profile.adapterRoot, profile.provider, { dataDir, profileId: profile.id });
-        }
+        for (const provider of Object.keys(store.readState(dataDir).active)) await repairRuntime(active.root, provider, { dataDir });
         await controls.start(active); started = true;
       } finally {
         try { if (stopped && !started) await controls.start(active); }
@@ -332,7 +314,7 @@ export async function managementMain(args, options = {}) {
     }
     if (/\.tgz$/i.test(spec)) spec = path.resolve(spec);
     installRecovery(root, dataDir);
-    const updated = await updateRelease(root, spec, { dataDir, ...controls, report, ...options.deploy }); console.log("Release and selected provider runtimes updated together."); return updated;
+    const updated = await updateRelease(root, spec, { dataDir, ...controls, report, notice: message => console.log(message), ...options.deploy }); console.log("Release and selected provider runtimes updated together."); return updated;
   }
   throw new Error("MANAGEMENT_COMMAND_INVALID");
 }

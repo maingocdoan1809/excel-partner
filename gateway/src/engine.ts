@@ -1,7 +1,7 @@
-import { McpServers } from "../../runtime/src/mcp-servers.js";
-import { discoverMcpCatalog, invokeRegisteredMcpTool, type ExternalMcpCatalog } from "../../runtime/src/mcp-catalog.js";
-import { inferOfficeHost } from "../../runtime/src/catalog.js";
-import { toolResultToMcp } from "../../runtime/src/results.js";
+import { McpServers } from "../../shared/src/mcp-servers.js";
+import { discoverMcpCatalog, invokeRegisteredMcpTool, type ExternalMcpCatalog } from "../../shared/src/mcp-catalog.js";
+import { inferOfficeHost } from "../../shared/src/catalog.js";
+import { toolResultToMcp } from "../../shared/src/results.js";
 import { isHostId } from "../../protocol/src/index.js";
 import { clientToolResult, CONVERSION_ERROR } from "./tool-result.js";
 import { gatewayToolInstructions } from "./tool-instructions.js";
@@ -10,7 +10,7 @@ import { conversationKey, ConversationStore, type ConversationRecord } from "./c
 import { randomUUID, createHash } from "node:crypto";
 import { CLIENT_TOOL_CONTRACT_REVISION } from "../../providers/src/client-tools.js";
 import type { ProviderRegistry } from "../../providers/src/registry.js";
-import { ProviderSessionManager, type ProviderSessionState } from "../../providers/src/session-manager.js";
+import { ProviderSessionManager, type ProviderSessionState } from "../../shared/src/session-manager.js";
 import type { TokenUsage } from "../../protocol/src/index.js";
 import { ApiError, stable, transcriptPrompt, turnImages, type ApiMessage, type ChatMessage, type ClientTool, type ContentBlock, type MessagesRequest } from "./protocol.js";
 import type { GatewayConfig, Route } from "./config.js";
@@ -130,7 +130,7 @@ export class GatewayEngine {
   private turnContent(request: MessagesRequest, route: Route, messages: ChatMessage[]) {
     const clientSystem = typeof request.system === "string" ? request.system : (request.system ?? []).filter(b => b.type === "text").map(b => String(b.text ?? "")).join("\n");
     const officeJs = this.clientTools(request).some(tool => tool.name === "execute_office_js");
-    const system = [clientSystem, `<gateway_tool_contract>\n${gatewayToolInstructions(route.provider, officeJs, this.officeHost(request))}\n</gateway_tool_contract>`].filter(Boolean).join("\n\n");
+    const system = [clientSystem, `<gateway_tool_contract>\n${gatewayToolInstructions(this.registry.require(route.provider).clientToolNotes, officeJs, this.officeHost(request))}\n</gateway_tool_contract>`].filter(Boolean).join("\n\n");
     const prompt = transcriptPrompt({ ...request, messages });
     if (system.length + prompt.length > this.config.maxPromptChars) throw new ApiError(413, "invalid_request_error", "Conversation text exceeds the gateway prompt limit. Compact the conversation or start a new chat; no provider turn was sent.");
     return { system, prompt };
@@ -366,7 +366,7 @@ export class GatewayEngine {
       onDiagnostic: event => this.trace(job, "provider_status", { statusPhase: event.phase, attempt: event.attempt, status: event.status, errorType: event.errorType, nextRetryAt: event.nextRetryAt }),
       requestUserInput: async () => ({ cancelled: true, answers: {} }), authorizeTool: async () => false,
       mcp: { bridgeUrl: this.relay.url, sessionId: job.id, token: this.relay.token, command: process.execPath, args: [this.relay.entry], toolNames: names,
-        env: { ...(this.officeHost(job.request) ? { AGENT_GATEWAY_OFFICE_HOST: this.officeHost(job.request)! } : {}), AGENT_GATEWAY_RELAY_URL: this.relay.url, AGENT_GATEWAY_RELAY_TOKEN: this.relay.token, AGENT_GATEWAY_RELAY_SESSION: job.id, AGENT_GATEWAY_PROVIDER: job.route.provider,
+        env: { ...(this.officeHost(job.request) ? { AGENT_GATEWAY_OFFICE_HOST: this.officeHost(job.request)! } : {}), AGENT_GATEWAY_RELAY_URL: this.relay.url, AGENT_GATEWAY_RELAY_TOKEN: this.relay.token, AGENT_GATEWAY_RELAY_SESSION: job.id, ...(this.registry.require(job.route.provider).clientToolNotes ? { AGENT_GATEWAY_TOOL_NOTES: this.registry.require(job.route.provider).clientToolNotes! } : {}),
           ...(names.includes("execute_office_js") ? { AGENT_GATEWAY_OFFICE_JS: "1" } : {}),
           ...(this.relay.ca ? { NODE_EXTRA_CA_CERTS: this.relay.ca } : {}) } } }; });
     if (job.disposed) return;

@@ -2,7 +2,7 @@ import { z } from "zod";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { ProviderIdSchema } from "../../protocol/src/index.js";
+import { DEFAULT_PROVIDER, ProviderIdSchema } from "../../protocol/src/index.js";
 import { ApiError } from "./protocol.js";
 
 const RouteSchema = z.object({ provider: ProviderIdSchema, model: z.string().min(1).nullable().default(null), effort: z.enum(["low", "medium", "high"]).default("medium") });
@@ -13,10 +13,10 @@ export const ConfigSchema = z.object({
   enabledMcpServers: z.array(z.string().regex(/^[a-z0-9][a-z0-9_-]{0,47}$/)).max(30).default([]),
   mcpApprovalMode: z.enum(["deny", "auto"]).default("deny"),
   port: z.number().int().min(1).max(65535).default(8766),
-  defaultRoute: RouteSchema.default({ provider: "copilot", model: null, effort: "medium" }),
+  defaultRoute: RouteSchema.default({ provider: DEFAULT_PROVIDER, model: null, effort: "medium" }),
   aliases: z.record(RouteSchema).default({}),
   modelNames: z.record(z.string().trim().min(1).max(180)).default({}),
-  enabledProviders: z.array(ProviderIdSchema).min(1).default(["copilot"]),
+  enabledProviders: z.array(ProviderIdSchema).min(1).default([DEFAULT_PROVIDER]),
   allowedOrigins: z.array(z.string().url()).default(["https://pivot.claude.ai"]),
   requestTimeoutMs: z.number().int().min(1000).max(30 * 60_000).default(180_000),
   continuationTimeoutMs: z.number().int().min(1000).max(60 * 60_000).default(600_000),

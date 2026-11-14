@@ -1,13 +1,13 @@
 import type http from "node:http";
 import { AttachmentError, MAX_ATTACHMENT_BYTES } from "../attachments.js";
 import { connectedSession, decodedHeader, readBinaryBody, readBody, sendJson } from "../http-util.js";
-import type { SessionManager } from "../session-manager.js";
+import type { WorkbookSessions } from "../workbook-sessions.js";
 import { MAX_SKILL_UPLOAD_BYTES, SkillEditConflict, type UserSkills } from "../skill-upload.js";
 import { SkillError, type SkillStore } from "../skills.js";
 import { PromptSettingsConflict, PromptSettingsError, type SystemPromptStore } from "../system-prompt.js";
 
 export interface SkillRouteDeps {
-  sessions: SessionManager;
+  sessions: WorkbookSessions;
   skills: SkillStore;
   userSkills: UserSkills;
   systemPrompt: SystemPromptStore;
@@ -105,13 +105,16 @@ export class SkillRoutes {
   }
 
   async systemPrompt(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
-    if (!connectedSession(this.deps.sessions, req)) return sendJson(res, 401, { error: "unauthorized" });
+    const session = connectedSession(this.deps.sessions, req);
+    if (!session) return sendJson(res, 401, { error: "unauthorized" });
+    // Each Office application keeps its own instructions, so the pane in Word never reads or changes the ones Excel uses.
+    const store = this.deps.systemPrompt.forHost(session.host);
     try {
-      if (req.method === "GET") return sendJson(res, 200, this.deps.systemPrompt.read());
+      if (req.method === "GET") return sendJson(res, 200, store.read());
       if (req.method !== "PUT") return sendJson(res, 405, { error: "method_not_allowed" });
       const body = JSON.parse(await readBody(req)) as { content?: unknown; revision?: unknown };
       if ((typeof body.content !== "string" && body.content !== null) || typeof body.revision !== "string") throw new PromptSettingsError("Specify prompt content and revision.");
-      return sendJson(res, 200, this.deps.systemPrompt.update(body.content, body.revision));
+      return sendJson(res, 200, store.update(body.content, body.revision));
     } catch (error) {
       if (error instanceof PromptSettingsConflict) return sendJson(res, 409, { error: error.message });
       if (error instanceof PromptSettingsError || error instanceof SyntaxError) return sendJson(res, 400, { error: error.message });

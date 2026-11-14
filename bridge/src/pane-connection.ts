@@ -4,15 +4,15 @@ import path from "node:path";
 import type { Duplex } from "node:stream";
 import { WebSocketServer, type RawData, type WebSocket } from "ws";
 import { HostIdSchema, PROTOCOL_VERSION, WorkbookInfoMessageSchema, type ClientMessage, type ServerMessage } from "../../protocol/src/index.js";
-import type { McpServers } from "../../runtime/src/mcp-servers.js";
-import type { OfficeRuntime } from "../../runtime/src/office-runtime.js";
+import type { McpServers } from "../../shared/src/mcp-servers.js";
+import type { OfficeRuntime } from "./office-runtime.js";
 import { attachmentPath } from "./attachments.js";
 import type { Delegations } from "./delegations.js";
 import type { Logger } from "./logger.js";
 import type { ProviderLoginManager } from "./provider-login.js";
 import type { ReferenceFiles } from "./reference-files.js";
 import { normalizePromptSelection } from "./selection.js";
-import type { SessionManager } from "./session-manager.js";
+import type { WorkbookSessions } from "./workbook-sessions.js";
 import type { WorkbookSession } from "./session.js";
 import { type SkillStore, expandSkillPrompt } from "./skills.js";
 import type { TurnRunner } from "./turns.js";
@@ -24,7 +24,7 @@ interface SocketState {
 }
 
 export interface PaneSocketDeps {
-  sessions: SessionManager;
+  sessions: WorkbookSessions;
   logger: Logger;
   turns: TurnRunner;
   delegations: Delegations;

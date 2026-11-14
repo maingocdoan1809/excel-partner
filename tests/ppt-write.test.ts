@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { computeAlignment } from "../addin/taskpane/executor/powerpoint/shapes.js";
+import { computeAlignment } from "../frontend/taskpane/executor/powerpoint/shapes.js";
 import { call, fails, ok, useFakeDeck } from "./support/ppt-fixture.js";
-import { executeWithPermission } from "../addin/taskpane/permissions.js";
+import { executeWithPermission } from "../frontend/taskpane/permissions.js";
 
 const fx = useFakeDeck();
 const shapeOf = (slideId: string, shapeId: string) => fx().deck.slideById(slideId).shapes.find((s) => s.id === shapeId)!;

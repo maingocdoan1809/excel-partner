@@ -2,12 +2,12 @@ import type http from "node:http";
 import { z } from "zod";
 import { HistorySaveSchema, StoredSessionSchema, type StoredSession } from "../../../protocol/src/history.js";
 import { HistoryStore, HistoryError } from "../history-store.js";
-import type { SessionManager } from "../session-manager.js";
+import type { WorkbookSessions } from "../workbook-sessions.js";
 import type { Logger } from "../logger.js";
 import { connectedSession, readBody, sendJson } from "../http-util.js";
 export class HistoryRoutes {
   private store?: HistoryStore;
-  constructor(private readonly sessions: SessionManager, private readonly file: string, private readonly logger?: Logger) {}
+  constructor(private readonly sessions: WorkbookSessions, private readonly file: string, private readonly logger?: Logger) {}
   close() { this.store?.close(); }
   async handle(req: http.IncomingMessage, res: http.ServerResponse, url: URL) {
     const session = connectedSession(this.sessions, req);

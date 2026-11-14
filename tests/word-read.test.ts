@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { WordSelectionSnapshotSchema } from "../protocol/src/index.js";
-import { executeWordTool } from "../addin/taskpane/executor/word/index.js";
-import { getWordSelection, getWordSelectionLabel, readWordDocumentName } from "../addin/taskpane/executor/word/selection.js";
+import { executeWordTool } from "../frontend/taskpane/executor/word/index.js";
+import { getWordSelection, getWordSelectionLabel, readWordDocumentName } from "../frontend/taskpane/executor/word/selection.js";
 import { FakeWordDoc, installWordFake, uninstallWordFake } from "./support/fake-word.js";
 
 let doc: FakeWordDoc;

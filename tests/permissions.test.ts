@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { authorizeSkillScript, executeWithPermission } from "../addin/taskpane/permissions.js";
+import { authorizeSkillScript, executeWithPermission } from "../frontend/taskpane/permissions.js";
 import { parseToolInput } from "../protocol/src/index.js";
 import type { ToolResult } from "../protocol/src/index.js";
 

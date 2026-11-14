@@ -23,7 +23,7 @@ function world(name = "office-partner") {
   };
   put("package.json", JSON.stringify({ name, version: "0.1.22" }));
   put("node_modules/@github/copilot-sdk/package.json", JSON.stringify({ version: "1.0.18", copilotCliVersion: "1.0.94", engines: { node: "^20.19.0 || >=22.12.0" } }));
-  put("dist/providers/src/copilot.js", 'static MIN_VERSION = "1.0.95";');
+  put("bin/runtime-manifest.json", JSON.stringify({ providers: { copilot: { minVersion: "1.0.95" } } }));
   put("dist/bridge/src/index.js", ""); put("gateway/dist/server.mjs", "");
   const exe = put(`private account/copilot${process.platform === "win32" ? ".exe" : ""}`, "mock executable"); fs.chmodSync(exe, 0o700);
   const env = { PATH: "", LOCALAPPDATA: root, AGENT_GATEWAY_HOME: path.join(root, "gateway-data"), COPILOT_BIN: exe, GITHUB_TOKEN: "sensitive-fixture-token" };

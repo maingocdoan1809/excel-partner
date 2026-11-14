@@ -4,7 +4,7 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-const OUT = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "addin", "assets");
+const OUT = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "frontend", "assets");
 const source = readFileSync(path.join(OUT, "excel-partner-mark.png"));
 const width = source.readUInt32BE(16);
 const height = source.readUInt32BE(20);

@@ -3,10 +3,10 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { isOpencodeV2 } from "../providers/src/opencode.js";
+import { isOpencodeV2 } from "../providers/src/opencode/adapter.js";
 import { JsonRpcPeer } from "../providers/src/jsonrpc.js";
-import { reserveOpencodePort } from "../providers/src/opencode-questions.js";
-import { resolveCopilotPath } from "../providers/src/copilot-native.js";
+import { reserveOpencodePort } from "../providers/src/opencode/questions.js";
+import { resolveCopilotPath } from "../providers/src/copilot/native.js";
 
 function installed(command: string) {
   try { execFileSync(command, ["--version"], { stdio: "ignore", timeout: 5000 }); return true; }

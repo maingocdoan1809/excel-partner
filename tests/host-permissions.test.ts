@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { executeWithPermission } from "../addin/taskpane/permissions.js";
-import { executeWordTool } from "../addin/taskpane/executor/word/index.js";
+import { executeWithPermission } from "../frontend/taskpane/permissions.js";
+import { executeWordTool } from "../frontend/taskpane/executor/word/index.js";
 import { FakeWordDoc, installWordFake, uninstallWordFake } from "./support/fake-word.js";
 import { WORD_WRITE_TOOLS, PPT_WRITE_TOOLS } from "../protocol/src/index.js";
 

@@ -3,10 +3,10 @@ import { GO_TO_REQUEST, UNNAMED_WORKBOOK, sameWorkbookName } from "../../../prot
 import { AttachmentError, MAX_ATTACHMENT_BYTES, attachmentPath, createAttachment } from "../attachments.js";
 import { connectedSession, decodedHeader, readBinaryBody, readBody, sendJson } from "../http-util.js";
 import type { Logger } from "../logger.js";
-import type { SessionManager } from "../session-manager.js";
+import type { WorkbookSessions } from "../workbook-sessions.js";
 
 export interface FileRouteDeps {
-  sessions: SessionManager;
+  sessions: WorkbookSessions;
   logger: Logger;
   /** Brings a workbook's window to the front; Excel on Windows only (replaced in tests). */
   activateWorkbook: (workbookName: string) => Promise<unknown>;

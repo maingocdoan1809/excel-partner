@@ -2,7 +2,7 @@ import {afterEach,expect,it} from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import {McpServers} from '../runtime/src/mcp-servers.js';
+import {McpServers} from '../shared/src/mcp-servers.js';
 const dirs: string[]=[];const managers:McpServers[]=[];
 function setup(){const dir=fs.mkdtempSync(path.join(os.tmpdir(),'mcp-test-'));dirs.push(dir);const file=path.join(dir,'servers.json');const manager=new McpServers(file);managers.push(manager);return {manager,file};}
 const config={id:'fixture',name:'Fixture',transport:'stdio' as const,target:process.execPath,args:[path.resolve('tests/support/mcp-fixture.mjs')]};

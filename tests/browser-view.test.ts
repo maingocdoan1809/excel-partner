@@ -1,14 +1,14 @@
 // @vitest-environment jsdom
 import fs from "node:fs";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { BrowserView, MAX_BROWSER_FRAMES } from "../addin/taskpane/ui/browser-view.js";
+import { BrowserView, MAX_BROWSER_FRAMES } from "../frontend/taskpane/ui/browser-view.js";
 import type { BrowserFrameMessage } from "../protocol/src/index.js";
 
 const frame = (n: number, extra: Partial<BrowserFrameMessage> = {}): BrowserFrameMessage =>
   ({ type: "browser_frame", requestId: "r1", seq: n, label: `Step ${n}`, mimeType: "image/jpeg", data: `IMG${n}`, url: "a.test/web", ...extra });
 
 function setup() {
-  document.body.innerHTML = fs.readFileSync("addin/taskpane/index.html", "utf8").match(/<body[^>]*>([\s\S]*)<\/body>/)![1]!;
+  document.body.innerHTML = fs.readFileSync("frontend/taskpane/index.html", "utf8").match(/<body[^>]*>([\s\S]*)<\/body>/)![1]!;
   const el = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
   const open = vi.fn();
   const view = new BrowserView({
@@ -142,7 +142,7 @@ describe("the assistant's browser view", () => {
   });
 
   it("is part of the page the task pane loads", () => {
-    const html = fs.readFileSync("addin/taskpane/index.html", "utf8");
+    const html = fs.readFileSync("frontend/taskpane/index.html", "utf8");
     for (const id of ["browser-dock", "browser-dock-image", "panel-browser", "browser-panel-image", "browser-prev", "browser-next"]) expect(html).toContain(`id="${id}"`);
     expect(html).toContain('data-close="browser"');
   });

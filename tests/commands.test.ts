@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { cachedCommands, normalizeCommands } from "../providers/src/commands.js";
-import { CODEX_COMMANDS } from "../providers/src/codex-commands.js";
+import { CODEX_COMMANDS } from "../providers/src/codex/commands.js";
 import { parseNativeCommand } from "../protocol/src/commands.js";
 
 describe("provider command catalogs", () => {

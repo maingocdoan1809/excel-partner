@@ -1,8 +1,8 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { executeTool } from "../addin/taskpane/executor/index.js";
-import { buildFilterCriteria, filterCriterion, relativeColumn } from "../addin/taskpane/executor/data.js";
-import { buildCellValueRule, buildValidationRule, ruleFormula } from "../addin/taskpane/executor/rules.js";
-import { describeBorder, groupByRectangles } from "../addin/taskpane/executor/styles.js";
+import { executeTool } from "../frontend/taskpane/executor/index.js";
+import { buildFilterCriteria, filterCriterion, relativeColumn } from "../frontend/taskpane/executor/data.js";
+import { buildCellValueRule, buildValidationRule, ruleFormula } from "../frontend/taskpane/executor/rules.js";
+import { describeBorder, groupByRectangles } from "../frontend/taskpane/executor/styles.js";
 import { parseToolInput } from "../protocol/src/index.js";
 import { MockSheet, MockWorkbook, installOfficeMock } from "./support/office-mock.js";
 

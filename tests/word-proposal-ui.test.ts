@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it } from "vitest";
-import { showProposalReview, diffParts } from "../addin/taskpane/ui/proposal.js";
-import type { ProposalRequest } from "../addin/taskpane/executor/word/index.js";
+import { showProposalReview, diffParts } from "../frontend/taskpane/ui/proposal.js";
+import type { ProposalRequest } from "../frontend/taskpane/executor/word/index.js";
 
 afterEach(() => document.body.replaceChildren());
 

@@ -1,6 +1,6 @@
 import http from "node:http";
 import { expect, it } from "vitest";
-import { watchOpencodeStatus } from "../providers/src/opencode-status.js";
+import { watchOpencodeStatus } from "../providers/src/opencode/status.js";
 
 it("O02 forwards only this session's safe retry state, then clears it", async () => {
   const controller = new AbortController();

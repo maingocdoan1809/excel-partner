@@ -15,7 +15,7 @@ const runtimeCheck = JSON.parse(fs.readFileSync(path.join(root, 'output/playwrig
 const dataDir = path.resolve(root, runtimeCheck.runtimeData);
 if (!store.inside(path.join(root, 'output/playwright/runtime-live'), dataDir)) throw new Error('Invalid opt-in runtime fixture directory.');
 const profile = store.selectProfile(dataDir, 'copilot');
-if (profile?.mode !== 'managed') throw new Error('Run the opt-in managed Copilot installation check first.');
+if (!profile) throw new Error('Run the opt-in managed Copilot installation check first.');
 process.env.OFFICE_PARTNER_DATA_DIR = dataDir;
 process.env.BRIDGE_CONFIG = path.join(dataDir, 'config.json');
 // This directory belongs to this opt-in fixture; keep reruns independent of earlier MCP selections.

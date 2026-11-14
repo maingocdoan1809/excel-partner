@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { ProviderSessionManager, type ProviderSessionSettings } from "../providers/src/session-manager.js";
+import { ProviderSessionManager, type ProviderSessionSettings } from "../shared/src/session-manager.js";
 import { WorkbookSession } from "../bridge/src/session.js";
 import { ProviderRegistry } from "../providers/src/registry.js";
 import { MockAdapter } from "../providers/src/mock.js";
@@ -170,5 +170,50 @@ describe.each(["claude", "copilot", "codex", "opencode"] as const)("%s shared se
     expect(h.session.providerNativeSessionId).toBe("native");
     await h.manager.ensure(h.session, { ...h.settings, resumeSessionId: "native" }, h.context);
     expect(h.adapter.starts[1]?.resumeSessionId).toBe("native");
+  });
+});
+
+describe("a model or effort the CLI can change in the middle of a session", () => {
+  class LiveAdapter extends RuntimeAdapter {
+    override readonly capabilities = { ...MockAdapter.capabilities, liveModel: true, liveEffort: true };
+  }
+  class EffortOnlyAdapter extends RuntimeAdapter {
+    override readonly capabilities = { ...MockAdapter.capabilities, liveModel: false, liveEffort: true };
+  }
+  function live(kind: typeof RuntimeAdapter) {
+    const adapter = new kind({ id: "copilot" });
+    const manager = new ProviderSessionManager(new ProviderRegistry().register(adapter), vi.fn(async () => {}), { debug() {}, warn() {} });
+    const session = new WorkbookSession("workbook");
+    session.provider = "copilot";
+    const signal = new AbortController().signal;
+    const settings: ProviderSessionSettings = { model: "a", effort: "medium", capabilities: { webSearch: false, playwright: false }, chatSessionId: "chat", systemPromptRevision: "revision" };
+    const context = (): StartSessionContext => ({ workbookConnectionId: session.workbookConnectionId, sessionId: session.id, signal,
+      mcp: { command: "node", args: [], bridgeUrl: "", sessionId: session.id, token: "", env: {} } });
+    return { adapter, manager, session, settings, context };
+  }
+
+  it("is handed over with the next turn: the CLI is not restarted", async () => {
+    const h = live(LiveAdapter);
+    await h.manager.ensure(h.session, h.settings, h.context);
+    await h.manager.ensure(h.session, { ...h.settings, model: "b", effort: "high" }, h.context);
+    expect(h.adapter.starts).toHaveLength(1);
+    expect(h.adapter.closes).toEqual([]);
+    expect(h.session).toMatchObject({ providerModel: "b", providerEffort: "high" });
+  });
+
+  it("still restarts for what only a restart can change, such as the instructions", async () => {
+    const h = live(LiveAdapter);
+    await h.manager.ensure(h.session, h.settings, h.context);
+    await h.manager.ensure(h.session, { ...h.settings, systemPromptRevision: "other" }, h.context);
+    expect(h.adapter.starts).toHaveLength(2);
+  });
+
+  it("restarts for a model change when the CLI can only change effort live", async () => {
+    const h = live(EffortOnlyAdapter);
+    await h.manager.ensure(h.session, h.settings, h.context);
+    await h.manager.ensure(h.session, { ...h.settings, effort: "high" }, h.context);
+    expect(h.adapter.starts).toHaveLength(1);
+    await h.manager.ensure(h.session, { ...h.settings, effort: "high", model: "b" }, h.context);
+    expect(h.adapter.starts).toHaveLength(2);
   });
 });
