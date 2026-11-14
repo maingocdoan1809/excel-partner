@@ -70,7 +70,26 @@ Settings > App & storage > Chat history provides:
 - Recovery of unsaved chats as separate chats; the button appears only while
   chats are waiting to be saved. Saving is retried automatically.
 - Explicit age-based cleanup scoped to this Office application, protecting
-  current connected and pending chats. No automatic retention policy runs.
+  current connected and pending chats.
+
+An administrator can set `historyRetentionDays` in the machine policy
+(`%ProgramData%\Office Partner\policy.json`). The bridge then deletes chats of
+every Office application not updated for that many days, at startup and once a
+day. Without it, nothing is deleted automatically.
+
+## Backups and restore
+
+At startup and once a day the bridge copies the database to `history.db.bak`
+in the same folder, keeping the previous copy as `history.db.bak.1`. If History
+reports that the database is damaged, it is left untouched. To restore: run
+`office-partner stop`, rename the damaged `history.db` (keep it for diagnosis),
+delete `history.db-wal` and `history.db-shm`, copy `history.db.bak` to
+`history.db`, then start Office Partner again. Chats saved after the backup are
+lost unless they are still pending in an open pane.
+
+While the bridge restarts (for example while switching releases), History
+answers `HISTORY_RESTARTING` and the pane waits and retries without reporting
+an error.
 
 SQLite may retain freed pages for reuse after cleanup; deleting chat rows does
 not guarantee immediate reduction of the database file's allocated size.

@@ -17,13 +17,38 @@ const openNative: OpenDatabase = file => {
   return new Driver(file, { timeout: 5000 });
 };
 const driverFailure = (error: unknown) => /better_sqlite3\.node|bindings file|ERR_DLOPEN_FAILED|NODE_MODULE_VERSION|Cannot find module 'better-sqlite3'/i.test(String((error as { code?: string })?.code ?? "") + String((error as Error)?.message ?? error));
+const HISTORY_HOSTS: SessionHost[] = ["excel", "word", "powerpoint"];
+const DAY_MS = 24 * 60 * 60_000;
+
+/**
+ * Daily housekeeping, run by the bridge at startup and then once a day: applies the admin retention policy (`days`; 0 or
+ * undefined keeps everything) and refreshes the backup when the last one is a day old. Never creates a database.
+ */
+export async function maintainHistory(file: string, days: number | undefined, now = Date.now()): Promise<{ removed: number; backedUp: boolean }> {
+  if (!fs.existsSync(file)) return { removed: 0, backedUp: false };
+  const store = new HistoryStore(file);
+  try {
+    const removed = store.pruneOlderThan(days ?? 0, now);
+    let last = 0;
+    try { last = fs.statSync(file + ".bak").mtimeMs; } catch { /* no backup yet */ }
+    const due = now - last >= DAY_MS || removed > 0;
+    if (due) await store.backup();
+    return { removed, backedUp: due };
+  } finally { store.close(); }
+}
+
 /** One SQLite owner per bridge; transactions/CAS also protect against another process. */
 export class HistoryStore {
-  private db: Database.Database;
+  private readonly connection: Database.Database;
   private closed = false;
+  /** Every use goes through here, so a request that outlives close() (a release switch) gets a typed error, not a driver one. */
+  private get db(): Database.Database {
+    if (this.closed) throw new HistoryError("HISTORY_CLOSED");
+    return this.connection;
+  }
   constructor(readonly file: string, open: OpenDatabase = openNative) {
     fs.mkdirSync(path.dirname(file), { recursive: true });
-    try { this.db = open(file); } catch (error) { throw driverFailure(error) ? new HistoryError("HISTORY_DRIVER_UNAVAILABLE") : error; }
+    try { this.connection = open(file); } catch (error) { throw driverFailure(error) ? new HistoryError("HISTORY_DRIVER_UNAVAILABLE") : error; }
     try {
       const version = this.db.pragma("user_version", { simple: true }) as number;
       if (version > 1) throw new HistoryError("HISTORY_SCHEMA_NEWER");
@@ -35,12 +60,15 @@ export class HistoryStore {
           CREATE INDEX IF NOT EXISTS history_order ON history_chats(host,deleted,updated DESC,id);
           CREATE TABLE IF NOT EXISTS history_entries(host TEXT NOT NULL,chat TEXT NOT NULL,kind TEXT NOT NULL,ordinal INTEGER NOT NULL,data TEXT NOT NULL,PRIMARY KEY(host,chat,kind,ordinal),FOREIGN KEY(host,chat) REFERENCES history_chats(host,id));
           PRAGMA user_version = 1;`);
-        for (const host of ["excel", "word", "powerpoint"]) this.db.prepare("INSERT OR IGNORE INTO history_scope(host) VALUES(?)").run(host);
+        for (const host of HISTORY_HOSTS) this.db.prepare("INSERT OR IGNORE INTO history_scope(host) VALUES(?)").run(host);
       })();
       try { fs.chmodSync(file, 0o600); } catch { /* Windows ACLs apply. */ }
-    } catch (error) { this.db.close(); throw error; }
+    } catch (error) {
+      this.connection.close();
+      throw /SQLITE_(?:CORRUPT|NOTADB)/.test(String((error as { code?: string })?.code)) ? new HistoryError("HISTORY_CORRUPT") : error;
+    }
   }
-  close() { if (!this.closed) { this.closed = true; this.db.close(); } }
+  close() { if (!this.closed) { this.closed = true; this.connection.close(); } }
   private generation(host: SessionHost) { return (this.db.prepare("SELECT generation FROM history_scope WHERE host=?").get(host) as { generation: number }).generation; }
   private row(host: SessionHost, id: string) { return this.db.prepare("SELECT * FROM history_chats WHERE host=? AND id=?").get(host, id) as Row | undefined; }
   private entries(host: SessionHost, id: string, kind: string, offset = 0, limit = -1) {
@@ -95,7 +123,8 @@ export class HistoryStore {
   }
   delete(host: SessionHost, id: string) {
     this.db.transaction(() => {
-      this.db.prepare("INSERT INTO history_chats VALUES(?,?,'{}',0,1,1,'','') ON CONFLICT(host,id) DO UPDATE SET deleted=1,revision=revision+1").run(host, id);
+      // The tombstone keeps only what stops the chat from coming back, not its title.
+      this.db.prepare("INSERT INTO history_chats VALUES(?,?,'{}',0,1,1,'','') ON CONFLICT(host,id) DO UPDATE SET deleted=1,revision=revision+1,metadata='{}'").run(host, id);
       this.db.prepare("DELETE FROM history_entries WHERE host=? AND chat=?").run(host, id);
     })();
   }
@@ -116,6 +145,17 @@ export class HistoryStore {
   export(host: SessionHost) { return this.db.transaction(() => (this.db.prepare("SELECT id FROM history_chats WHERE host=? AND deleted=0 ORDER BY updated,id").all(host) as { id: string }[]).map(row => this.get(host, row.id)!.session))(); }
   stats(host: SessionHost) { return { count: (this.db.prepare("SELECT count(*) n FROM history_chats WHERE host=? AND deleted=0").get(host) as { n: number }).n,
     bytes: [this.file, this.file + "-wal", this.file + "-shm"].reduce((sum, file) => { try { return sum + fs.statSync(file).size; } catch { return sum; } }, 0), generation: this.generation(host) }; }
+  /** Admin retention: delete every app's chats not updated for `days` days. Returns how many were deleted. */
+  pruneOlderThan(days: number, now = Date.now()) {
+    return days > 0 ? HISTORY_HOSTS.reduce((removed, host) => removed + this.cleanup(host, now - days * DAY_MS, []), 0) : 0;
+  }
+  /** Copies the database to `history.db.bak`, keeping the copy before it as `history.db.bak.1`. */
+  async backup() {
+    const latest = this.file + ".bak", temp = latest + ".tmp";
+    await this.db.backup(temp);
+    if (fs.existsSync(latest)) fs.renameSync(latest, latest + ".1");
+    fs.renameSync(temp, latest);
+  }
   cleanup(host: SessionHost, before: number, protectedIds: string[]) {
     return this.db.transaction(() => { const rows = this.db.prepare("SELECT id FROM history_chats WHERE host=? AND deleted=0 AND updated<?").all(host, before) as { id: string }[];
       const targets = rows.filter(row => !protectedIds.includes(row.id)); for (const row of targets) this.delete(host, row.id); return targets.length; })();

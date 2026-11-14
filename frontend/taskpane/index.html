@@ -4,6 +4,12 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="addin-build-id" content="__ADDIN_BUILD_ID__" />
+    <!--
+      The pane talks only to the bridge that serves it: execute_office_js code (hence 'unsafe-eval') cannot fetch, post or
+      open sockets elsewhere. Previews are srcdoc frames, which inherit this policy and narrow it with their own, so their
+      inline code and the two script CDNs they may use are allowed here too.
+    -->
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-eval' 'unsafe-inline' https://appsforoffice.microsoft.com https://cdnjs.cloudflare.com https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; frame-src 'self' blob: data:; object-src 'none'; base-uri 'self'; form-action 'self'" />
     <title>Excel Partner</title>
     <script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
     <link rel="stylesheet" href="./styles.css" />

@@ -20,6 +20,7 @@ import { answerClaudeQuestion, type RequestUserInput } from "../user-input.js";
 import { cachedCommands, normalizeCommands } from "../commands.js";
 import { discoverClaudeCommands } from "../command-discovery.js";
 import { ClaudeProcess } from "./process.js";
+import { trackProcess } from "../process-registry.js";
 import { AsyncQueue } from "../async-queue.js";
 
 interface ClaudeSession {
@@ -131,6 +132,7 @@ export class ClaudeAdapter extends BaseCliAdapter {
         "-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose",
         "--setting-sources", "project", "--tools", "", "--disable-slash-commands",
       ], { cwd: ensureWorkspaceDir(), env: this.env, windowsHide: true, stdio: ["pipe", "pipe", "ignore"] });
+      trackProcess(child);
       let done = false;
       const finish = (value: ProviderModelCatalog | null) => {
         if (done) return;

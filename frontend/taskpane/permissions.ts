@@ -46,7 +46,7 @@ export async function executeWithPermission(
     args !== null && typeof args === "object" && (args as { operation?: unknown }).operation === "delete";
   if (mode === "ask" && (ASK_BEFORE_WRITE.has(tool) || (tool === "modify_structure" && (args as { operation?: string })?.operation === "delete")) && !guardedSlideDelete) {
     const detail = tool === "execute_office_js"
-      ? "Run Office.js code? It can read, change or delete content with this task pane's access."
+      ? "Run Office.js code? It can read, change or delete anything in the whole document, and send it over the network."
       : `Allow ${tool.replace(/_/g, " ")} to change this file?`;
     if (!await ask(detail)) return { ok: false, error: { code: "cancelled", message: "The user declined this file change." } };
   }

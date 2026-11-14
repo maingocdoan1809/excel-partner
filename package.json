@@ -1,6 +1,6 @@
 {
   "name": "office-partner",
-  "version": "0.1.22",
+  "version": "0.1.23",
   "description": "Excel Partner (Office Partner): local Word, Excel and PowerPoint desktop AI add-in with Claude Code, GitHub Copilot CLI, Codex CLI and OpenCode CLI providers.",
   "type": "module",
   "license": "MIT",
@@ -18,6 +18,8 @@
   },
   "files": [
     "npm-shrinkwrap.json",
+    "THIRD_PARTY_NOTICES.md",
+    "CHANGELOG.md",
     "frontend/assets/",
     "frontend/dist/",
     "frontend/manifest.xml",
@@ -39,6 +41,9 @@
     "scripts/package-windows.ps1",
     "scripts/workspace-windows.ps1",
     "docs/history-storage.md",
+    "docs/admin-policy.md",
+    "docs/enterprise-deployment.md",
+    "docs/privacy-and-data-flow.md",
     "!**/*.map"
   ],
   "engines": {
@@ -49,8 +54,8 @@
     "build": "npm run build:server && npm run build:frontend && npm run build:gateway",
     "build:gateway": "node scripts/build-gateway.mjs",
     "build:server": "tsc -p tsconfig.json",
-    "build:frontend": "esbuild frontend/taskpane/main.ts --bundle --format=iife --target=es2020 --outfile=frontend/dist/taskpane.js",
-    "prepack": "npm run build",
+    "build:frontend": "esbuild frontend/taskpane/main.ts --bundle --format=iife --target=es2020 --legal-comments=linked --outfile=frontend/dist/taskpane.js",
+    "prepack": "npm run build && node scripts/third-party-notices.mjs",
     "clean": "rm -rf dist frontend/dist",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p frontend/tsconfig.json --noEmit",
     "test": "vitest run",
@@ -65,13 +70,14 @@
     "test:live": "vitest run tests/providers.live.test.ts"
   },
   "dependencies": {
-    "@github/copilot-sdk": "1.0.18",
+    "@github/copilot-sdk": "1.0.34",
     "@modelcontextprotocol/sdk": "^1.32.1",
     "better-sqlite3": "12.9.0",
     "cross-spawn": "^7.0.6",
     "dompurify": "^3.4.17",
     "fast-xml-parser": "^5.11.2",
     "fflate": "^0.8.3",
+    "koffi": "3.3.6",
     "marked": "^18.1.1",
     "selfsigned": "^5.5.0",
     "ws": "^8.18.0",

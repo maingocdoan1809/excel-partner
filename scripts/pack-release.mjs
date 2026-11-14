@@ -1,6 +1,6 @@
 // Builds the release tarball (add-in, bridge and gateway in one package) into ./release.
 //   npm run pack:release
-// Publish with: npm publish ./release/excel-partner-<version>.tgz   (or simply `npm publish`)
+// Publish with: npm publish ./release/office-partner-<version>.tgz   (or simply `npm publish`)
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";

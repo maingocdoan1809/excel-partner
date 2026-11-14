@@ -217,6 +217,50 @@ async function fixConnection(dataDir, options) {
     try { await input.question("\nPress Enter to close this window."); } finally { input.close(); }
   }
 }
+const PRODUCT = "office-partner";
+const VERSION = /^\d+\.\d+\.\d+(?:-[\w.-]+)?$/;
+
+/** `npm view <spec> <field> --json`: npm's own registry, proxy, certificate and auth settings apply (Node's fetch ignores them). */
+async function npmView(spec, field) {
+  const { npmEntrypoint } = await import("./runtime-manager.mjs");
+  const { runCommand } = await import("./doctor-probes.mjs");
+  const result = await runCommand(process.execPath, [npmEntrypoint(), "view", spec, field, "--json"], { timeoutMs: 30_000 });
+  if (result.code !== 0) throw new Error("RELEASE_LOOKUP_FAILED");
+  const text = result.stdout.trim();
+  return text ? JSON.parse(text) : undefined;
+}
+
+export function compareVersions(a, b) {
+  const parse = version => { const [core, pre] = version.split("-", 2); return { parts: core.split(".").map(Number), pre }; };
+  const x = parse(a), y = parse(b);
+  for (let i = 0; i < 3; i++) if (x.parts[i] !== y.parts[i]) return x.parts[i] > y.parts[i] ? 1 : -1;
+  if (x.pre === y.pre) return 0;
+  return x.pre === undefined ? 1 : y.pre === undefined ? -1 : x.pre > y.pre ? 1 : -1;
+}
+
+/**
+ * What `update` installs, under the admin policy: updates can be turned off or pinned to one version, and the registry
+ * chosen. Otherwise "latest" from npm; never an older version (unless asked, as rollback does) or a deprecated one.
+ */
+export async function updateTarget(root, spec, { allowDowngrade = false, view = npmView, policy = store.readPolicy() } = {}) {
+  if (!policy.autoUpdate) throw new Error(policy.error ? "UPDATE_DISABLED_POLICY_INVALID" : "UPDATE_DISABLED_BY_POLICY");
+  if (policy.registry) process.env.npm_config_registry = policy.registry; // npm view, pack and install all read it
+  const latest = !spec || spec === PRODUCT + "@latest";
+  if (policy.pinVersion) {
+    if (!latest && spec !== PRODUCT + "@" + policy.pinVersion) throw new Error("UPDATE_PINNED");
+    return PRODUCT + "@" + policy.pinVersion; // the administrator's choice wins, including going back
+  }
+  if (/\.tgz$/i.test(spec ?? "")) return spec; // a file the user picked on purpose
+  if (latest) spec = PRODUCT + "@" + await view(PRODUCT + "@latest", "version");
+  const target = spec.startsWith(PRODUCT + "@") ? spec.slice(PRODUCT.length + 1) : null;
+  if (!target || !VERSION.test(target)) throw new Error("RELEASE_VERSION_INVALID");
+  const current = store.readJson(path.join(root, "package.json")).version;
+  if (VERSION.test(current ?? "") && compareVersions(target, current) < 0 && !allowDowngrade) throw new Error("UPDATE_DOWNGRADE_REFUSED");
+  // A version picked by hand is the user's choice; "latest" that the publisher deprecated (a withdrawn release) is not taken.
+  if (latest && await view(spec, "deprecated")) throw new Error("UPDATE_VERSION_DEPRECATED");
+  return spec;
+}
+
 export async function managementMain(args, options = {}) {
   const dataDir = options.dataDir ?? store.home();
   const [command = "versions", action, value] = args;
@@ -276,7 +320,7 @@ export async function managementMain(args, options = {}) {
   if (command === "rollback") {
     // Older releases are not kept on disk: going back means installing that version from npm.
     if (!/^\d+\.\d+\.\d+(?:-[\w.-]+)?$/.test(action ?? "")) throw new Error("USE_ROLLBACK_WITH_A_VERSION");
-    return managementMain(["update", "--from", "office-partner@" + action], options);
+    return managementMain(["update", "--from", "office-partner@" + action, "--allow-downgrade"], options);
   }
   const controls = options.lifecycle ?? await lifecycle(dataDir);
   const startedAt = Date.now();
@@ -305,13 +349,7 @@ export async function managementMain(args, options = {}) {
   }
   if (command === "update") {
     let spec = action === "--from" ? value : undefined;
-    if (!spec || spec === "office-partner@latest") {
-      const response = await fetch("https://registry.npmjs.org/office-partner/latest", { signal: AbortSignal.timeout(15000) });
-      if (!response.ok) throw new Error("RELEASE_LOOKUP_FAILED");
-      const latest = (await response.json()).version;
-      if (!/^\d+\.\d+\.\d+(?:-[\w.-]+)?$/.test(latest)) throw new Error("RELEASE_VERSION_INVALID");
-      spec = "office-partner@" + latest;
-    }
+    spec = await updateTarget(root, spec, { allowDowngrade: args.includes("--allow-downgrade"), view: options.npmView });
     if (/\.tgz$/i.test(spec)) spec = path.resolve(spec);
     installRecovery(root, dataDir);
     const updated = await updateRelease(root, spec, { dataDir, ...controls, report, notice: message => console.log(message), ...options.deploy }); console.log("Release and selected provider runtimes updated together."); return updated;

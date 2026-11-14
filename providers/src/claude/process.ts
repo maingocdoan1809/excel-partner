@@ -2,6 +2,7 @@ import type { ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { createInterface } from "node:readline";
 import spawn from "cross-spawn";
+import { trackProcess } from "../process-registry.js";
 
 interface PendingControl {
   resolve(value: unknown): void;
@@ -28,6 +29,7 @@ export class ClaudeProcess {
     this.child = spawn(options.command, options.args, {
       cwd: options.cwd, env: options.env, stdio: ["pipe", "pipe", "pipe"], windowsHide: true,
     });
+    trackProcess(this.child);
     const stdout = createInterface({ input: this.child.stdout!, crlfDelay: Infinity });
     const stderr = createInterface({ input: this.child.stderr! });
     let notified = false;

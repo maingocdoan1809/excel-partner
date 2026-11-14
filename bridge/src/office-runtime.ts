@@ -1,5 +1,6 @@
 import { invokeRegisteredMcpTool } from "../../shared/src/mcp-catalog.js";
 import type { McpServers } from "../../shared/src/mcp-servers.js";
+import { OPEN_POLICY, type AdminPolicy } from "../../protocol/src/index.js";
 import { ZodError } from "zod";
 import {
   exposedToolNamesForHost,
@@ -73,6 +74,8 @@ export interface InternalToolRequest {
  */
 export class OfficeRuntime {
   mcpServers?: McpServers;
+  /** The admin policy (see policy.ts); the tools it switches off are refused here whatever the provider asks for. */
+  policy: AdminPolicy = OPEN_POLICY;
   readonly externalTools = new ExternalTools();
   readonly crashGuard = new CrashGuard();
   constructor(
@@ -105,6 +108,8 @@ export class OfficeRuntime {
     if (!session) {
       return error("disconnected", `unknown or expired session '${request.sessionId}'`);
     }
+    const refusal = policyRefusal(this.policy, request.tool, session.externalMcpTools.has(request.tool));
+    if (refusal) return error("unsupported", refusal);
     const external = session.externalMcpTools.get(request.tool);
     if (external) {
       if (!this.mcpServers) return error("unsupported", "MCP servers are unavailable");
@@ -513,8 +518,6 @@ export class OfficeRuntime {
       tool,
       ms,
       code: result.error.code,
-      message: result.error.message.slice(0, 300),
-      detail: result.error.detail === undefined ? undefined : JSON.stringify(result.error.detail).slice(0, 300),
       args: summariseArgs(args),
     });
   }
@@ -836,12 +839,24 @@ function either(a?: AbortSignal, b?: AbortSignal): AbortSignal | undefined {
 }
 
 /** Arguments for the log: bulky payloads (a workbook's bytes) are replaced and the rest is truncated. */
-function summariseArgs(args: unknown): string {
-  try {
-    return JSON.stringify(args, (key, value) => (key === "fileBase64" ? `<${String(value).length} chars>` : value)).slice(0, 400);
-  } catch {
-    return "<unserialisable>";
-  }
+const CODE_TOOLS = new Set(["run_python", "run_skill_script"]);
+const BROWSER_TOOLS = new Set(["playwright_browser", "open_test_browser", "list_test_sessions", "save_test_script", "finish_test_run"]);
+
+/** Why the admin policy refuses a tool, or null. */
+export function policyRefusal(policy: AdminPolicy, tool: string, external: boolean): string | null {
+  if (external && !policy.allowExternalMcp) return "External MCP servers are turned off by your administrator.";
+  if (CODE_TOOLS.has(tool) && !policy.allowCodeExecution) return "Running code on this computer is turned off by your administrator.";
+  if (BROWSER_TOOLS.has(tool) && !policy.allowBrowserAutomation) return "Browser automation is turned off by your administrator.";
+  if (tool === "execute_office_js" && !policy.allowOfficeJs) return "Office.js code is turned off by your administrator.";
+  return null;
+}
+
+/** The shape of a call for the log: argument names and sizes, never values (cell contents, paths, code). */
+function summariseArgs(args: unknown): Record<string, string> | string {
+  if (!args || typeof args !== "object" || Array.isArray(args)) return typeof args;
+  const size = (value: unknown) => typeof value === "string" ? `string(${value.length})` : Array.isArray(value) ? `array(${value.length})`
+    : value && typeof value === "object" ? `object(${Object.keys(value).length})` : typeof value;
+  return Object.fromEntries(Object.entries(args).slice(0, 30).map(([key, value]) => [key, size(value)]));
 }
 
 /**

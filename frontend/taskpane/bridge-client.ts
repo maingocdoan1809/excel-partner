@@ -59,7 +59,7 @@ const FILE_KINDS: Record<string, string> = { excel: "workbook", word: "document"
 export interface BridgeClientHandlers {
   onUserInput?(request: UserInputRequest, signal: AbortSignal, requestId: string): Promise<UserInputResponse>;
   onState(state: BridgeState, detail?: string): void;
-  onHello(info: { sessionToken: string; serverTime: string; addinBuildId?: string }): void;
+  onHello(info: { sessionToken: string; serverTime: string; addinBuildId?: string; autoApproveAllowed: boolean }): void;
   onProviderStatus(message: ProviderStatusMessage): void;
   onProviderEvent(event: ProviderEvent): void;
   /** A picture of the assistant's browser; shown to the person only. */
@@ -99,6 +99,8 @@ export class BridgeClient {
   private workbookConnectionId = randomId();
   private sessionToken: string | null = null;
   private permissionMode: PermissionMode = "ask";
+  /** False when the admin policy turns Auto off: every change is then asked, whatever the picker says. */
+  private autoApproveAllowed = true;
   private readonly operations = new Set<AbortController>();
   private readonly approvals = new Set<() => void>();
   private readonly questions = new Map<string, { requestId: string; controller: AbortController }>();
@@ -428,11 +430,13 @@ export class BridgeClient {
     switch (message.type) {
       case "hello_ok":
         this.sessionToken = message.sessionToken;
+        this.autoApproveAllowed = message.policy?.allowAutoApprove !== false;
         this.setState("open");
         this.handlers.onHello({
           sessionToken: message.sessionToken,
           serverTime: message.serverTime,
           addinBuildId: message.addinBuildId,
+          autoApproveAllowed: this.autoApproveAllowed,
         });
         return;
       case "hello_error":
@@ -514,42 +518,44 @@ export class BridgeClient {
       : activeHost().execute(name, input, controller.signal);
     // Changes to the file run one at a time, so two big writes never hit Excel together. Reads run straight away.
     const execute = (name: string, input: unknown): Promise<ToolResult> => activeHost().writeTools.has(name) ? serialWrite(() => run(name, input)) : run(name, input);
+    // The admin policy can turn Auto off; then everything is asked, as in Ask mode.
+    const auto = this.autoApproveAllowed && this.permissionMode === "auto";
     const result = message.tool === "__authorize_mcp"
-      ? { ok: true as const, data: { approved: this.permissionMode === "auto" || await this.askPermission("Allow external MCP tool?", "This tool can access external services or local files.", "Allow", message.timeoutMs, JSON.stringify(message.args, null, 2)) } }
+      ? { ok: true as const, data: { approved: auto || await this.askPermission("Allow external MCP tool?", "This tool can access external services or local files.", "Allow", message.timeoutMs, JSON.stringify(message.args, null, 2)) } }
       : message.tool === "__authorize_provider_tool"
-      ? { ok: true as const, data: { approved: this.permissionMode === "auto" || await this.askPermission(
+      ? { ok: true as const, data: { approved: auto || await this.askPermission(
         "Allow OpenCode tool?", "OpenCode requests permission to run this tool on your computer.", "Allow tool", message.timeoutMs,
         JSON.stringify(message.args, null, 2).slice(0, 8000)) } }
       : message.tool === "__authorize_skill_edit"
-      ? { ok: true as const, data: { approved: this.permissionMode === "auto" || await this.askPermission("Update installed skill?",
+      ? { ok: true as const, data: { approved: auto || await this.askPermission("Update installed skill?",
         `Save changes to /${(message.args as { name: string }).name}/${(message.args as { file: string }).file}?`, "Save skill", message.timeoutMs,
         (message.args as { content: string }).content.slice(0, 8000)) } }
       : message.tool === "__authorize_browser"
-      ? { ok: true as const, data: { approved: this.permissionMode === "auto" || await this.askPermission("Allow browser action?",
+      ? { ok: true as const, data: { approved: auto || await this.askPermission("Allow browser action?",
         "Playwright will perform this action in a separate browser on this computer.", "Allow browser action", message.timeoutMs,
         JSON.stringify(message.args, null, 2).slice(0, 8000)) } }
       : message.tool === "__authorize_python"
-      ? this.permissionMode === "auto" ? { ok: true as const, data: { approved: true } }
+      ? auto ? { ok: true as const, data: { approved: true } }
         : { ok: true as const, data: { approved: await this.askPermission("Run Python on this computer?",
           "The assistant will run Python on your computer with your user permissions, including access to files and the network. Selected file copies and generated files use a temporary working folder.",
           "Run Python", message.timeoutMs, (message.args as { code: string }).code.slice(0, 8000)) } }
       : message.tool === "__authorize_skill_script"
-      ? await authorizeSkillScript(this.permissionMode, message.args as RunSkillScriptInput,
+      ? await authorizeSkillScript(auto ? "auto" : "ask", message.args as RunSkillScriptInput,
         (detail, target) => this.askPermission("Allow skill script?", detail, "Run script", message.timeoutMs, target))
       : message.tool === "__authorize_site_knowledge"
       ? await this.authorizeSiteKnowledge(message.args as SiteKnowledgeApproval, message.timeoutMs)
       : message.tool === "__authorize_connected_file"
-      ? { ok: true as const, data: { approved: this.permissionMode === "auto" || await this.authorizeConnectedFile(message.args as ConnectedFileApproval, message.timeoutMs) } }
+      ? { ok: true as const, data: { approved: auto || await this.authorizeConnectedFile(message.args as ConnectedFileApproval, message.timeoutMs) } }
       : message.tool === "__authorize_test_browser"
       ? await this.authorizeTestBrowser(message.args as TestBrowserApproval, message.timeoutMs)
       : message.tool === "__authorize_reference_path"
-      ? this.permissionMode === "auto"
+      ? auto
         ? { ok: true as const, data: { approved: true } }
         : await this.askReferencePermission(message.args as { path: string; resolvedPath?: string }, message.timeoutMs)
       : await executeWithPermission(
         message.tool,
         message.args,
-        this.permissionMode,
+        this.autoApproveAllowed ? this.permissionMode : "ask",
         execute,
         (detail) => this.askPermission(`Allow ${activeHost().noun} change?`, detail, "Allow change", message.timeoutMs,
           JSON.stringify(message.args, null, 2).slice(0, 8000)),
@@ -584,9 +590,8 @@ export class BridgeClient {
       "Allow read", timeoutMs, name);
   }
 
-  /** Notes about a system steer later sessions, so Ask mode shows the text; Auto mode saves without asking. */
+  /** Notes about a system steer later sessions, so the text is shown and asked about in Auto mode too. */
   private async authorizeSiteKnowledge(args: SiteKnowledgeApproval, timeoutMs: number): Promise<ToolResult> {
-    if (this.permissionMode === "auto") return { ok: true, data: { approved: true } };
     const { title, detail, confirm, target } = describeSiteKnowledgeApproval(args);
     return { ok: true, data: { approved: await this.askPermission(title, detail, confirm, timeoutMs, target) } };
   }

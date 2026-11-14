@@ -27,7 +27,7 @@ function fixture() {
     for (const file of ["bin/office-partner.mjs", "dist/bridge/src/index.js", "gateway/dist/server.mjs", "frontend/dist/taskpane.js"]) put(root, file, "// fixture " + version);
     put(root, "bin/runtime-store.cjs", fs.readFileSync("bin/runtime-store.cjs", "utf8"));
     put(root, "bin/runtime-manifest.json", fs.readFileSync("bin/runtime-manifest.json", "utf8"));
-    put(root, "node_modules/@github/copilot-sdk/package.json", JSON.stringify({ name: "@github/copilot-sdk", version: "1.0.18", main: "index.js" }));
+    put(root, "node_modules/@github/copilot-sdk/package.json", JSON.stringify({ name: "@github/copilot-sdk", version: "1.0.34", main: "index.js" }));
     put(root, "node_modules/@github/copilot-sdk/index.js", "module.exports = {};");
   };
   app(root, "1.0.0");

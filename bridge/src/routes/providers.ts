@@ -1,5 +1,5 @@
 import type http from "node:http";
-import { DEFAULT_PROVIDER, ProviderIdSchema, providerSessionKey } from "../../../protocol/src/index.js";
+import { DEFAULT_PROVIDER, ProviderIdSchema, providerSessionKey, type ProviderId } from "../../../protocol/src/index.js";
 import { cleanSessionTitle } from "../../../protocol/src/session-title.js";
 import { normalizeCommands } from "../../../providers/src/commands.js";
 import type { ProviderRegistry } from "../../../providers/src/registry.js";
@@ -16,7 +16,11 @@ export interface ProviderRouteDeps {
   logins: ProviderLoginManager;
   usage: UsageStore;
   logger: Logger;
+  /** Providers the admin policy turns off: no sign-in, models or commands for them. */
+  disabled?: readonly ProviderId[];
 }
+
+const DISABLED = { error: "This AI provider is turned off by your administrator.", code: "provider_disabled" };
 
 /** What the pane asks about the provider CLIs: sign-in, models, slash commands and recorded usage. */
 export class ProviderRoutes {
@@ -31,6 +35,7 @@ export class ProviderRoutes {
     const parsed = ProviderIdSchema.safeParse(query.get("provider") ?? DEFAULT_PROVIDER);
     if (!parsed.success) return sendJson(res, 400, { error: "invalid_provider" });
     const provider = parsed.data;
+    if (this.deps.disabled?.includes(provider)) return sendJson(res, 403, DISABLED);
     if (req.method === "GET" && query.get("accounts") === "1") {
       try {
         return sendJson(res, 200, { accounts: await logins.accounts(provider) });
@@ -72,6 +77,7 @@ export class ProviderRoutes {
     if (session.isBusy) return sendJson(res, 409, { error: "Stop the current response before signing out." });
     const parsed = ProviderIdSchema.safeParse(new URL(req.url ?? "/", "http://localhost").searchParams.get("provider"));
     if (!parsed.success) return sendJson(res, 400, { error: "invalid_provider" });
+    if (this.deps.disabled?.includes(parsed.data)) return sendJson(res, 403, DISABLED);
     try {
       const body = JSON.parse(await readBody(req, 4096) || "{}") as { accountId?: unknown };
       await this.deps.logins.logout(parsed.data, typeof body.accountId === "string" ? body.accountId : undefined);
@@ -108,6 +114,7 @@ export class ProviderRoutes {
     if (!connectedSession(this.deps.sessions, req)) return sendJson(res, 401, { error: "unauthorized" });
     const parsed = ProviderIdSchema.safeParse(url.searchParams.get("provider"));
     if (!parsed.success) return sendJson(res, 400, { error: "invalid_provider" });
+    if (this.deps.disabled?.includes(parsed.data)) return sendJson(res, 403, DISABLED);
     try {
       return sendJson(res, 200, await this.deps.providers.listModels(parsed.data));
     } catch (error) {
@@ -125,6 +132,7 @@ export class ProviderRoutes {
     if (!session) return sendJson(res, 401, { error: "unauthorized" });
     const provider = ProviderIdSchema.safeParse(url.searchParams.get("provider"));
     if (!provider.success) return sendJson(res, 400, { error: "Invalid provider" });
+    if (this.deps.disabled?.includes(provider.data)) return sendJson(res, 403, DISABLED);
     try {
       const adapter = this.deps.providers.require(provider.data);
       const commands = await adapter.listCommands?.(session.provider === provider.data ? session.providerSessionId ?? undefined : undefined) ?? [];

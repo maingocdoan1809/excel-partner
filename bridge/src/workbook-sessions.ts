@@ -8,6 +8,14 @@ export interface WorkbookSessionsOptions {
   logger?: Logger;
 }
 
+/** Every session slot holds a file whose assistant is working; a new pane is refused rather than stopping one of them. */
+export class SessionLimitError extends Error {
+  readonly code = "session_limit";
+  constructor(max: number) {
+    super(`${max} Office files are connected and every one of them is busy. Wait for one to finish or close one of their task panes, then reopen this one.`);
+  }
+}
+
 /**
  * Owns the lifetime of every workbook session and the lookup tables used to
  * authenticate the task pane (`sessionToken`), the MCP side (session id) and
@@ -37,8 +45,10 @@ export class WorkbookSessions {
     if (existing) this.remove(existing, "reconnect");
 
     if (this.sessions.size >= this.maxSessions) {
-      const oldest = [...this.sessions.values()].sort((a, b) => a.lastActivityAt - b.lastActivityAt)[0];
-      if (oldest) this.remove(oldest, "evicted");
+      // Only an idle session makes room: evicting a busy one would stop its turn mid-way.
+      const oldest = [...this.sessions.values()].filter((item) => !item.isBusy).sort((a, b) => a.lastActivityAt - b.lastActivityAt)[0];
+      if (!oldest) throw new SessionLimitError(this.maxSessions);
+      this.remove(oldest, "evicted");
     }
 
     const session = new WorkbookSession(workbookConnectionId, clientInfo, `f${++this.fileCounter}`);

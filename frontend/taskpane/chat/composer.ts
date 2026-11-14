@@ -49,8 +49,17 @@ export function clearAttachment(): void {
   renderComposerPreview();
 }
 
+/** The admin policy can turn Auto off: the option is disabled and the pane falls back to Ask. */
+export function applyAutoApprovePolicy(allowed: boolean): void {
+  const option = [...els.permissionMode.options].find(item => item.value === "auto");
+  if (option) option.disabled = !allowed;
+  if (!allowed && app.permissionMode === "auto") selectPermissionMode("ask");
+  else app.permissionPicker?.refresh();
+}
+
 export function selectPermissionMode(mode: PermissionMode): void {
   if (mode !== "ask" && mode !== "auto") return;
+  if (mode === "auto" && [...els.permissionMode.options].some(item => item.value === "auto" && item.disabled)) return;
   app.permissionMode = mode;
   localStorage.setItem(PERMISSION_MODE_KEY, mode);
   app.client.setPermissionMode(mode);

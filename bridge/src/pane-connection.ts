@@ -3,7 +3,8 @@ import type https from "node:https";
 import path from "node:path";
 import type { Duplex } from "node:stream";
 import { WebSocketServer, type RawData, type WebSocket } from "ws";
-import { HostIdSchema, PROTOCOL_VERSION, WorkbookInfoMessageSchema, type ClientMessage, type ServerMessage } from "../../protocol/src/index.js";
+import { HostIdSchema, PROTOCOL_VERSION, WorkbookInfoMessageSchema, type AdminPolicy, type ClientMessage, type ServerMessage } from "../../protocol/src/index.js";
+import { allowedCapabilities } from "./policy.js";
 import type { McpServers } from "../../shared/src/mcp-servers.js";
 import type { OfficeRuntime } from "./office-runtime.js";
 import { attachmentPath } from "./attachments.js";
@@ -12,7 +13,7 @@ import type { Logger } from "./logger.js";
 import type { ProviderLoginManager } from "./provider-login.js";
 import type { ReferenceFiles } from "./reference-files.js";
 import { normalizePromptSelection } from "./selection.js";
-import type { WorkbookSessions } from "./workbook-sessions.js";
+import { SessionLimitError, type WorkbookSessions } from "./workbook-sessions.js";
 import type { WorkbookSession } from "./session.js";
 import { type SkillStore, expandSkillPrompt } from "./skills.js";
 import type { TurnRunner } from "./turns.js";
@@ -35,6 +36,7 @@ export interface PaneSocketDeps {
   externalTools: OfficeRuntime["externalTools"];
   skills: SkillStore;
   references: ReferenceFiles;
+  policy: AdminPolicy;
   /** Same rule as for HTTP requests: a foreign Origin or Host never gets a socket. */
   isTrustedRequest: (req: http.IncomingMessage) => boolean;
   addinBuildId: () => string;
@@ -149,6 +151,9 @@ export class PaneSockets {
         void this.refreshConnectedFiles();
         return;
       case "set_provider": {
+        if (this.deps.policy.disabledProviders.includes(message.provider)) {
+          return this.sendTo(ws, { type: "error", requestId: null, code: "provider_disabled", message: "This AI provider is turned off by your administrator." });
+        }
         const change = state.providerChange.then(() => turns.setProvider(session, message.provider));
         state.providerChange = change.catch(() => undefined);
         return change;
@@ -157,7 +162,7 @@ export class PaneSockets {
         // Behind a provider change that is still running, so the runtime is opened for the provider the pane chose last.
         await state.providerChange;
         void turns.warm(session, { model: message.model ?? null, effort: message.effort ?? "medium", chatSessionId: message.chatSessionId,
-          resumeSessionId: message.resumeSessionId, capabilities: message.capabilities ?? { webSearch: false, playwright: false } });
+          resumeSessionId: message.resumeSessionId, capabilities: allowedCapabilities(this.deps.policy, message.capabilities ?? { webSearch: false, playwright: false }) });
         return;
       }
       case "prompt": {
@@ -166,7 +171,8 @@ export class PaneSockets {
         return turns.run(session, {
           requestId: message.requestId, prompt: message.prompt, selection: picked.selection, context: message.context,
           attachmentIds: message.attachmentIds, model: message.model, referencePaths: message.referencePaths, effort: message.effort,
-          chatSessionId: message.chatSessionId, resumeSessionId: message.resumeSessionId, capabilities: message.capabilities,
+          chatSessionId: message.chatSessionId, resumeSessionId: message.resumeSessionId,
+          capabilities: message.capabilities && allowedCapabilities(this.deps.policy, message.capabilities),
           isCommand: message.command, delegationId: message.delegationId,
         });
       }
@@ -220,10 +226,13 @@ export class PaneSockets {
     if (!host.success) {
       return this.sendTo(ws, { type: "hello_error", code: "invalid_hello", message: "clientInfo.host must be excel, word or powerpoint" });
     }
-    const session = this.deps.sessions.create(
-      message.workbookConnectionId,
-      { ...message.clientInfo, host: host.data },
-    );
+    let session: WorkbookSession;
+    try {
+      session = this.deps.sessions.create(message.workbookConnectionId, { ...message.clientInfo, host: host.data });
+    } catch (error) {
+      if (!(error instanceof SessionLimitError)) throw error;
+      return this.sendTo(ws, { type: "hello_error", code: error.code, message: error.message });
+    }
     session.attachSocket(ws);
     state.session = session;
     state.helloDone = true;
@@ -235,6 +244,7 @@ export class PaneSockets {
       workbookConnectionId: session.workbookConnectionId,
       serverTime: new Date().toISOString(),
       addinBuildId: this.deps.addinBuildId(),
+      policy: this.deps.policy,
     });
     this.broadcastConnectedFiles();
   }

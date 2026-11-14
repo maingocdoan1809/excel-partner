@@ -4,6 +4,7 @@ import { ProviderEventSchema } from "./events.js";
 import { AnySelectionSnapshotSchema, ToolResultSchema } from "./tool-results.js";
 import { HostIdSchema } from "./host.js";
 import { MAX_DELEGATED_TEXT } from "./tools-advanced.js";
+import { AdminPolicySchema } from "./policy.js";
 
 /* -------------------------------------------------------------------------- */
 /* Client -> Bridge                                                            */
@@ -166,6 +167,8 @@ export const HelloOkMessageSchema = z.object({
   serverTime: z.string(),
   /** Identifies the task pane bundle the bridge currently serves; a pane running another one reloads itself. */
   addinBuildId: z.string().optional(),
+  /** The admin policy in force: the pane hides what it switches off (the bridge refuses it either way). */
+  policy: AdminPolicySchema.optional(),
 });
 
 

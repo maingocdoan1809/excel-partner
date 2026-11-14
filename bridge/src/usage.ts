@@ -1,4 +1,4 @@
-import { appendFileSync, mkdirSync, readFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { z } from "zod";
 import { TokenUsageSchema, type TokenUsage, type UsageSummary } from "../../protocol/src/index.js";
@@ -32,9 +32,15 @@ type Total = z.infer<typeof TotalSchema>;
 
 const COUNTS = ["inputTokens", "outputTokens", "cachedInputTokens", "totalTokens", "cacheWriteTokens", "uncachedInputTokens", "reasoningTokens"] as const;
 
-/** Append-only local ledger. No prompts, workbook data or credentials. */
+/** The ledger file is rewritten with only what is kept in memory once it grows past this; the previous file stays as `.1`. */
+export const USAGE_FILE_MAX_BYTES = 5 * 1024 * 1024;
+/** The usage panel shows recent chats: turns this much older than the newest, or beyond the newest `USAGE_MAX_RECORDS`, are dropped. */
+export const USAGE_MAX_AGE_MS = 90 * 24 * 60 * 60_000;
+export const USAGE_MAX_RECORDS = 5_000;
+
+/** Append-only local ledger, bounded in memory and on disk. No prompts, workbook data or credentials. */
 export class UsageStore {
-  private readonly records: UsageRecord[] = [];
+  private records: UsageRecord[] = [];
   private readonly totals = new Map<string, Total>();
 
   constructor(private readonly file: string | null) {
@@ -55,11 +61,35 @@ export class UsageStore {
         if (parsed.success) this.records.push(parsed.data);
       } catch { /* A damaged line must not discard the rest of the ledger. */ }
     }
+    this.trim();
+    this.rotateIfLarge();
   }
 
   append(record: UsageRecord): void {
     this.write(record);
     this.records.push(record);
+    this.trim();
+    this.rotateIfLarge();
+  }
+
+  /** Measured from the newest turn, so a ledger that was not used for a while still shows its last chats. */
+  private trim(): void {
+    const oldest = (this.records.at(-1)?.startedAt ?? 0) - USAGE_MAX_AGE_MS;
+    if (this.records.length > USAGE_MAX_RECORDS || (this.records[0] && this.records[0].startedAt < oldest)) {
+      this.records = this.records.filter((record) => record.startedAt >= oldest).slice(-USAGE_MAX_RECORDS);
+    }
+  }
+
+  /** Keep the previous file as `.1` and start a new one holding only what is kept in memory. */
+  private rotateIfLarge(): void {
+    if (!this.file) return;
+    try {
+      if (statSync(this.file).size <= USAGE_FILE_MAX_BYTES) return;
+      rmSync(`${this.file}.1`, { force: true });
+      renameSync(this.file, `${this.file}.1`);
+      const lines = [...this.totals.values(), ...this.records].map((entry) => JSON.stringify(entry));
+      writeFileSync(this.file, lines.join("\n") + "\n", { mode: 0o600 });
+    } catch { /* The ledger keeps growing until rotation succeeds; it is never lost. */ }
   }
 
   private write(entry: object): void {

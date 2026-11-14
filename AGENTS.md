@@ -22,6 +22,6 @@ User-confirmed requirement: enabling an MCP server must expose its actual tools 
 
 - Neutral "Office Partner / Excel Partner" branding everywhere; never ship customer documents, company references, personal paths or account identifiers.
 - Skills are optional and user-installed from `%USERPROFILE%\.excel-partner\skills`; the package bundles no skills or templates.
-- Provider credentials stay under each provider CLI's control; the add-in never asks for or stores an API key.
+- Provider credentials stay under each provider CLI's control; the add-in never stores an API key. Where a provider CLI itself supports API-key sign-in (currently OpenCode), the pane may collect the key and relay it directly to that CLI's own credential store; the key must never be written to Office Partner's config, history, logs, usage records or diagnostics.
 - External folders are read only when the user grants access (references / `referenceDirs`).
 - Validate with `npm run typecheck`, `npm run build` and `npm test`; automated checks use mock providers, live CLI checks are opt-in.

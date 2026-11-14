@@ -38,6 +38,15 @@ export interface TurnRunnerDeps {
   hasOtherFiles: (session: WorkbookSession) => boolean;
 }
 
+/**
+ * How long a turn may go without any sign of life (a provider event or a tool call finishing) before it is stopped.
+ * There is deliberately no cap on a turn's total time. `OFFICE_PARTNER_TURN_IDLE_MINUTES` overrides the default of 20.
+ */
+export function turnIdleMs(env: NodeJS.ProcessEnv = process.env): number {
+  const minutes = Number(env.OFFICE_PARTNER_TURN_IDLE_MINUTES);
+  return (Number.isFinite(minutes) && minutes > 0 ? minutes : 20) * 60_000;
+}
+
 /** What a `prompt` message from the pane carries. */
 export interface PromptInput {
   requestId: string;
@@ -253,6 +262,7 @@ export class TurnRunner {
     // Where a slow message spends its time: before the provider is asked (opening the runtime) or inside it.
     const timing = { start: performance.now(), ready: 0, firstEvent: 0, firstText: 0, tools: 0 };
     const since = () => Math.round(performance.now() - timing.start);
+    const idle = this.watchIdle(session, requestId);
     try {
       controller.signal.throwIfAborted();
       // An open runtime needs no check: only a prompt that has to open one asks whether the CLI is there.
@@ -288,6 +298,7 @@ export class TurnRunner {
         selection,
         signal: controller.signal,
       })) {
+        idle.activity();
         timing.firstEvent ||= since();
         if (event.type === "message_delta" || event.type === "message_completed") timing.firstText ||= since();
         if (event.type === "tool_started") timing.tools++;
@@ -311,10 +322,10 @@ export class TurnRunner {
         }
       }
       logger.info("turn timing", { provider: session.provider, ...timing, start: undefined, total: since() });
-      this.finishTurn(session, requestId, controller.signal.aborted ? "cancelled" : "completed");
+      this.finishTurn(session, requestId, idle.timedOut ? "error" : controller.signal.aborted ? "cancelled" : "completed");
     } catch (error) {
       const aborted = controller.signal.aborted;
-      if (!session.hasFinished(requestId)) {
+      if (!session.hasFinished(requestId) && !idle.timedOut) {
         const failure = {
           type: "error" as const,
           requestId,
@@ -324,11 +335,38 @@ export class TurnRunner {
         delegations.observe(session, requestId, failure);
         session.send(failure);
       }
-      this.finishTurn(session, requestId, aborted ? "cancelled" : "error");
+      this.finishTurn(session, requestId, aborted && !idle.timedOut ? "cancelled" : "error");
     } finally {
+      idle.stop();
       session.endTurn(requestId);
       session.touch();
     }
+  }
+
+  /**
+   * Stops a turn that shows no sign of life for `turnIdleMs()`. Waiting on the pane (a tool call, a question to the user or a
+   * tool approval) or on a script is not idleness: those have their own time limits, and the user may take a while to answer.
+   */
+  private watchIdle(session: WorkbookSession, requestId: string) {
+    const limit = turnIdleMs();
+    let last = Date.now();
+    const state = { timedOut: false, activity: () => { last = Date.now(); }, stop: () => clearInterval(timer) };
+    const timer = setInterval(() => {
+      if (session.activeRequestId !== requestId) return state.stop();
+      if (session.pendingToolCount > 0 || session.scriptControllers.size > 0) return state.activity();
+      if (Date.now() - last < limit) return;
+      state.timedOut = true;
+      state.stop();
+      const minutes = Math.round(limit / 60_000);
+      this.deps.logger.warn("turn idle timeout", { requestId, provider: session.provider, minutes });
+      const failure = { type: "error" as const, requestId, code: "TURN_IDLE_TIMEOUT",
+        message: `The assistant showed no activity for ${minutes} minutes, so this request was stopped. Send it again to retry.` };
+      this.deps.delegations.observe(session, requestId, failure);
+      session.send(failure);
+      void this.cancel(session, requestId);
+    }, Math.min(60_000, limit));
+    timer.unref();
+    return state;
   }
 
   /** Emit `turn_finished` exactly once per request. */

@@ -42,13 +42,23 @@ interface Package {
   xml(path: string): Node | null;
 }
 
+/** Zip bomb guard: fflate inflates each part into a buffer of its declared size, so capping declared sizes caps memory. */
+export const XLSX_LIMITS = { partBytes: 64 * 1024 * 1024, totalBytes: 256 * 1024 * 1024, parts: 5000 };
+
 function open(bytes: Uint8Array): Package {
   let files: Record<string, Uint8Array>;
+  let parts = 0, total = 0, refused: string | null = null;
   try {
-    files = unzipSync(bytes, { filter: (f) => !f.name.startsWith("xl/media/") && !f.name.includes("printerSettings") });
+    files = unzipSync(bytes, { filter: (f) => {
+      if (f.name.startsWith("xl/media/") || f.name.includes("printerSettings") || refused) return false;
+      total += f.originalSize;
+      if (++parts > XLSX_LIMITS.parts || f.originalSize > XLSX_LIMITS.partBytes || total > XLSX_LIMITS.totalBytes) { refused = f.name; return false; }
+      return true;
+    } });
   } catch {
     throw new XlsxError("not a valid .xlsx file (zip could not be read)");
   }
+  if (refused) throw new XlsxError(`the workbook expands to more than can be read safely (stopped at '${refused}')`);
   return {
     files,
     xml(path) {

@@ -67,6 +67,23 @@ function readState(dataDir = home(), suffix = '') {
   }
   return state;
 }
+const bootTime = () => Math.round((Date.now() - os.uptime() * 1000) / 60000); // minutes: stable for one Windows session
+const LOCK_MAX_AGE_MS = 2 * 60 * 60_000; // longer than any update, repair or setup runs
+/**
+ * A lock left behind is taken over when its process is gone, when Windows restarted since it was taken (its PID may now
+ * belong to another program), when it is older than any operation runs, or when a crash left it empty.
+ */
+function staleLock(file, now = Date.now()) {
+  let owner;
+  try { owner = readJson(file); }
+  catch { try { return now - fs.statSync(file).mtimeMs > 2 * 60_000; } catch { return true; } }
+  if (!Number.isSafeInteger(owner.pid) || typeof owner.created !== 'number') return now - fs.statSync(file).mtimeMs > 2 * 60_000;
+  if (now - owner.created > LOCK_MAX_AGE_MS) return true;
+  if (typeof owner.boot === 'number' && Math.abs(owner.boot - bootTime()) > 1) return true;
+  let alive = true;
+  try { process.kill(owner.pid, 0); } catch (err) { alive = err.code !== 'ESRCH'; }
+  return !alive && now - owner.created >= 30000;
+}
 function lock(dataDir, name, operation) {
   fs.mkdirSync(dataDir, { recursive: true });
   const file = path.join(dataDir, name + '.lock');
@@ -74,14 +91,10 @@ function lock(dataDir, name, operation) {
   try { handle = fs.openSync(file, 'wx', 0o600); }
   catch (error) {
     if (error.code !== 'EEXIST') throw error;
-    let owner;
-    try { owner = readJson(file); } catch { throw new Error('OPERATION_LOCKED'); }
-    let alive = true;
-    try { process.kill(owner.pid, 0); } catch (err) { alive = err.code !== 'ESRCH'; }
-    if (alive || Date.now() - owner.created < 30000) throw new Error('OPERATION_LOCKED');
+    if (!staleLock(file)) throw new Error('OPERATION_LOCKED');
     fs.unlinkSync(file); handle = fs.openSync(file, 'wx', 0o600);
   }
-  fs.writeFileSync(handle, JSON.stringify({ pid: process.pid, created: Date.now() }));
+  fs.writeFileSync(handle, JSON.stringify({ pid: process.pid, created: Date.now(), boot: bootTime() }));
   const release = () => { fs.closeSync(handle); try { fs.unlinkSync(file); } catch {} };
   try {
     const result = operation();
@@ -135,4 +148,23 @@ function currentDeployment(dataDir = home(), suffix = '') {
   }
   return data;
 }
-module.exports = { manifest, ids, digest, fileDigest, home, inside, readJson, atomic, renameFolder, emptyState, readState, changeState, lock, selectProfile, childEnvironment, currentDeployment };
+/**
+ * The admin policy's update settings (the whole policy is protocol/src/policy.ts; bin/ runs on its own, so it reads the
+ * same file here). No file: updates allowed. A file that cannot be read or parsed: updates off, as everything risky is.
+ */
+function policyFile(env = process.env) {
+  return env.OFFICE_PARTNER_POLICY_FILE || path.join(env.ProgramData || env.PROGRAMDATA || 'C:\\ProgramData', 'Office Partner', 'policy.json');
+}
+function readPolicy(env = process.env) {
+  let text;
+  try { text = fs.readFileSync(policyFile(env), 'utf8').replace(/^\uFEFF/, ''); }
+  catch (error) { return error.code === 'ENOENT' || error.code === 'ENOTDIR' ? { autoUpdate: true } : { autoUpdate: false, error: 'POLICY_UNREADABLE' }; }
+  let raw;
+  try { raw = JSON.parse(text); } catch { return { autoUpdate: false, error: 'POLICY_INVALID' }; }
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)
+    || raw.autoUpdate !== undefined && typeof raw.autoUpdate !== 'boolean'
+    || raw.pinVersion !== undefined && !/^\d+\.\d+\.\d+(?:-[\w.-]+)?$/.test(raw.pinVersion)
+    || raw.registry !== undefined && !/^https?:\/\/\S+$/.test(raw.registry)) return { autoUpdate: false, error: 'POLICY_INVALID' };
+  return { autoUpdate: raw.autoUpdate !== false, pinVersion: raw.pinVersion, registry: raw.registry };
+}
+module.exports = { readPolicy, staleLock, manifest, ids, digest, fileDigest, home, inside, readJson, atomic, renameFolder, emptyState, readState, changeState, lock, selectProfile, childEnvironment, currentDeployment };

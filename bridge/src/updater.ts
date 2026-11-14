@@ -2,6 +2,7 @@ import { spawn, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { loadAdminPolicy } from "./policy.js";
 
 /** "0.1.9" < "0.1.19" < "0.2.0"; a release beats its own pre-release. Null when either side is not a version. */
 export function compareVersions(a: string, b: string): number | null {
@@ -95,6 +96,26 @@ export async function fetchLatestFromRegistry(fetchImpl: typeof fetch = fetch, s
   return body.version;
 }
 
+/** The latest version through npm itself, so the company's registry, proxy and certificates apply (Node's fetch ignores them). */
+export function npmViewLatest(name: string = DEFAULT_PACKAGE_NAME): Promise<string> {
+  return new Promise((resolve, reject) => {
+    // npm.cmd needs the Windows shell; the package name is checked by packageNameOf.
+    const child = spawn(process.platform === "win32" ? "npm.cmd" : "npm", ["view", `${name}@latest`, "version", "--json"], { shell: process.platform === "win32", windowsHide: true });
+    let out = "";
+    const timer = setTimeout(() => { child.kill(); reject(new Error("npm view timed out")); }, 30_000);
+    child.stdout.on("data", chunk => { out += chunk; });
+    child.on("error", error => { clearTimeout(timer); reject(error); });
+    child.on("close", code => {
+      clearTimeout(timer);
+      try {
+        const version = JSON.parse(out) as unknown;
+        if (code === 0 && typeof version === "string" && compareVersions(version, "0.0.0") !== null) return resolve(version);
+      } catch { /* reported below */ }
+      reject(new Error(`npm could not look up ${name} (exit ${code})`));
+    });
+  });
+}
+
 export class UpdateService {
   private readonly opts: Required<Pick<UpdateServiceOptions, "platform" | "spec" | "now" | "staleAfterMs" | "cacheMs">> & UpdateServiceOptions;
   private cached: { at: number; latest: string | null; error?: string } | null = null;
@@ -167,6 +188,8 @@ export class UpdateService {
 
   /** Why this installation cannot update itself, or null when it can. */
   unsupportedReason(): string | null {
+    const policy = loadAdminPolicy().policy;
+    if (!policy.autoUpdate) return "Updates are managed by your administrator.";
     if (this.opts.platform !== "win32") return "Updating from the task pane works on Windows with Excel desktop.";
     // Managed releases are installed alongside the current copy, including source installations.
     if (fs.existsSync(path.join(this.opts.packageRoot, "bin", "deployment.mjs"))) return null;
@@ -182,7 +205,8 @@ export class UpdateService {
     const now = this.opts.now();
     if (refresh || !this.cached || now - this.cached.at > this.opts.cacheMs) {
       try {
-        this.cached = { at: now, latest: await (this.opts.fetchLatest ?? (() => fetchLatestFromRegistry(fetch, undefined, this.packageName)))() };
+        const pinned = loadAdminPolicy().policy.pinVersion;
+        this.cached = { at: now, latest: pinned ?? await (this.opts.fetchLatest ?? (() => npmViewLatest(this.packageName)))() };
       } catch (error) {
         this.cached = { at: now, latest: null, error: error instanceof Error ? error.message : String(error) };
       }

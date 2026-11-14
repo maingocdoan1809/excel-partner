@@ -110,8 +110,12 @@ export function loadConfig(overrides: Partial<BridgeConfig> = {}): BridgeConfig 
   const port = envInt("BRIDGE_PORT", 8765);
   const certPath = process.env.BRIDGE_CERT ?? path.join(PROJECT_ROOT, "certs", "localhost.crt");
   const keyPath = process.env.BRIDGE_KEY ?? path.join(PROJECT_ROOT, "certs", "localhost.key");
-  const useTls = envBool("BRIDGE_TLS", true) && fs.existsSync(certPath) && fs.existsSync(keyPath);
-  const scheme = useTls ? "https" : "http";
+  const useTls = envBool("BRIDGE_TLS", true);
+  // Plain HTTP only when asked for (BRIDGE_TLS=0, development) or set up in code (tests); never as a quiet fallback.
+  if (useTls && overrides.tls === undefined && !(fs.existsSync(certPath) && fs.existsSync(keyPath))) {
+    throw new Error(`The HTTPS certificate is missing (${certPath}). Run: office-partner doctor. For development without HTTPS set BRIDGE_TLS=0.`);
+  }
+  const scheme = useTls && overrides.tls !== null ? "https" : "http";
 
   const config: BridgeConfig = {
     host,

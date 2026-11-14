@@ -29,6 +29,23 @@ export function toLocalPath(input: string): string {
   return trimmed;
 }
 
+/**
+ * `\\server\share`, `//server/share`, `\\?\`, `\\.\` and WebDAV `\\host@port\...`: touching one makes Windows connect to that
+ * host and offer the user's NTLM credentials, so such a path is refused by its text before any file system call.
+ */
+export function isNetworkPath(input: string): boolean {
+  return /^[\\/]{2}/.test(input.trim());
+}
+
+/** `input` as an absolute local path; a network path only when it lies inside one of `networkRoots` (folders the user configured). */
+export function localPath(input: string, networkRoots: readonly string[] = []): string {
+  const candidate = path.resolve(toLocalPath(input));
+  if (!isNetworkPath(candidate)) return candidate;
+  const key = (value: string) => value.toLowerCase().replace(/[\\/]+$/, "");
+  if (networkRoots.filter(isNetworkPath).some(root => key(candidate) === key(root) || key(candidate).startsWith(key(root) + path.sep))) return candidate;
+  throw new ReferenceError_(`'${input}' is a network location. Add its folder as a workspace first to let the assistant read it.`);
+}
+
 /** Local folder containing the workbook currently open in Excel. Cloud URLs have no bridge-local folder. */
 export function workbookFolderFromUrl(documentUrl: string): string {
   let input = documentUrl.trim();
@@ -39,6 +56,7 @@ export function workbookFolderFromUrl(documentUrl: string): string {
     if (url.hostname && url.hostname !== "localhost") throw new ReferenceError_("Network file URLs cannot be mapped to a local workspace. Add the folder manually.");
     input = decodeURIComponent(url.pathname).replace(/^\/(?=[A-Za-z]:\/)/, "");
   }
+  if (isNetworkPath(path.resolve(toLocalPath(input)))) throw new ReferenceError_("This workbook is opened from a network location. Add its folder manually.");
   let file: string;
   try { file = fs.realpathSync(path.resolve(toLocalPath(input))); }
   catch { throw new ReferenceError_("The open workbook path is unavailable to the bridge. Add its folder manually."); }
@@ -109,9 +127,14 @@ export class ReferenceFiles {
     return false;
   }
 
+  /** A model- or pane-supplied path; a network path is refused before any file system call unless it is inside a configured one. */
+  private local(input: string): string {
+    return localPath(input, [...this.roots, ...this.savedPaths()]);
+  }
+
   /** Resolve a user-supplied path to a real path inside an allowed folder, or throw with guidance. */
   resolve(input: string, grants: ReadonlySet<string> = new Set()): string {
-    const candidate = path.resolve(toLocalPath(input));
+    const candidate = this.local(input);
     let real: string;
     try {
       real = fs.realpathSync(candidate);
@@ -199,7 +222,8 @@ export class ReferenceFiles {
   /** Canonical, validated target shown to the user before a one-session grant. */
   permissionTarget(input: string): string {
     let real: string;
-    try { real = fs.realpathSync(path.resolve(toLocalPath(input))); }
+    const local = this.local(input);
+    try { real = fs.realpathSync(local); }
     catch { throw new ReferenceError_(`'${input}' does not exist or is not readable`); }
     const stat = fs.statSync(real);
     if (!stat.isFile() || !WORKBOOK_EXT.has(path.extname(real).toLowerCase())) throw new ReferenceError_("only Excel workbooks can be read");
@@ -210,7 +234,8 @@ export class ReferenceFiles {
   /** What a person typed for a saved reference: the real path of a file or a folder, and which of the two it is. */
   referenceTarget(input: string): { path: string; kind: "file" | "folder" } {
     let real: string;
-    try { real = fs.realpathSync(path.resolve(toLocalPath(input))); }
+    const local = this.local(input);
+    try { real = fs.realpathSync(local); }
     catch { throw new ReferenceError_(`'${input}' does not exist or is not readable`); }
     const stat = fs.statSync(real);
     if (stat.isDirectory()) return { path: real, kind: "folder" };
@@ -221,7 +246,8 @@ export class ReferenceFiles {
   /** Exact file selected through the native picker, regardless of extension. */
   permissionTargetAny(input: string): string {
     let real: string;
-    try { real = fs.realpathSync(path.resolve(toLocalPath(input))); }
+    const local = this.local(input);
+    try { real = fs.realpathSync(local); }
     catch { throw new ReferenceError_(`'${input}' does not exist or is not readable`); }
     if (!fs.statSync(real).isFile()) throw new ReferenceError_(`'${input}' is not a file`);
     return real;

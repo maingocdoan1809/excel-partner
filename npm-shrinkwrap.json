@@ -1,12 +1,12 @@
 {
   "name": "office-partner",
-  "version": "0.1.22",
+  "version": "0.1.23",
   "lockfileVersion": 3,
   "requires": true,
   "packages": {
     "": {
       "name": "office-partner",
-      "version": "0.1.22",
+      "version": "0.1.23",
       "license": "MIT",
       "dependencies": {
         "@github/copilot-sdk": "1.0.18",
@@ -16,6 +16,7 @@
         "dompurify": "^3.4.17",
         "fast-xml-parser": "^5.11.2",
         "fflate": "^0.8.3",
+        "koffi": "3.2.1",
         "marked": "^18.1.1",
         "selfsigned": "^5.5.0",
         "ws": "^8.18.0",

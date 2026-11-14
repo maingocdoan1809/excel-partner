@@ -1,6 +1,7 @@
 import spawn from "cross-spawn";
 import { createInterface } from "node:readline";
 import { JsonRpcPeer } from "./jsonrpc.js";
+import { trackProcess } from "./process-registry.js";
 import { normalizeCommands } from "./commands.js";
 import type { ProviderCommand } from "../../protocol/src/commands.js";
 
@@ -10,6 +11,7 @@ export function discoverClaudeCommands(command: string, env: NodeJS.ProcessEnv, 
     const child = spawn(command, ["-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose",
       "--setting-sources", "project", "--tools", "", "--strict-mcp-config", "--mcp-config", '{"mcpServers":{}}'],
     { env, cwd, stdio: ["pipe", "pipe", "pipe"], windowsHide: true });
+    trackProcess(child);
     let settled = false;
     let lastType = "none", linesSeen = 0, invalidLines = 0;
     const finish = (error?: Error, commands?: ProviderCommand[]) => {

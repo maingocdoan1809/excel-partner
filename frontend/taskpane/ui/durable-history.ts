@@ -21,6 +21,9 @@ export interface ChatHistoryStore {
 }
 interface Pending extends HistorySave { host: SessionHost; recoveryId?: string }
 const OUTBOX = "excelPartner.historyOutbox.v1";
+/** How long a request waits for a bridge that answers HISTORY_RESTARTING (it is handing over to a new release). */
+export const HISTORY_RESTART_WAIT_MS = 30_000;
+const restarting = (error: unknown) => (error as { code?: string })?.code === "HISTORY_RESTARTING";
 /** UI cache + acknowledged SQLite writes. localStorage is only migration input/outbox. */
 export class DurableHistory implements ChatHistoryStore {
  private records = new Map<string, StoredSession>();
@@ -45,6 +48,22 @@ export class DurableHistory implements ChatHistoryStore {
  private retryDelay = 1000;
  private failureNotices = new Set<string>();
  total = 0;
+ /** The bridge's history API, waiting quietly through a restart instead of reporting it as a failure. */
+ private readonly api: HistoryApi = {
+   historyList: (...args) => this.retrying(() => this.client().historyList(...args)),
+   historyPage: (...args) => this.retrying(() => this.client().historyPage(...args)),
+   historyStats: () => this.retrying(() => this.client().historyStats()),
+   historySave: (...args) => this.retrying(() => this.client().historySave(...args)),
+   historyImport: (...args) => this.retrying(() => this.client().historyImport(...args)),
+   historyDelete: (...args) => this.retrying(() => this.client().historyDelete(...args)),
+ };
+ private async retrying<T>(request: () => Promise<T>): Promise<T> {
+   for (let waited = 0; ; waited += 1000) {
+     try { return await request(); }
+     catch (error) { if (!restarting(error) || waited >= HISTORY_RESTART_WAIT_MS) throw error; }
+     await new Promise(resolve => setTimeout(resolve, 1000));
+   }
+ }
  constructor(private readonly client: () => HistoryApi, private readonly host: () => SessionHost, private readonly storage: Pick<Storage, "getItem" | "setItem" | "removeItem">,
    private readonly notify: (message: string) => void = () => {}, writerId?: string) {
    if (!writerId) { try { writerId = sessionStorage.getItem("excelPartner.historyWriter") ?? crypto.randomUUID(); sessionStorage.setItem("excelPartner.historyWriter", writerId); } catch { writerId = crypto.randomUUID(); } }
@@ -90,7 +109,7 @@ export class DurableHistory implements ChatHistoryStore {
  private async initialize() {
    try {
      const host = this.host(), marker = `excelPartner.historyMigrated.v1.${host}`;
-     const stats = await this.client().historyStats(); this.generation = stats.generation;
+     const stats = await this.api.historyStats(); this.generation = stats.generation;
      let legacy: string | null = null, migrated = false, readable = true;
      try { migrated = this.storage.getItem(marker) === "1"; legacy = this.storage.getItem("excelPartner.sessions.v1"); }
      catch { readable = false; this.notify("Old browser history could not be read. New chats can still be saved on this computer; retry migration when browser storage is available."); }
@@ -100,7 +119,7 @@ export class DurableHistory implements ChatHistoryStore {
        const raw = JSON.parse(legacy ?? "[]") as StoredSession[];
        if (!Array.isArray(raw)) throw new Error("Invalid legacy history");
        const source = raw.filter(s => (s.host ?? inferHost(s)) === host).map(s => ({ ...s, host }));
-       for (let i = 0; i < source.length; i += 10) await this.client().historyImport(source.slice(i, i + 10));
+       for (let i = 0; i < source.length; i += 10) await this.api.historyImport(source.slice(i, i + 10));
        // Keep legacy bytes for old retained app releases; only mark an acknowledged import.
        try { this.storage.setItem(marker, "1"); } catch { this.notify("History imported, but the migration marker could not be saved. A retry is safe."); }
        } catch { this.migrationNotice = "Old browser history could not be imported. New chats can still be saved; the old browser data is retained. Use Export history in Settings to keep a copy."; this.notify(this.migrationNotice); }
@@ -136,14 +155,14 @@ export class DurableHistory implements ChatHistoryStore {
  private saveAliases() { try { if (this.aliases.size) this.storage.setItem(this.aliasKey, JSON.stringify(Object.fromEntries(this.aliases))); else this.storage.removeItem(this.aliasKey); } catch { /* Pending snapshots retain their resolved IDs. */ } }
  latest(maxAgeMs: number) { const s = [...this.records.values()].filter(s => s.host === this.host()).sort((a,b) => b.updatedAt-a.updatedAt)[0]; return s && Date.now()-s.updatedAt<=maxAgeMs ? structuredClone(s) : null; }
  async refresh(more = false) {
-   const page = await this.client().historyList(more ? this.summaries.length : 0, 40);
+   const page = await this.api.historyList(more ? this.summaries.length : 0, 40);
    if (!Array.isArray(page.items)) throw new Error("Invalid history response");
    this.summaries = more ? [...this.summaries, ...page.items.filter(s => !this.summaries.some(old => old.id === s.id))] : page.items;
    this.listed = true;
    this.total = page.total; this.generation = page.generation;
    // Summary refreshes cannot advance the revision of an older loaded transcript.
  }
- loadPage(id: string, offset = 0, limit = 100) { return this.client().historyPage(id, offset, limit); }
+ loadPage(id: string, offset = 0, limit = 100) { return this.api.historyPage(id, offset, limit); }
  async load(id: string) {
    const pending = this.queue.filter(p => p.host === this.host() && p.session.id === id).slice(-1)[0];
    if (pending) return structuredClone(pending.session);
@@ -197,7 +216,7 @@ export class DurableHistory implements ChatHistoryStore {
      this.inFlight = next;
      try {
        const deleting = !next.session.messages.some(m => m.kind === "user");
-       const result = deleting ? { ack: { revision: 0, ...(await this.client().historyDelete(next.session.id)) }, advance: true } : await this.saveReconciled(next, keepalive);
+       const result = deleting ? { ack: { revision: 0, ...(await this.api.historyDelete(next.session.id)) }, advance: true } : await this.saveReconciled(next, keepalive);
        const ack = result.ack;
        if (deleting) { this.records.delete(`${this.host()}:${next.session.id}`); this.signatures.delete(`${this.host()}:${next.session.id}`); }
        this.forgetRecovery(next.operationId);
@@ -231,10 +250,10 @@ export class DurableHistory implements ChatHistoryStore {
  }
  private conflict(error: unknown) { return (error as { code?: string })?.code === "HISTORY_CONFLICT" || error instanceof Error && error.message === "HISTORY_CONFLICT"; }
  private async readSaved(id: string) {
-   const first = await this.client().historyPage(id, 0, 100);
+   const first = await this.api.historyPage(id, 0, 100);
    const session = structuredClone(first.session);
    for (let offset = 100; offset < Math.max(first.totalMessages, first.totalChanges); offset += 100) {
-     const page = await this.client().historyPage(id, offset, 100);
+     const page = await this.api.historyPage(id, offset, 100);
      if (page.revision !== first.revision) throw Object.assign(new Error("HISTORY_CONFLICT"), { code: "HISTORY_CONFLICT" });
      session.messages.push(...page.session.messages); session.changes.push(...page.session.changes);
    }
@@ -243,7 +262,7 @@ export class DurableHistory implements ChatHistoryStore {
  private async saveReconciled(next: Pending, keepalive: boolean): Promise<{ ack: HistoryAck; advance: boolean }> {
    let error: unknown;
    for (let attempt = 0; attempt < 4; attempt++) {
-     try { return { ack: await this.client().historySave(next, keepalive), advance: true }; }
+     try { return { ack: await this.api.historySave(next, keepalive), advance: true }; }
      catch (failure) { if (!this.conflict(failure)) throw failure; error = failure; }
      let current;
      try { current = await this.readSaved(next.session.id); }
@@ -282,7 +301,7 @@ export class DurableHistory implements ChatHistoryStore {
    } catch { this.notify("Saved history was deleted, but an old browser backup could not be updated. Clear that backup before sharing this profile."); }
  }
  async delete(id: string) {
-   await this.running?.catch(() => {}); const stats = await this.client().historyDelete(id); this.removeLegacy(id);
+   await this.running?.catch(() => {}); const stats = await this.api.historyDelete(id); this.removeLegacy(id);
    for (const item of this.queue) if (item.host === this.host() && item.session.id === id) this.forgetRecovery(item.operationId);
    this.queue = this.queue.filter(p => p.host !== this.host() || p.session.id !== id); this.records.delete(`${this.host()}:${id}`); this.signatures.delete(`${this.host()}:${id}`); this.revisions.delete(id); this.outbox();
    this.summaries = this.summaries.filter(s => s.id !== id); this.total = stats.count;
@@ -292,7 +311,7 @@ export class DurableHistory implements ChatHistoryStore {
    await this.refresh().catch(() => this.notify("Chat deleted. The list will refresh when the connection is available."));
  }
  async clear() {
-   await this.running?.catch(() => {}); const stats = await this.client().historyDelete(); this.removeLegacy(); this.generation = stats.generation;
+   await this.running?.catch(() => {}); const stats = await this.api.historyDelete(); this.removeLegacy(); this.generation = stats.generation;
    for (const item of this.queue) if (item.host === this.host()) this.forgetRecovery(item.operationId);
    this.queue = this.queue.filter(p => p.host !== this.host()); for (const [id,s] of this.records) if (s.host === this.host()) this.records.delete(id);
    for (const key of this.signatures.keys()) if (key.startsWith(this.host() + ":")) this.signatures.delete(key);
@@ -303,13 +322,13 @@ export class DurableHistory implements ChatHistoryStore {
  }
  async recoverPending() {
    await this.running?.catch(() => {});
-   const stats = await this.client().historyStats();
+   const stats = await this.api.historyStats();
    const latest = new Map<string, Pending>(); for (const item of this.queue) if (item.host === this.host()) latest.set(item.session.id, item);
    const recovered: Array<{ originalId: string; session: StoredSession }> = [];
    for (const [originalId, item] of latest) {
      if (!item.session.messages.some(m => m.kind === "user")) continue;
      const session = { ...structuredClone(item.session), id: `recovered-${crypto.randomUUID()}`, providerSessionId: undefined, providerTitle: undefined, identityVersion: 1 as const, updatedAt: Date.now() };
-     const ack = await this.client().historySave({ session, baseRevision: 0, generation: stats.generation, operationId: crypto.randomUUID() });
+     const ack = await this.api.historySave({ session, baseRevision: 0, generation: stats.generation, operationId: crypto.randomUUID() });
      for (const old of this.queue) if (old.host === this.host() && old.session.id === originalId) this.forgetRecovery(old.operationId);
      this.queue = this.queue.filter(old => old.host !== this.host() || old.session.id !== originalId);
      this.signatures.delete(`${this.host()}:${originalId}`);

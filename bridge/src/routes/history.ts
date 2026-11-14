@@ -7,13 +7,20 @@ import type { Logger } from "../logger.js";
 import { connectedSession, readBody, sendJson } from "../http-util.js";
 export class HistoryRoutes {
   private store?: HistoryStore;
-  constructor(private readonly sessions: WorkbookSessions, private readonly file: string, private readonly logger?: Logger) {}
-  close() { this.store?.close(); }
+  private closed = false;
+  constructor(private readonly sessions: WorkbookSessions, private readonly file: string, private readonly logger?: Logger,
+    private readonly openStore: (file: string) => HistoryStore = file => new HistoryStore(file)) {}
+  /** After this, requests get HISTORY_RESTARTING (the pane retries quietly) and the database is never reopened by this bridge. */
+  close() { this.closed = true; this.store?.close(); }
+  private open() {
+    if (this.closed) throw new HistoryError("HISTORY_CLOSED");
+    return this.store ??= this.openStore(this.file);
+  }
   async handle(req: http.IncomingMessage, res: http.ServerResponse, url: URL) {
     const session = connectedSession(this.sessions, req);
     if (!session) return sendJson(res, 401, { error: "unauthorized" });
     try {
-      const store = this.store ??= new HistoryStore(this.file), host = session.host;
+      const store = this.open(), host = session.host;
       if (req.method === "GET") {
         const view = url.searchParams.get("view") ?? "list";
         const offset = z.coerce.number().int().min(0).parse(url.searchParams.get("offset") ?? 0);
@@ -50,13 +57,19 @@ export class HistoryRoutes {
       return sendJson(res, 400, { error: "Unknown history action." });
     } catch (error) {
       const tooLarge = error instanceof Error && error.message === "body too large";
+      // The bridge is stopping (usually a release switch): the next bridge serves the retry. Not a storage failure.
+      if (error instanceof HistoryError && error.code === "HISTORY_CLOSED") {
+        this.logger?.debug("history request during shutdown");
+        return sendJson(res, 503, { code: "HISTORY_RESTARTING", error: "History is restarting. It will be available again in a moment." });
+      }
       const code = error instanceof HistoryError ? error.code : tooLarge ? "HISTORY_TOO_LARGE" : error instanceof z.ZodError || error instanceof SyntaxError ? "HISTORY_INVALID_INPUT" : "HISTORY_STORAGE_FAILED";
-      if (code === "HISTORY_STORAGE_FAILED" || code === "HISTORY_DRIVER_UNAVAILABLE") this.logger?.warn("history_unavailable", { code, error: error instanceof Error ? error.message : String(error) });
+      if (["HISTORY_STORAGE_FAILED", "HISTORY_DRIVER_UNAVAILABLE", "HISTORY_CORRUPT"].includes(code)) this.logger?.warn("history_unavailable", { code, error: error instanceof Error ? error.message : String(error) });
       const conflict = ["HISTORY_CONFLICT", "HISTORY_DELETED", "HISTORY_GENERATION"].includes(code);
       if (conflict) return sendJson(res, 409, { code, error: "History changed in another window or was deleted. Your pending copy is retained; export it before resolving the conflict." });
       if (code === "HISTORY_TOO_LARGE") return sendJson(res, 413, { code, error: "This chat is too large to save. Export what you need, then start a new chat." });
       if (code === "HISTORY_INVALID_INPUT") return sendJson(res, 400, { code, error: "History could not be saved or loaded. Check disk space and permissions. Existing data was not replaced." });
       if (code === "HISTORY_DRIVER_UNAVAILABLE") return sendJson(res, 503, { code, error: "History storage is not available with this Node.js version. Run office-partner doctor and install a supported Node.js release. Pending chats are kept in this pane." });
+      if (code === "HISTORY_CORRUPT") return sendJson(res, 503, { code, error: "The history database is damaged and was left untouched. Chats in this pane are kept. To restore the last daily backup, run office-partner stop, replace history.db with history.db.bak in the data folder (remove history.db-wal and history.db-shm), then start Office Partner again." });
       return sendJson(res, 503, { code, error: "History could not be saved or loaded. Check disk space and permissions. Existing data was not replaced." });
     }
   }

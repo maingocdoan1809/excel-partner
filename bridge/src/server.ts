@@ -9,6 +9,7 @@ import { MockAdapter, ProviderRegistry, createDefaultRegistry } from "../../prov
 import { ProviderSessionManager } from "../../shared/src/session-manager.js";
 import { officeToolCatalog } from "../../shared/src/catalog.js";
 import { McpServers } from "../../shared/src/mcp-servers.js";
+import { refuseForeignPeers, type PeerCheck } from "../../shared/src/peer-identity.js";
 import { OfficeRuntime } from "./office-runtime.js";
 import { PROJECT_ROOT, type BridgeConfig } from "./config.js";
 import { Delegations } from "./delegations.js";
@@ -26,6 +27,7 @@ import { WorkspaceRoutes } from "./routes/workspaces.js";
 import { HistoryRoutes } from "./routes/history.js";
 import { SystemRoutes } from "./routes/system.js";
 import { SavedReferences } from "./saved-references.js";
+import { loadAdminPolicy, type LoadedPolicy } from "./policy.js";
 import { WorkbookSessions } from "./workbook-sessions.js";
 import { discoverSessionMcp } from "./session-mcp.js";
 import { WorkbookSession } from "./session.js";
@@ -63,6 +65,10 @@ export interface BridgeOptions {
   updater?: UpdateService | null;
   /** Replaces bringing a workbook's window to the front (tests); it is Excel on Windows only. */
   activateWorkbook?: (workbookName: string) => Promise<unknown>;
+  /** Replaces the same-Windows-user check on each connection (tests). */
+  peerCheck?: PeerCheck;
+  /** Replaces the machine's admin policy file (tests). */
+  policy?: LoadedPolicy;
 }
 
 /**
@@ -84,6 +90,11 @@ export class Bridge {
   private maintenance = false;
   private readonly history: HistoryRoutes;
   private readonly onShutdown?: () => void;
+  private readonly peerCheck?: PeerCheck;
+  private readonly policy: LoadedPolicy;
+  private readonly discoverMcp: (session: WorkbookSession) => ReturnType<typeof discoverSessionMcp>;
+  /** The management token; taken out of the environment at once so provider CLIs and scripts never inherit it. */
+  private readonly controlToken = process.env.OFFICE_PARTNER_CONTROL_TOKEN;
   private readonly skills: SkillStore;
   private readonly logins: ProviderLoginManager;
   private readonly mcpServers: McpServers;
@@ -94,12 +105,18 @@ export class Bridge {
   };
 
   constructor(config: BridgeConfig, options: BridgeOptions = {}) {
+    delete process.env.OFFICE_PARTNER_CONTROL_TOKEN;
     this.onShutdown = options.onShutdown;
+    this.peerCheck = options.peerCheck;
+    this.policy = options.policy ?? loadAdminPolicy();
+    const policy = this.policy.policy;
+    config = { ...config, allowOfficeJs: config.allowOfficeJs && policy.allowOfficeJs };
     this.config = config;
     const enrichSelection = options.selectionEnricher ?? enrichWindowsSelection;
     const usage = new UsageStore(options.usageFile === undefined
       ? process.env.BRIDGE_USAGE_FILE ?? path.join(PROJECT_ROOT, "run", "usage.jsonl") : options.usageFile);
     this.logger = options.logger ?? new Logger("bridge", config.logLevel);
+    if (this.policy.error) this.logger.error("admin policy is invalid; risky features are off until it is fixed", { file: this.policy.file, error: this.policy.error });
     this.sessions = new WorkbookSessions({
       ttlMs: config.sessionTtlMs,
       logger: this.logger.child("sessions"),
@@ -148,6 +165,7 @@ export class Bridge {
       delegations,
     );
     this.gateway.mcpServers = this.mcpServers;
+    this.gateway.policy = policy;
 
     this.providers = options.registry ?? createDefaultRegistry({
       bridgeUrl: config.publicBaseUrl,
@@ -168,7 +186,10 @@ export class Bridge {
       }
     }
 
-    const discoverMcp = (session: WorkbookSession) => discoverSessionMcp(this.mcpServers, config.allowOfficeJs, session);
+    const discoverMcp = this.discoverMcp = (session: WorkbookSession) => {
+      if (!policy.allowExternalMcp) session.enabledMcpServers.clear(); // nothing is started or exposed
+      return discoverSessionMcp(this.mcpServers, config.allowOfficeJs, session);
+    };
     const turns = new TurnRunner({
       isUpdating: () => this.maintenance,
       config, logger: this.logger, providers: this.providers, providerSessions, delegations, externalTools: this.gateway.externalTools,
@@ -177,14 +198,14 @@ export class Bridge {
     });
     this.panes = new PaneSockets({
       sessions: this.sessions, logger: this.logger, turns, delegations, logins: this.logins, mcpServers: this.mcpServers,
-      externalTools: this.gateway.externalTools, skills: this.skills, references,
+      externalTools: this.gateway.externalTools, skills: this.skills, references, policy,
       isTrustedRequest: req => this.isTrustedRequest(req), addinBuildId: () => this.addinBuildId(),
     });
     this.routes = {
       system: new SystemRoutes(this.sessions, this.providers, this.updater, () => this.logins.isBusy),
       files: new FileRoutes({ sessions: this.sessions, logger: this.logger, activateWorkbook: options.activateWorkbook ?? activateWorkbook }),
       mcp: new McpRoutes({ sessions: this.sessions, mcpServers: this.mcpServers, discover: discoverMcp }),
-      providers: new ProviderRoutes({ sessions: this.sessions, providers: this.providers, logins: this.logins, usage, logger: this.logger }),
+      providers: new ProviderRoutes({ sessions: this.sessions, providers: this.providers, logins: this.logins, usage, logger: this.logger, disabled: policy.disabledProviders }),
       skills: new SkillRoutes({ sessions: this.sessions, skills: this.skills, userSkills, systemPrompt }),
       testing: new TestingRoutes({ sessions: this.sessions, admin: testingAdmin }),
       workspaces: new WorkspaceRoutes({ sessions: this.sessions, references, savedReferences, logger: this.logger, workspaceConfigPath }),
@@ -213,6 +234,8 @@ export class Bridge {
     } else {
       this.server = http.createServer(requestHandler);
     }
+    // 127.0.0.1 is shared by every user on the machine: only processes of the user running the bridge may connect.
+    refuseForeignPeers(this.server, peer => this.logger.warn("refused a connection from a process of another user", peer), this.peerCheck);
     this.panes.attach(this.server);
 
     await new Promise<void>((resolve, reject) => {
@@ -272,7 +295,7 @@ export class Bridge {
     if (url.pathname === "/session/system") return this.routes.system.handle(req, res, url);
 
     if (method === "POST" && ["/admin/maintenance", "/admin/resume", "/admin/shutdown"].includes(url.pathname)) {
-      const configured = process.env.OFFICE_PARTNER_CONTROL_TOKEN, supplied = req.headers["x-office-partner-control"];
+      const configured = this.controlToken, supplied = req.headers["x-office-partner-control"];
       if (!configured || typeof supplied !== "string" || Buffer.byteLength(configured) !== Buffer.byteLength(supplied)
         || !timingSafeEqual(Buffer.from(configured), Buffer.from(supplied))) return sendJson(res, 401, { error: "unauthorized" });
       const busy = this.logins.isBusy || this.sessions.list().some(session => session.isBusy);
@@ -286,7 +309,14 @@ export class Bridge {
       return sendJson(res, 200, { busy: false, maintenance: true });
     }
 
-    if (url.pathname === "/session/mcp") return mcp.handle(req, res);
+    if (url.pathname === "/session/mcp") {
+      if (!this.policy.policy.allowExternalMcp && connectedSession(this.sessions, req)) return sendJson(res, 403, { error: "External MCP servers are turned off by your administrator." });
+      return mcp.handle(req, res);
+    }
+    if (method === "GET" && url.pathname === "/session/policy") {
+      if (!connectedSession(this.sessions, req)) return sendJson(res, 401, { error: "unauthorized" });
+      return sendJson(res, 200, { policy: this.policy.policy, file: this.policy.file, error: this.policy.error ?? null });
+    }
     if (method === "GET" && (url.pathname === "/" || url.pathname === "/index.html")) return this.serveStandalonePage(res);
     if (method === "GET" && url.pathname === "/health") {
       return sendJson(res, 200, {
@@ -299,7 +329,6 @@ export class Bridge {
         maintenance: this.maintenance,
         uptimeMs: Date.now() - this.startedAt,
         tls: Boolean(this.config.tls),
-        sessions: this.sessions.list().map((session) => session.toJSON()),
       });
     }
     // Development only: lets scripts/tool-call.ts act as an independent MCP client against a
@@ -314,7 +343,7 @@ export class Bridge {
     if (method === "GET" && url.pathname === "/internal/tools") {
       const session = connectedSession(this.sessions, req);
       if (!session) return sendJson(res, 401, { error: "unauthorized" });
-      const external = await discoverSessionMcp(this.mcpServers, this.config.allowOfficeJs, session);
+      const external = await this.discoverMcp(session);
       return sendJson(res, 200, { tools: [...officeToolCatalog(session.host, this.config.allowOfficeJs, session.capabilities), ...[...external.values()].map(tool => tool.definition)] });
     }
     if (method === "POST" && url.pathname === "/internal/tool") return this.handleInternalTool(req, res);
@@ -354,7 +383,8 @@ export class Bridge {
     try {
       const html = readFileSync(path.join(PROJECT_ROOT, "frontend", "taskpane", "index.html"), "utf8").replace("__ADDIN_BUILD_ID__", this.addinBuildId());
       res.writeHead(200, { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" });
-      res.end(standalonePage(html));
+      // The tab has no Office.js, so its policy does not name Microsoft's script host either.
+      res.end(standalonePage(html).replace(" https://appsforoffice.microsoft.com", ""));
     } catch (error) {
       this.logger.error("could not serve the browser page", { error: String(error) });
       sendJson(res, 500, { error: "page_unavailable" });
@@ -469,20 +499,23 @@ export class Bridge {
   /* Lifecycle                                                               */
   /* ----------------------------------------------------------------------- */
 
+  /** Stop taking requests first, then stop the providers, and close history last: nothing can reach a closed store. */
   async close(): Promise<void> {
-    this.logins.dispose();
-    this.history.close();
+    this.maintenance = true;
     if (this.heartbeat) clearInterval(this.heartbeat);
     if (this.reaper) clearInterval(this.reaper);
     this.panes.closeSockets();
-    await this.mcpServers.close();
-    await this.gateway.externalTools.close();
-    await this.providers.disposeAll();
-    await this.panes.close();
-    await new Promise<void>((resolve) => {
+    const closed = new Promise<void>((resolve) => {
       if (!this.server) return resolve();
       this.server.close(() => resolve());
       this.server.closeAllConnections(); // keep-alive connections from panes would otherwise hold close() open
     });
+    await this.panes.close();
+    this.logins.dispose();
+    await this.mcpServers.close();
+    await this.gateway.externalTools.close();
+    await this.providers.disposeAll();
+    await closed;
+    this.history.close();
   }
 }

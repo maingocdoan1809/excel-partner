@@ -1,6 +1,7 @@
 import type { ChildProcess } from "node:child_process";
 import { createInterface } from "node:readline";
 import spawn from "cross-spawn";
+import { trackProcess } from "./process-registry.js";
 
 export interface JsonRpcOptions {
   command: string;
@@ -59,6 +60,7 @@ export class JsonRpcPeer {
       stdio: ["pipe", "pipe", "pipe"],
       windowsHide: true,
     });
+    trackProcess(this.child);
 
     createInterface({ input: this.child.stdout! }).on("line", (line) => this.onLine(line));
     createInterface({ input: this.child.stderr! }).on("line", (line) => {

@@ -5,6 +5,7 @@ import path from "node:path";
 import { randomBytes, randomUUID, createHash, timingSafeEqual } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { createDefaultRegistry, type ProviderRegistry } from "../../providers/src/registry.js";
+import { refuseForeignPeers, type PeerCheck } from "../../shared/src/peer-identity.js";
 import { GatewayEngine } from "./engine.js";
 import { ConversationStore } from "./conversations.js";
 import { ApiError, parseRequest, stable, type ApiMessage, type MessagesRequest } from "./protocol.js";
@@ -20,6 +21,8 @@ export interface ServerOptions {
   registry?: ProviderRegistry; relayEntry?: string; log?: (entry: object) => void;
   onShutdown?: () => void;
   conversationFile?: string;
+  /** Replaces the same-Windows-user check on each connection (tests). */
+  peerCheck?: PeerCheck;
 }
 export class GatewayServer {
   private readonly servers: Array<http.Server | https.Server> = [];
@@ -48,6 +51,8 @@ export class GatewayServer {
         const server = this.options.tls ? https.createServer({ cert: fs.readFileSync(this.options.tls.cert), key: fs.readFileSync(this.options.tls.key) }, handler) : http.createServer(handler);
         server.headersTimeout = 30_000;
         server.requestTimeout = 60_000;
+        // Loopback is shared by every user on the machine; the token alone must not be the only fence.
+        refuseForeignPeers(server, peer => this.options.log?.({ event: "foreign_peer_refused", ...peer }), this.options.peerCheck);
         try {
           await new Promise<void>((resolve, reject) => { server.once("error", reject); server.listen(this.options.config.port, host, resolve); });
         } catch (error) {

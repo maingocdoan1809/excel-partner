@@ -12,6 +12,7 @@ import { publishWorkbookName, readWorkbookName, refreshSheetNames } from "./work
 import { submit } from "./turn.js";
 import { prepareRuntime } from "./prepare.js";
 import { app } from "./state.js";
+import { applyAutoApprovePolicy } from "./composer.js";
 
 export function createBridgeClient(): BridgeClient {
   return new BridgeClient({
@@ -39,7 +40,8 @@ export function createBridgeClient(): BridgeClient {
       return response;
     },
     onState: renderState,
-    onHello: ({ addinBuildId }) => {
+    onHello: ({ addinBuildId, autoApproveAllowed }) => {
+      applyAutoApprovePolicy(autoApproveAllowed);
       void store.connect().then(async () => {
         if (app.restoreChatId && !app.currentRequestId) {
           const id = app.restoreChatId; app.restoreChatId = null;

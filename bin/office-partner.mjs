@@ -1,7 +1,6 @@
 #!/usr/bin/env node
 import { spawn, spawnSync } from "node:child_process";
-import { X509Certificate } from "node:crypto";
-import { copyFileSync, existsSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import https from "node:https";
 import os from "node:os";
 import path from "node:path";
@@ -72,39 +71,18 @@ async function waitForHealth(ms) {
   }
   return false;
 }
+/** Creates the localhost certificate, or renews it well before it expires (see certificate.mjs). True when it changed. */
 async function ensureCertificate() {
-  if (existsSync(cert) && existsSync(key)) {
-    const current = new X509Certificate(readFileSync(cert));
-    if (new Date(current.validTo).getTime() > Date.now() + 30 * 86400000) return;
-    fail(`Certificate expires soon. Run "office-partner uninstall", then "office-partner setup" to renew it.`);
-  }
-  if (existsSync(cert) || existsSync(key)) fail(`Incomplete certificate pair in ${dataDir}; remove it and rerun setup.`);
-  mkdirSync(dataDir, { recursive: true });
-  // Reuse the Agent Gateway's localhost certificate so the user trusts one certificate only.
-  const shared = path.join(process.env.LOCALAPPDATA || os.homedir(), "Agent Gateway");
-  const sharedCert = path.join(shared, "localhost.crt"), sharedKey = path.join(shared, "localhost.key");
-  if (existsSync(sharedCert) && existsSync(sharedKey)
-    && new Date(new X509Certificate(readFileSync(sharedCert)).validTo).getTime() > Date.now() + 30 * 86400000) {
-    copyFileSync(sharedCert, cert); copyFileSync(sharedKey, key);
-    console.log(`Reusing the Agent Gateway certificate from ${shared}`);
-    return;
-  }
-  const { default: selfsigned } = await import("selfsigned");
-  const pems = await selfsigned.generate([{ name: "commonName", value: "localhost" }], {
-    algorithm: "sha256",
-    notAfterDate: new Date(Date.now() + 365 * 86400000),
-    extensions: [
-      { name: "basicConstraints", cA: false },
-      { name: "keyUsage", digitalSignature: true, keyEncipherment: true },
-      { name: "extKeyUsage", serverAuth: true },
-      { name: "subjectAltName", altNames: [{ type: 2, value: "localhost" }, { type: 7, ip: "127.0.0.1" }] },
-    ],
-  });
-  writeFileSync(cert, pems.cert, { mode: 0o600 });
-  writeFileSync(key, pems.private, { mode: 0o600 });
+  const { ensureCertificate: ensure } = await import("./certificate.mjs");
+  const result = await ensure({ dir: dataDir, sharedDir: path.join(process.env.LOCALAPPDATA || os.homedir(), "Agent Gateway") });
+  if (result.reused) console.log("Reusing the Agent Gateway certificate.");
+  if (result.status === "renewed") console.log("Renewed the localhost certificate before it expires.");
+  return result.status === "renewed";
 }
 async function start() {
   if (!existsSync(cert) || !existsSync(key)) fail("Run 'office-partner setup' first.");
+  // Every start (also the one at sign-in) renews a certificate that expires soon; a running bridge still serves the old one.
+  if (await ensureCertificate() && await health()) await stop();
   if (await health()) { console.log("Bridge is already running at https://localhost:8765"); return; }
   const recorded = livePid();
   if (recorded) {
@@ -371,7 +349,7 @@ async function main() {
     return;
   }
   if (["providers", "versions", "rollback", "repair", "diagnostics", "debug", "update", "fix"].includes(command)) {
-    const managementArgs = command === "update" && updateSpec ? ["update", "--from", updateSpec] : args;
+    const managementArgs = command === "update" && updateSpec ? ["update", "--from", updateSpec, ...args.filter(arg => arg === "--allow-downgrade")] : args;
     if (runWithRecoveryTools(managementArgs)) return;
     const { managementMain } = await import("./manage.mjs");
     await managementMain(managementArgs, { root, dataDir }); return;
@@ -414,7 +392,7 @@ async function main() {
     }
     runtimeStore.changeState(dataDir, state => { if (wantAddin) state.owners.addin = true; if (wantGateway) state.owners.gateway = true; });
     if (path.resolve(root) !== path.resolve(baseline.root) && livePid()) await stop();
-    if (dispatchActive(root, ["setup", target, "--skip-providers"], dataDir)) return;
+    if (dispatchActive(root, ["setup", target, "--skip-providers", ...flags.filter(flag => flag === "--no-sideload")], dataDir)) return;
   }
   // The add-in needs Word, Excel or PowerPoint desktop on Windows; the gateway does not. Each part
   // runs on its own, so a failure in one never prevents the other from running.
@@ -427,7 +405,8 @@ async function main() {
     case "setup":
       if (wantAddin) add("Add-in", addin(async () => {
         await ensureCertificate();
-        powershell("register");
+        // --no-sideload: the manifest comes from Microsoft 365 centralized deployment, so no per-user developer registration.
+        powershell("register", flags.includes("--no-sideload") ? ["-NoSideload"] : []);
         await stop();
         await start();
         console.log("Restart Word, Excel and PowerPoint, then open Home > Office Partner. Use Settings > Sign in to GitHub Copilot for device-code sign-in; other providers use their own CLI login.");

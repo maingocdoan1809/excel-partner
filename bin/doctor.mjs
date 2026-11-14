@@ -5,12 +5,15 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { collectDoctor, PROVIDERS } from "./doctor-checks.mjs";
 
+const USAGE = "Usage: office-partner-doctor [addin|gateway|all] [--provider <id>] [--probe] [--mcp] [--integrity] [--host excel|word|powerpoint] [--json] [--output <new file>]\n";
+
 export function parseDoctorArgs(args) {
-  const result = { target: "all", probe: false, mcp: false, integrity: false, host: "excel", json: false };
+  const result = { target: "all", probe: false, mcp: false, integrity: false, host: "excel", json: false, help: false };
   let targetSet = false;
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
     if (["addin", "gateway", "all"].includes(arg) && !targetSet) { result.target = arg; targetSet = true; }
+    else if (arg === "--help" || arg === "-h") result.help = true;
     else if (arg === "--json") result.json = true;
     else if (arg === "--probe") result.probe = true;
     else if (arg === "--mcp") result.mcp = true;
@@ -28,6 +31,7 @@ export function parseDoctorArgs(args) {
 
 export async function doctorMain(args, options = {}) {
   const parsed = parseDoctorArgs(args);
+  if (parsed.help) { (options.write ?? (text => process.stdout.write(text)))(USAGE); return 0; }
   const root = options.root ?? path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
   const report = await collectDoctor({ ...options, ...parsed, root });
   const serialized = JSON.stringify(report, null, 2) + "\n";

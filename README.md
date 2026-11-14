@@ -154,7 +154,8 @@ Cells that already hold something are not overwritten unless you agree; cells th
 - Large writes are sent in batches of about 15,000 cells with recalculation paused (the previous calculation mode is always restored), so Excel stays responsive.
 - Python and skill scripts (`run_python`, `run_skill_script`) run with **your Windows user permissions** and can reach local files and the network. Keep them on **Ask** unless you trust the task.
 - `execute_office_js` (free-form Office.js) is on by default. Disable it with `BRIDGE_ALLOW_OFFICE_JS=0` or `"allowOfficeJs": false` in `config.json`, then restart the bridge.
-- Selected cells and workbook context are sent to your chosen provider as part of each request. Their data policy applies.
+- Selected cells and workbook context are sent to your chosen provider as part of each request. Their data policy applies. Details: [docs/privacy-and-data-flow.md](docs/privacy-and-data-flow.md).
+- Organizations: silent install, central manifest deployment and the admin policy file are described in [docs/enterprise-deployment.md](docs/enterprise-deployment.md) and [docs/admin-policy.md](docs/admin-policy.md).
 
 ### Instructions
 

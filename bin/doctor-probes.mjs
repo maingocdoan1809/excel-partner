@@ -5,8 +5,25 @@ import https from "node:https";
 import http from "node:http";
 import path from "node:path";
 import { createHash, randomUUID } from "node:crypto";
+import { createRequire } from "node:module";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
-export async function runCommand(command, args, { env, timeoutMs = 8000 } = {}) {
+const RELEASE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+
+/**
+ * A dependency from `<root>/node_modules` only. A bare import would keep looking in parent folders up to C:
+ode_modules,
+ * which any user can create, so a copy of bin/ without node_modules could load a planted module.
+ */
+export async function importFromRelease(root, specifier) {
+  let resolved, modules;
+  try { modules = fs.realpathSync(path.join(root, "node_modules")); resolved = createRequire(path.join(root, "package.json")).resolve(specifier); }
+  catch { throw new Error(`DEPENDENCY_MISSING: ${specifier} is not installed in ${root}`); }
+  if (!resolved.startsWith(modules + path.sep)) throw new Error(`DEPENDENCY_MISSING: ${specifier} is not installed in ${root}`);
+  return import(pathToFileURL(resolved).href);
+}
+
+export async function runCommand(command, args, { env, timeoutMs = 8000, root = RELEASE_ROOT } = {}) {
   let nodeScript = /\.[cm]?js$/i.test(command);
   if (!nodeScript && path.isAbsolute(command)) {
     let handle;
@@ -17,7 +34,7 @@ export async function runCommand(command, args, { env, timeoutMs = 8000 } = {}) 
   if (nodeScript) { args = [command, ...args]; command = process.execPath; }
   let launch = spawn;
   if (/\.(cmd|bat|m?js)$/i.test(command) || process.platform === "win32" && !/\.(exe|com)$/i.test(command)) {
-    try { launch = (await import("cross-spawn")).default; }
+    try { launch = (await importFromRelease(root, "cross-spawn")).default; }
     catch { return { code: null, errorCode: "RUNNER_MISSING", stdout: "", stderr: "" }; }
   }
   return new Promise(resolve => {
@@ -78,8 +95,8 @@ export function requestHealth({ port, ca, timeoutMs = 2000 }) {
 export async function probeMcp({ root, host, timeoutMs = 8000 }) {
   const entry = path.join(root, "dist", "excel_mcp", "src", "cli.js");
   if (!fs.existsSync(entry)) throw new Error("MCP_ENTRYPOINT_MISSING");
-  const { Client } = await import("@modelcontextprotocol/sdk/client/index.js");
-  const { StdioClientTransport } = await import("@modelcontextprotocol/sdk/client/stdio.js");
+  const { Client } = await importFromRelease(root, "@modelcontextprotocol/sdk/client/index.js");
+  const { StdioClientTransport } = await importFromRelease(root, "@modelcontextprotocol/sdk/client/stdio.js");
   const env = {};
   for (const key of ["PATH", "Path", "SystemRoot", "SYSTEMROOT", "TEMP", "TMP"]) {
     if (process.env[key]) env[key] = process.env[key];

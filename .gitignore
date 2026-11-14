@@ -34,3 +34,4 @@ excel-partner.config.json
 # Local working files that are not part of the add-in
 /.archify/
 /Excel Partner.pptx
+THIRD_PARTY_NOTICES.md

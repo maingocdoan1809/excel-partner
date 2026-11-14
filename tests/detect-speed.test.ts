@@ -10,6 +10,7 @@ class SlowCheckAdapter extends BaseCliAdapter {
   readonly id = "claude" as const;
   readonly capabilities = MockAdapter.capabilities;
   loginChecks = 0;
+  loginStartedAt = 0;
   constructor(private readonly versionCode: number, private readonly login: ProviderConnectionStatus = "ready") {
     super({ bridgeUrl: "http://127.0.0.1:1", mcp: { command: process.execPath, args: [] }, logger: { debug() {}, warn() {} } });
   }
@@ -18,6 +19,7 @@ class SlowCheckAdapter extends BaseCliAdapter {
   }
   protected override async checkLogin() {
     this.loginChecks += 1;
+    this.loginStartedAt = performance.now();
     await new Promise(resolve => setTimeout(resolve, DELAY_MS));
     return { status: this.login, hint: this.login === "ready" ? null : "sign in" };
   }
@@ -33,10 +35,10 @@ describe("checking a provider CLI", () => {
     const adapter = new SlowCheckAdapter(0);
     const started = performance.now();
     const detection = await adapter.detect(true);
-    const elapsed = performance.now() - started;
     expect(detection).toMatchObject({ installed: true, status: "ready" });
-    // Two checks of 400 ms one after the other would take at least 800 ms.
-    expect(elapsed).toBeLessThan(DELAY_MS * 1.8);
+    // One after the other, the login check would start only after the version check (a CLI that takes 400 ms) ended.
+    // Wall-clock totals are unreliable on Windows, where starting a process alone can take hundreds of ms.
+    expect(adapter.loginStartedAt - started).toBeLessThan(DELAY_MS / 2);
   });
 
   it("still reports the login that was found", async () => {
