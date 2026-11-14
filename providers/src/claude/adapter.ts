@@ -34,6 +34,15 @@ interface ClaudeSession {
   active: ClaudeTurn | null;
   /** The CLI re-emits the messages it takes (`--replay-user-messages`): needed to hand it a message during a turn. */
   replaysMessages: boolean;
+  /** The model the process runs with now (null: the CLI's default). It changes in place, from the next turn on. */
+  model: string | null;
+  /** The reasoning effort it runs with now. It changes in place too. */
+  effort: string;
+}
+
+function withoutEffortLevel(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const { CLAUDE_CODE_EFFORT_LEVEL: _pinned, ...rest } = env;
+  return rest;
 }
 
 interface ClaudeTurn {
@@ -165,8 +174,8 @@ export class ClaudeAdapter extends BaseCliAdapter {
     credits: false,
     loginKind: "browser",
     logout: true,
-    liveModel: false,
-    liveEffort: false,
+    liveModel: true,
+    liveEffort: true,
   };
   readonly capabilities = ClaudeAdapter.capabilities;
 
@@ -267,7 +276,9 @@ export class ClaudeAdapter extends BaseCliAdapter {
           ...(thinkingDisplay ? ["--thinking-display", "summarized"] : []),
         ],
         cwd: ensureWorkspaceDir(),
-        env: { ...this.env, CLAUDE_CODE_EFFORT_LEVEL: ctx.effort ?? "medium" },
+        // The effort is the `--effort` flag's, which the CLI can change while it runs; the environment variable would pin it
+        // (and would also override the flag), so the CLI is started without one.
+        env: withoutEffortLevel(this.env),
         onStderr: line => this.runtime.logger.debug(`claude stderr: ${line}`),
         onMessage: message => { if (session) this.onMessage(session, message); },
         onRuntimeClosed: ctx.onRuntimeClosed,
@@ -280,7 +291,7 @@ export class ClaudeAdapter extends BaseCliAdapter {
         },
       });
       session = { requestUserInput: ctx.requestUserInput, mcp: ctx.mcp, mcpConfigPath,
-        conversationId, resumable: Boolean(ctx.resumeSessionId), process: transport, active: null, replaysMessages: replayMessages };
+        conversationId, resumable: Boolean(ctx.resumeSessionId), process: transport, active: null, replaysMessages: replayMessages, model: model ?? null, effort: ctx.effort ?? "medium" };
       await transport.request("initialize", ctx.signal);
       ctx.signal.throwIfAborted();
       this.sessions.set(providerSessionId, session);
@@ -323,6 +334,8 @@ export class ClaudeAdapter extends BaseCliAdapter {
     input.signal.addEventListener("abort", abort, { once: true });
     try {
       input.signal.throwIfAborted();
+      await this.applyModel(session, input.model ?? this.env.CLAUDE_MODEL ?? null);
+      await this.applyEffort(session, input.effort ?? "medium");
       const text = input.command ? `/${input.command.name}${input.command.args ? ` ${input.command.args}` : ""}` : buildTurnPrompt(input.prompt, input.selection);
       const content = input.images?.length ? [{ type: "text", text }, ...input.images.map(image => ({ type: "image", source: { type: "base64", media_type: image.mediaType, data: image.data } }))] : text;
       session.process.write({ type: "user", session_id: session.conversationId, parent_tool_use_id: null,
@@ -342,6 +355,22 @@ export class ClaudeAdapter extends BaseCliAdapter {
         session.active = null;
       }
     }
+  }
+
+  /** Switch the running CLI to another model (no model: its default) instead of opening it again. */
+  private async applyModel(session: ClaudeSession, model: string | null): Promise<void> {
+    if (model === session.model) return;
+    try { await session.process.request("set_model", session.active?.interruptController.signal, 10_000, model ? { model } : {}); }
+    catch (error) { throw new Error(`Could not change the model: ${error instanceof Error ? error.message : String(error)}`); }
+    session.model = model;
+  }
+
+  /** Change the reasoning effort of the running CLI the way its own `/effort` does, instead of opening it again. */
+  private async applyEffort(session: ClaudeSession, effort: string): Promise<void> {
+    if (effort === session.effort) return;
+    try { await session.process.request("apply_flag_settings", session.active?.interruptController.signal, 10_000, { settings: { effortLevel: effort } }); }
+    catch (error) { throw new Error(`Could not change the effort: ${error instanceof Error ? error.message : String(error)}`); }
+    session.effort = effort;
   }
 
   private onMessage(session: ClaudeSession, message: Record<string, any>): void {

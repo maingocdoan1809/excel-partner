@@ -14,6 +14,7 @@ export interface ProviderSessionState {
   capabilities: ToolCapabilities;
 }
 interface SessionLogger {
+  info?(message: string, details?: Record<string, unknown>): void;
   debug(message: string, details?: Record<string, unknown>): void;
   warn(message: string, details?: Record<string, unknown>): void;
 }
@@ -40,11 +41,31 @@ export class ProviderSessionManager<S extends ProviderSessionState = ProviderSes
     private readonly log: SessionLogger,
   ) {}
 
-  async ensure(
+  /** The last `ensure` of each session: calls for one session run one after another, so a warm-up and a turn never open two runtimes. */
+  private readonly opening = new WeakMap<S, Promise<unknown>>();
+
+  ensure(
     session: S,
     settings: ProviderSessionSettings,
     context: () => StartSessionContext,
     /** Called just before a runtime is opened (not when an open one is reused), so callers can say so. */
+    onOpening?: () => void,
+  ): Promise<string> {
+    const previous = this.opening.get(session);
+    // Nothing in front of it: start at once. Otherwise wait for the one in front, whose outcome does not matter here.
+    const run = previous
+      ? previous.then(() => undefined, () => undefined).then(() => this.ensureNow(session, settings, context, onOpening))
+      : this.ensureNow(session, settings, context, onOpening);
+    this.opening.set(session, run);
+    const clear = () => { if (this.opening.get(session) === run) this.opening.delete(session); };
+    run.then(clear, clear);
+    return run;
+  }
+
+  private async ensureNow(
+    session: S,
+    settings: ProviderSessionSettings,
+    context: () => StartSessionContext,
     onOpening?: () => void,
   ): Promise<string> {
     if (!session.provider) throw new Error("Select a provider before opening a session");
@@ -62,7 +83,8 @@ export class ProviderSessionManager<S extends ProviderSessionState = ProviderSes
       || (!liveEffort && session.providerEffort !== settings.effort)
       || session.systemPromptRevision !== settings.systemPromptRevision
       || session.capabilities.webSearch !== settings.capabilities.webSearch
-      || session.capabilities.playwright !== settings.capabilities.playwright;
+      || session.capabilities.playwright !== settings.capabilities.playwright
+      || Boolean(session.capabilities.connectedFiles) !== Boolean(settings.capabilities.connectedFiles);
     const runtimeClosed = this.lifetimes.get(session)?.closed === true;
     if (session.providerSessionId && (changed || runtimeClosed)) {
       await this.close(session, runtimeClosed ? "runtime_closed" : sameChat ? "configuration_change" : "chat_change", sameChat);
@@ -89,7 +111,10 @@ export class ProviderSessionManager<S extends ProviderSessionState = ProviderSes
       await adapter.closeSession(id);
       throw new Error("Provider session opening was cancelled");
     }
-    this.log.debug("runtime_opened", { sessionId: session.id, provider: adapter.id, resume: Boolean(resumeSessionId), durationMs: Math.round(performance.now() - started) });
+    const durationMs = Math.round(performance.now() - started);
+    this.log.debug("runtime_opened", { sessionId: session.id, provider: adapter.id, resume: Boolean(resumeSessionId), durationMs });
+    // The bridge's log level hides debug lines; how long a CLI takes to open is what to look at when sending feels slow.
+    this.log.info?.("provider runtime opened", { provider: adapter.id, resume: Boolean(resumeSessionId), durationMs });
     session.providerSessionId = id;
     this.lifetimes.set(session, lifetime);
     session.providerNativeSessionId = resumeSessionId ?? null;

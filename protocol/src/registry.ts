@@ -162,13 +162,32 @@ export const SERVER_TOOLS: readonly ExcelToolName[] = ["playwright_browser", "li
 /** Tools that need the user to have switched on the browser (Playwright) in Tools. */
 export const BROWSER_TOOLS: readonly ExcelToolName[] = ["playwright_browser", "list_test_sessions", "open_test_browser", "save_test_script", "finish_test_run"];
 
+/**
+ * Tools of testing a web system from a test-case sheet. They only make sense with the browser, so they come with it: every tool
+ * offered to a model is part of what it reads before each answer, and most conversations never use these.
+ */
+export const WEB_TESTING_TOOLS: readonly ExcelToolName[] = ["record_test_results", "read_site_knowledge", "save_site_knowledge", "delete_site_knowledge"];
+
+/** Tools for work across files. They only make sense while another file is open, so they are offered only then. */
+export const CONNECTED_FILE_TOOLS: readonly ExcelToolName[] = ["list_connected_files", "read_connected_file", "send_to_connected_file"];
+
 /** Tools controlled by allowOfficeJs (enabled by default; BRIDGE_ALLOW_OFFICE_JS=0 disables them). */
 export const OPT_IN_TOOLS: readonly ToolName[] = ["execute_office_js", "edit_slide_xml"];
 
+/** What a session offers beyond the tools every conversation has: each is switched on by the user (web search, browser) or by the situation (another file open). */
+export interface ToolGroups { webSearch?: boolean; playwright?: boolean; connectedFiles?: boolean }
+
+/** Whether the tool is offered given the groups that are on. */
+export function toolInGroups(name: string, groups: ToolGroups): boolean {
+  if ((BROWSER_TOOLS as readonly string[]).includes(name) || (WEB_TESTING_TOOLS as readonly string[]).includes(name)) return groups.playwright === true;
+  if ((CONNECTED_FILE_TOOLS as readonly string[]).includes(name)) return groups.connectedFiles === true;
+  return true;
+}
+
 /** Excel tool names a session exposes, given whether the opt-in tools are enabled. */
-export function exposedToolNames(allowOptIn: boolean, capabilities: { webSearch?: boolean; playwright?: boolean } = {}): ExcelToolName[] {
+export function exposedToolNames(allowOptIn: boolean, capabilities: ToolGroups = {}): ExcelToolName[] {
   return EXCEL_TOOL_NAMES.filter((name) => (allowOptIn || !(OPT_IN_TOOLS as readonly string[]).includes(name))
-    && (!BROWSER_TOOLS.includes(name) || capabilities.playwright));
+    && toolInGroups(name, capabilities));
 }
 
 export function isExcelToolName(name: string): name is ExcelToolName {

@@ -1,10 +1,11 @@
 import { z } from "zod";
 import {
-  BROWSER_TOOLS,
   EXCEL_TOOL_NAMES,
   OPT_IN_TOOLS,
   parseToolInput,
+  toolInGroups,
   type ExcelToolName,
+  type ToolGroups,
   type ToolName,
 } from "./registry.js";
 import { PPT_TOOL_NAMES } from "./tools-ppt.js";
@@ -64,22 +65,20 @@ export const TOOL_HOSTS: Readonly<Record<string, readonly HostId[]>> = {
   ...Object.fromEntries(PPT_TOOLS.map((name): [string, readonly HostId[]] => [name, ["powerpoint"]])),
 };
 
-export interface ToolExposureOptions {
+export interface ToolExposureOptions extends ToolGroups {
   /** Whether opt-in tools such as `execute_office_js` are enabled (BRIDGE_ALLOW_OFFICE_JS). */
   allowOptIn: boolean;
-  webSearch?: boolean;
-  playwright?: boolean;
 }
 
 /** Tool names a session of `host` exposes. The single source for MCP `ListTools`, the bridge gate and provider fallbacks. */
 export function toolsForHost(host: HostId, opts: ToolExposureOptions): string[] {
   return Object.keys(TOOL_HOSTS).filter((name) => TOOL_HOSTS[name]!.includes(host)
     && (opts.allowOptIn || !(OPT_IN_TOOLS as readonly string[]).includes(name))
-    && (opts.playwright || !(BROWSER_TOOLS as readonly string[]).includes(name)));
+    && toolInGroups(name, opts));
 }
 
 /** Same as `exposedToolNames` for a host: `exposedToolNamesForHost("excel", a, c)` equals `exposedToolNames(a, c)`. */
-export function exposedToolNamesForHost(host: HostId, allowOptIn: boolean, capabilities: { webSearch?: boolean; playwright?: boolean } = {}): string[] {
+export function exposedToolNamesForHost(host: HostId, allowOptIn: boolean, capabilities: ToolGroups = {}): string[] {
   return toolsForHost(host, { allowOptIn, ...capabilities });
 }
 

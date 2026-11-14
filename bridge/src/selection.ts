@@ -4,7 +4,6 @@ import {
   type ExcelSelectionSnapshot,
   type HostId,
 } from "../../protocol/src/index.js";
-import type { SelectionEnricher } from "./windows-selection.js";
 
 export type NormalizedSelection = { ok: true; selection: AnySelectionSnapshot | null } | { ok: false; message: string };
 
@@ -25,10 +24,4 @@ export function normalizePromptSelection(raw: unknown, host: HostId): Normalized
     return { ok: true, selection: { ...(raw as object), host: "excel" } as ExcelSelectionSnapshot };
   }
   return { ok: false, message: "the selection is not a valid snapshot" };
-}
-
-/** Add what the machine knows about the selection. Only Excel on Windows has anything to add (selected shapes through COM). */
-export async function enrichSelectionForHost(host: HostId, selection: AnySelectionSnapshot, enrich: SelectionEnricher, signal?: AbortSignal): Promise<AnySelectionSnapshot> {
-  if (host !== "excel" || selection.host !== "excel") return selection;
-  return { ...(await enrich(selection, signal)), host: "excel" };
 }

@@ -7,7 +7,7 @@ import {
   type CallToolResult,
 } from "@modelcontextprotocol/sdk/types.js";
 import { ZodError } from "zod";
-import { DEFAULT_HOST, exposedToolNamesForHost, isKnownToolName, parseToolInputForHost, type HostId, type ToolError } from "../../protocol/src/index.js";
+import { DEFAULT_HOST, exposedToolNamesForHost, isKnownToolName, parseToolInputForHost, type HostId, type ToolError, type ToolGroups } from "../../protocol/src/index.js";
 import type { ToolForwarder } from "./forwarder.js";
 
 export const SERVER_INFO = { name: "excel-ai-addin", version: "0.1.0" } as const;
@@ -16,7 +16,7 @@ export interface ExcelMcpOptions {
   dynamicTools?: boolean;
   /** Expose opt-in tools such as execute_office_js. */
   allowOptInTools?: boolean;
-  capabilities?: { webSearch?: boolean; playwright?: boolean };
+  capabilities?: ToolGroups;
   /** The Office app the session belongs to (OFFICE_HOST); only that host's tools are listed and callable. Defaults to Excel. */
   host?: HostId;
 }

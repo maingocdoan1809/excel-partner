@@ -12,6 +12,7 @@ import {
   type HostId,
   type ProviderId,
   type ServerMessage,
+  type ToolCapabilities,
   type ToolResult,
   type ToolError,
   UserInputRequestSchema,
@@ -83,7 +84,7 @@ export class WorkbookSession implements ProviderSessionState {
   systemPromptRevision: string | null = null;
   externalMcpTools: ExternalMcpCatalog = new Map();
   readonly enabledMcpServers = new Set<string>();
-  capabilities = { webSearch: false, playwright: false };
+  capabilities: ToolCapabilities = { webSearch: false, playwright: false };
   providerEffort: "low" | "medium" | "high" = "medium";
   activeRequestId: string | null = null;
   turnController: AbortController | null = null;

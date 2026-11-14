@@ -36,7 +36,7 @@ async function main(): Promise<void> {
   }
 
   const forwarder = new HttpToolForwarder({ bridgeUrl, sessionId, token });
-  const server = createExcelMcpServer(forwarder, { dynamicTools: process.env.EXCEL_DYNAMIC_TOOLS === "1", host, allowOptInTools: process.env.EXCEL_ALLOW_OFFICE_JS === "1", capabilities: { webSearch: process.env.EXCEL_WEB_SEARCH === "1", playwright: process.env.EXCEL_PLAYWRIGHT === "1" } });
+  const server = createExcelMcpServer(forwarder, { dynamicTools: process.env.EXCEL_DYNAMIC_TOOLS === "1", host, allowOptInTools: process.env.EXCEL_ALLOW_OFFICE_JS === "1", capabilities: { webSearch: process.env.EXCEL_WEB_SEARCH === "1", playwright: process.env.EXCEL_PLAYWRIGHT === "1", connectedFiles: process.env.EXCEL_CONNECTED_FILES === "1" } });
   const transport = new StdioServerTransport();
   await server.connect(transport);
 }

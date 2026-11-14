@@ -136,7 +136,12 @@ export interface ProviderAdapter {
   /** Models advertised by the installed CLI, when it offers a catalog. */
   listModels?(): Promise<ProviderModelCatalog>;
   /** Read the native title without a model request. Missing titles stay unknown. */
-  sessionTitle?(nativeSessionId: string): Promise<string | undefined>;
+  sessionTitle?(nativeSessionId: string, options?: { cheapOnly?: boolean }): Promise<string | undefined>;
+  /**
+   * What the CLI itself recorded for a conversation: the session's total token usage. Only for a CLI whose per-turn
+   * figure is not complete or costs a process to read; it is asked for when someone looks at the usage, not after every turn.
+   */
+  sessionUsage?(nativeSessionId: string): Promise<{ usage: import("../../protocol/src/index.js").TokenUsage; title?: string }>;
   /** Whether the CLI is logged in and ready to accept a turn. */
   connectionStatus(): Promise<ProviderConnectionStatus>;
   /** Open one long-lived runtime, creating or resuming a native conversation.

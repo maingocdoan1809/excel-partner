@@ -10,7 +10,7 @@ import { describeSiteKnowledgeApproval } from "../frontend/taskpane/permissions.
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { exposedToolNames, normalizeOrigin, parseToolInput } from "../protocol/src/index.js";
+import { exposedToolNames, normalizeOrigin, parseToolInput, WEB_TESTING_TOOLS } from "../protocol/src/index.js";
 import { MockWorkbook, installOfficeMock } from "./support/office-mock.js";
 
 let book: MockWorkbook;
@@ -113,7 +113,11 @@ describe("open_test_browser", () => {
     expect(() => parseToolInput("open_test_browser", { origins: [] })).toThrow();
     expect(exposedToolNames(false, { playwright: true })).toEqual(expect.arrayContaining(["open_test_browser", "record_test_results"]));
     expect(exposedToolNames(false, {})).not.toContain("open_test_browser");
-    expect(exposedToolNames(false, {})).toContain("record_test_results");
+    // Testing a web system needs the browser, so its tools (the sheet, the notes about the system) come with it.
+    for (const name of WEB_TESTING_TOOLS) {
+      expect(exposedToolNames(false, {})).not.toContain(name);
+      expect(exposedToolNames(false, { playwright: true })).toContain(name);
+    }
   });
 
   it("asks the user every time and then limits the browser to exactly the approved sites", async () => {

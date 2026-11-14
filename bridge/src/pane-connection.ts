@@ -21,6 +21,8 @@ interface SocketState {
   session: WorkbookSession | null;
   helloDone: boolean;
   alive: boolean;
+  /** The pane's last provider change, which later messages for the new provider wait for. */
+  providerChange: Promise<void>;
 }
 
 export interface PaneSocketDeps {
@@ -69,7 +71,7 @@ export class PaneSockets {
 
   private handleConnection(ws: WebSocket): void {
     const { logger, logins, externalTools, mcpServers, delegations, turns } = this.deps;
-    const state: SocketState = { session: null, helloDone: false, alive: true };
+    const state: SocketState = { session: null, helloDone: false, alive: true, providerChange: Promise.resolve() };
     this.sockets.set(ws, state);
     logger.debug("socket connected");
 
@@ -146,8 +148,18 @@ export class PaneSockets {
       case "refresh_connected_files":
         void this.refreshConnectedFiles();
         return;
-      case "set_provider":
-        return turns.setProvider(session, message.provider);
+      case "set_provider": {
+        const change = state.providerChange.then(() => turns.setProvider(session, message.provider));
+        state.providerChange = change.catch(() => undefined);
+        return change;
+      }
+      case "prepare": {
+        // Behind a provider change that is still running, so the runtime is opened for the provider the pane chose last.
+        await state.providerChange;
+        void turns.warm(session, { model: message.model ?? null, effort: message.effort ?? "medium", chatSessionId: message.chatSessionId,
+          resumeSessionId: message.resumeSessionId, capabilities: message.capabilities ?? { webSearch: false, playwright: false } });
+        return;
+      }
       case "prompt": {
         const picked = normalizePromptSelection(message.selection, session.host);
         if (!picked.ok) return void session.send({ type: "error", requestId: message.requestId, code: "bad_message", message: picked.message });
@@ -239,7 +251,10 @@ export class PaneSockets {
   /** Tell every connected task pane which workbooks are open, each with itself first. Called whenever the list or a name changes. */
   private broadcastConnectedFiles(): void {
     const connected = this.deps.sessions.connected();
-    for (const session of connected) session.send({ type: "connected_files", files: this.deps.sessions.connectedFiles(session) });
+    for (const session of connected) {
+      session.send({ type: "connected_files", files: this.deps.sessions.connectedFiles(session) });
+      this.deps.turns.refreshTools(session);
+    }
   }
 
   private sendTo(ws: WebSocket, message: ServerMessage): void {

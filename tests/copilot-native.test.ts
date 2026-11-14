@@ -145,6 +145,13 @@ describe("Copilot native question transport", () => {
     expect(sdk.config.onPermissionRequest({ kind: "shell" })).toEqual({ kind: "reject" });
     expect(sdk.config.onPermissionRequest({ kind: "url" })).toEqual({ kind: "reject" });
   });
+  it("does not start the CLI's own GitHub MCP server, which the first message would wait for, unless web tools are wanted", async () => {
+    await manager.start(ctx, process.execPath, process.env);
+    expect(sdk.config.disabledMcpServers).toEqual(["github-mcp-server"]);
+    ctx.mcp.env.EXCEL_WEB_SEARCH = "1";
+    await manager.start(ctx, process.execPath, process.env);
+    expect(sdk.config.disabledMcpServers).toBeUndefined();
+  });
   it("registers the tools as the host's own tools, not as an MCP server the CLI can block or hide", async () => {
     await manager.start(ctx, process.execPath, process.env);
     expect(sdk.config.mcpServers).toBeUndefined();

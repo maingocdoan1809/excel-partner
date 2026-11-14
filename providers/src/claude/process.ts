@@ -82,7 +82,7 @@ export class ClaudeProcess {
     this.child.stdin!.write(JSON.stringify(message) + "\n");
   }
 
-  request(subtype: string, signal?: AbortSignal, timeoutMs = 30_000): Promise<unknown> {
+  request(subtype: string, signal?: AbortSignal, timeoutMs = 30_000, params: Record<string, unknown> = {}): Promise<unknown> {
     if (signal?.aborted) return Promise.reject(signal.reason);
     const id = randomUUID();
     return new Promise((resolve, reject) => {
@@ -96,7 +96,7 @@ export class ClaudeProcess {
       const timer = setTimeout(() => finish(new Error(`Claude ${subtype} timed out`)), timeoutMs);
       this.pending.set(id, { resolve: value => finish(undefined, value), reject: error => finish(error) });
       signal?.addEventListener("abort", abort, { once: true });
-      try { this.write({ type: "control_request", request_id: id, request: { subtype } }); }
+      try { this.write({ type: "control_request", request_id: id, request: { subtype, ...params } }); }
       catch (error) { finish(error as Error); }
     });
   }

@@ -106,6 +106,33 @@ describe("provider-native web search", () => {
   });
 });
 
+describe("cancelling an OpenCode turn", () => {
+  it("keeps the CLI open and uses it for the next turn, once it has confirmed the cancel", async () => {
+    let confirm!: (value: unknown) => void;
+    rpc.reply = async method => method === "session/prompt" ? new Promise(resolve => { confirm = resolve; }) : {};
+    const adapter = new OpencodeAdapter(runtime);
+    const internalId = await adapter.startSession(context());
+    try {
+      const controller = new AbortController();
+      const first: ProviderEvent[] = [];
+      const running = (async () => {
+        for await (const event of adapter.sendTurn({ providerSessionId: internalId, requestId: "first", prompt: "long task", selection: null, signal: controller.signal })) first.push(event);
+      })();
+      await vi.waitFor(() => expect(rpc.calls.some(call => call.method === "session/prompt")).toBe(true));
+      controller.abort();
+      await running;
+      expect(first.at(-1)).toMatchObject({ type: "turn_finished", reason: "cancelled" });
+
+      confirm({ stopReason: "cancelled" });
+      rpc.reply = async method => method === "session/prompt" ? { stopReason: "end_turn" } : {};
+      const next = await turn(adapter, internalId);
+      expect(next.some(event => event.type === "error" && event.code === "no_session")).toBe(false);
+      expect(rpc.calls.filter(call => call.method === "session/prompt")).toHaveLength(2);
+      expect(rpc.launches).toHaveLength(1);
+    } finally { await adapter.dispose(); }
+  });
+});
+
 describe("optional ACP add-in instructions", () => {
   it.each([CopilotAdapter, OpencodeAdapter])("sends a clean first prompt without instructions and still supports a custom prompt (%j)", async Adapter => {
     vi.spyOn(base, "execCli").mockResolvedValue({ code: 0, stdout: "{}", stderr: "" });
@@ -206,6 +233,14 @@ describe("each provider resumes its native session independently", () => {
         expect(config.permissions).toContainEqual({ action: "*", resource: "*", effect: "ask" });
         expect(config.permission).toBeUndefined();
       }
+      if (!v2) {
+        // A task pane's turn does not run the CLI to read usage: that happens when someone looks at it (`sessionUsage`).
+        expect(exports).toBe(0);
+        expect(events.find(e => e.type === "usage_update")).toBeUndefined();
+        expect(await adapter.sessionUsage(nativeId)).toMatchObject({ title: "Native OpenCode Title", usage: {
+          totalTokens: 165, inputTokens: 140, outputTokens: 25, reasoningTokens: 5, cachedInputTokens: 30, cacheWriteTokens: 10 } });
+        return;
+      }
       expect(events.filter(e => e.type === "session_info").at(-1)).toMatchObject({ providerSessionId: nativeId, title: "Native OpenCode Title" });
       expect(events.find(e => e.type === "usage_update")).toMatchObject({ usage: {
         totalTokens: 173, inputTokens: 140, outputTokens: 33, reasoningTokens: 3, cachedInputTokens: 30, cacheWriteTokens: 10,
@@ -213,7 +248,7 @@ describe("each provider resumes its native session independently", () => {
     } finally { await adapter.dispose(); }
   });
 
-  it("keeps workbook add-in OpenCode V2 sessions on their existing configuration and export path", async () => {
+  it("keeps workbook add-in OpenCode V2 sessions on their existing configuration and does not export usage when one opens", async () => {
     const adapter = new OpencodeAdapter(runtime);
     const detected = await adapter.detect();
     vi.mocked(adapter.detect).mockResolvedValue({ ...detected, version: "2.0.32" });
@@ -228,7 +263,8 @@ describe("each provider resumes its native session independently", () => {
       const config = JSON.parse(fs.readFileSync(launch.env.OPENCODE_CONFIG, "utf8"));
       expect(config.permission).toMatchObject({ "*": "ask", websearch: "deny", "excel_*": "allow" });
       expect(config.permissions).toBeUndefined();
-      expect(exportCli).toHaveBeenCalledWith(expect.any(String), ["export", nativeId, "--pure"], expect.any(Object), 10_000);
+      // Reading usage runs the CLI, which a task pane's session does only when someone looks at the usage.
+      expect(exportCli).not.toHaveBeenCalled();
       expect(launch.args).toEqual(["acp"]);
     } finally { await adapter.dispose(); }
   });

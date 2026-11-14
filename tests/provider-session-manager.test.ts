@@ -54,6 +54,16 @@ describe.each(["claude", "copilot", "codex", "opencode"] as const)("%s shared se
     expect(h.adapter.closes).toEqual([]);
   });
 
+  it("opens one runtime when two callers ask at the same time", async () => {
+    const h = setup(provider);
+    const [first, second] = await Promise.all([
+      h.manager.ensure(h.session, h.settings, h.context),
+      h.manager.ensure(h.session, h.settings, h.context),
+    ]);
+    expect(first).toBe(second);
+    expect(h.adapter.starts).toHaveLength(1);
+  });
+
   it("announces only a runtime that is really being opened, before it opens", async () => {
     const h = setup(provider);
     const opening = vi.fn(() => { expect(h.adapter.starts).toHaveLength(0); });

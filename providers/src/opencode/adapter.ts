@@ -8,6 +8,7 @@ import type {
   ProviderConnectionStatus,
   ProviderEvent,
   ProviderId,
+  TokenUsage,
 } from "../../../protocol/src/index.js";
 import { acpPermissionOutcome, contentText, toolNameOf } from "../acp.js";
 import { AsyncQueue } from "../async-queue.js";
@@ -60,8 +61,18 @@ interface OpencodeSession {
   /** Temp directory holding the permission config handed to the CLI. */
   configDir: string;
   v2?: boolean;
+  /**
+   * Usage is read from the CLI after every turn. Only an API client needs it that often (it answers with the figure);
+   * for a task pane it is read when someone opens the usage (`sessionUsage`), since reading it runs the CLI.
+   */
+  reportsUsage: boolean;
   diagnostic?: StartSessionContext["onDiagnostic"];
+  /** The `session/prompt` still waiting for its answer; after a cancel it settles when the CLI confirms it stopped. */
+  prompting?: Promise<unknown>;
 }
+
+/** How long a cancelled prompt may take to be confirmed before the CLI is considered stuck and is closed. */
+const CANCEL_GRACE_MS = 5_000;
 
 /** How long OpenCode may retry a failing model call, and how long a healthy model may stay silent, before the first output. */
 const FIRST_RESPONSE_RETRY_LIMIT_MS = 120_000;
@@ -124,8 +135,15 @@ export class OpencodeAdapter extends BaseCliAdapter {
       ? [...commands, ...normalizeCommands([{ name: "skills", description: "List available OpenCode skills" }])] : commands;
   }
   private titleCache?: { at: number; value: Promise<Map<string, string>> };
-  async sessionTitle(id: string): Promise<string | undefined> {
-    if (!validNativeId(id)) return undefined;
+  /** The CLI's own export of one conversation. */
+  async sessionUsage(id: string): Promise<{ usage: TokenUsage; title?: string }> {
+    if (!validNativeId(id)) throw new Error("Invalid OpenCode session ID");
+    return this.originalUsage(id);
+  }
+
+  async sessionTitle(id: string, options?: { cheapOnly?: boolean }): Promise<string | undefined> {
+    // Reading titles runs the CLI; a caller that is not showing them to anyone right now does not ask.
+    if (options?.cheapOnly || !validNativeId(id)) return undefined;
     if (!this.titleCache || Date.now() - this.titleCache.at > 5000) {
       this.titleCache = { at: Date.now(), value: execCli(this.command,
         ["session", "list", "--format", "json", "--max-count", "100", "--pure"], this.env, 5000).then(result => {
@@ -343,9 +361,10 @@ export class OpencodeAdapter extends BaseCliAdapter {
         active: null,
         configDir,
         v2: clientTools && v2,
+        reportsUsage: clientTools,
         diagnostic: clientTools ? ctx.onDiagnostic : undefined,
       };
-      if (ctx.resumeSessionId) {
+      if (ctx.resumeSessionId && clientTools) {
         session.usage = new CumulativeUsage();
         try { session.usage.next((await this.originalUsage(created.sessionId, clientTools && v2)).usage); }
         catch { session.usageBaselinePending = true; }
@@ -373,6 +392,8 @@ export class OpencodeAdapter extends BaseCliAdapter {
   override async *sendTurn(input: SendTurnInput): AsyncIterable<ProviderEvent> {
     const session = this.sessions.get(input.providerSessionId);
     const { requestId } = input;
+    // A prompt that was cancelled is answered by the CLI in a moment; the next one goes after it.
+    if (session?.prompting) await Promise.race([session.prompting, new Promise(resolve => setTimeout(resolve, CANCEL_GRACE_MS).unref())]);
     if (!session || !session.peer.alive) {
       yield { type: "error", requestId, code: "no_session", message: "opencode session is not running" };
       yield { type: "turn_finished", requestId, reason: "error" };
@@ -428,7 +449,10 @@ export class OpencodeAdapter extends BaseCliAdapter {
       cancel();
       queue.push({ type: "turn_finished", requestId, reason: "cancelled" });
       queue.end();
-      void this.closeSession(input.providerSessionId);
+      // The CLI confirms a cancel within moments and then takes the next prompt, so it stays open; it is closed only if it never does.
+      const stuck = setTimeout(() => void this.closeSession(input.providerSessionId), CANCEL_GRACE_MS);
+      stuck.unref();
+      void (session.prompting ?? Promise.resolve()).then(() => clearTimeout(stuck));
     };
     input.signal.addEventListener("abort", abort, { once: true });
 
@@ -480,7 +504,11 @@ export class OpencodeAdapter extends BaseCliAdapter {
       );
     };
 
-    run()
+    const running = run();
+    const settled = running.then(() => undefined, () => undefined);
+    session.prompting = settled;
+    void settled.then(() => { if (session.prompting === settled) session.prompting = undefined; });
+    running
       .then(async (response) => {
         if (finished) return;
         finished = true;
@@ -541,6 +569,7 @@ export class OpencodeAdapter extends BaseCliAdapter {
   }
 
   private async reportUsage(session: OpencodeSession, active: ActiveTurn): Promise<void> {
+    if (!session.reportsUsage) return;
     try {
       const snapshot = await this.originalUsage(session.acpSessionId, session.v2);
       session.title = snapshot.title ?? session.title;

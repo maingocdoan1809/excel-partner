@@ -60,7 +60,15 @@ export abstract class BaseCliAdapter implements ProviderAdapter {
       return this.cached.value;
     }
     const { command, versionArgs, installHint, loginHint } = this.probe();
-    const probed = await probeCli(command, versionArgs, this.env, installHint, loginHint);
+    // Both checks run a process (a large CLI takes about a second just to start), and neither needs the other's answer:
+    // the login check is simply ignored when the version check says the CLI is not usable.
+    const [probed, login] = await Promise.all([
+      probeCli(command, versionArgs, this.env, installHint, loginHint),
+      this.checkLogin(command).catch((error) => ({
+        status: "error" as ProviderConnectionStatus,
+        hint: `Could not verify login: ${error instanceof Error ? error.message : String(error)}`,
+      })),
+    ]);
     const minVersion = this.minVersion;
     if (probed.installed && probed.status === "ready" && minVersion && probed.version) {
       if (compareVersions(extractVersion(probed.version), minVersion) < 0) {
@@ -69,10 +77,6 @@ export abstract class BaseCliAdapter implements ProviderAdapter {
       }
     }
     if (probed.installed && probed.status === "ready") {
-      const login = await this.checkLogin(command).catch((error) => ({
-        status: "error" as ProviderConnectionStatus,
-        hint: `Could not verify login: ${error instanceof Error ? error.message : String(error)}`,
-      }));
       probed.status = login.status;
       probed.hint = login.hint;
     }

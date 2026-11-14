@@ -68,6 +68,8 @@ export const SetProviderMessageSchema = z.object({
 export const ToolCapabilitiesSchema = z.object({
   webSearch: z.boolean().default(false),
   playwright: z.boolean().default(false),
+  /** Set by the bridge, never by the pane: another file is open, so the tools for work across files are offered. */
+  connectedFiles: z.boolean().optional(),
 });
 export type ToolCapabilities = z.infer<typeof ToolCapabilitiesSchema>;
 
@@ -95,6 +97,14 @@ export const PromptMessageSchema = z.object({
   /** Set when this turn answers a request another file's assistant sent (see `delegated_prompt`). */
   delegationId: z.string().min(1).max(64).optional(),
 });
+
+/**
+ * What the next prompt will run with. Sent when the pane connects and whenever one of these changes, so the bridge opens
+ * the provider's runtime ahead of the first message and the prompt finds it ready. It carries no text and gets no reply.
+ */
+export const PrepareMessageSchema = PromptMessageSchema
+  .pick({ chatSessionId: true, resumeSessionId: true, model: true, effort: true, capabilities: true })
+  .extend({ type: z.literal("prepare") });
 
 /** The task pane cannot take a request another workbook's assistant sent (busy, not ready). */
 export const DelegationDeclinedMessageSchema = z.object({
@@ -132,6 +142,7 @@ export const ClientMessageSchema = z.discriminatedUnion("type", [
   WorkbookInfoMessageSchema,
   RefreshConnectedFilesMessageSchema,
   SetProviderMessageSchema,
+  PrepareMessageSchema,
   PromptMessageSchema,
   DelegationDeclinedMessageSchema,
   CancelMessageSchema,

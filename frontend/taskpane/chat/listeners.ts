@@ -14,6 +14,7 @@ import { persistNow, startNewChat } from "./chats.js";
 import { renderComposerPreview, selectPermissionMode, syncAttachmentsWithInput, syncSelectedSlashToken } from "./composer.js";
 import { app, pendingAttachments } from "./state.js";
 import { stopCurrentTurn, submit } from "./turn.js";
+import { prepareRuntime } from "./prepare.js";
 
 /** Hooks every button, menu and the message box of the pane up to the chat. */
 export function bindListeners(): void {
@@ -107,7 +108,7 @@ export function bindListeners(): void {
   });
 
   els.usageExport.addEventListener("click", () => void exportUsage());
-  setupUsagePopover(byId<HTMLButtonElement>("usage-button"), byId("usage-popover"), () => void refreshUsage());
+  setupUsagePopover(byId<HTMLButtonElement>("usage-button"), byId("usage-popover"), () => void refreshUsage(true));
   // Composer
   els.mentionMenu.addEventListener("mousedown", (event) => {
     if (!(event.target instanceof HTMLInputElement)) event.preventDefault();
@@ -129,7 +130,9 @@ export function bindListeners(): void {
   els.permissionMode.value = app.permissionMode;
   app.permissionPicker?.refresh();
   els.permissionMode.addEventListener("change", () => selectPermissionMode(els.permissionMode.value as PermissionMode));
-  els.modelSelect.addEventListener("change", saveModelChoice);
+  els.modelSelect.addEventListener("change", () => { saveModelChoice(); prepareRuntime(); });
+  els.effortSelect.addEventListener("change", prepareRuntime);
+  for (const id of ["tool-web-search", "tool-playwright"]) byId(id).addEventListener("change", prepareRuntime);
   els.send.addEventListener("click", () => {
     if (app.currentRequestId && !els.input.value.trim() && !pendingAttachments.length) stopCurrentTurn();
     else void submit();

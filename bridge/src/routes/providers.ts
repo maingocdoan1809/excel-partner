@@ -145,13 +145,25 @@ export class ProviderRoutes {
   async usage(req: http.IncomingMessage, res: http.ServerResponse, url: URL): Promise<void> {
     if (!connectedSession(this.deps.sessions, req)) return sendJson(res, 401, { error: "unauthorized" });
     const id = url.searchParams.get("sessionId");
+    // Someone is looking at the usage: now is when a CLI that does not report it turn by turn is asked for its totals.
+    const resolve = url.searchParams.get("resolve") === "1";
+    if (resolve) {
+      await Promise.all(this.deps.usage.unsettled(id).map(async ({ provider, providerSessionId }) => {
+        const parsed = ProviderIdSchema.safeParse(provider);
+        const adapter = parsed.success ? this.deps.providers.get(parsed.data) : undefined;
+        if (!adapter?.sessionUsage) return;
+        const asked = Date.now();
+        try { this.deps.usage.settle(provider, providerSessionId, (await adapter.sessionUsage(providerSessionId)).usage, asked); }
+        catch (error) { this.deps.logger.warn("could not read the CLI's usage", { provider, error: String(error) }); }
+      }));
+    }
     const summaries = this.deps.usage.summaries().filter((item) => !id || item.sessionId === id);
     await Promise.all(summaries.map(async item => {
       const provider = ProviderIdSchema.safeParse(item.provider);
       const nativeId = item.providerSessionIds?.at(-1);
       if (!provider.success || !nativeId || item.sessionId !== providerSessionKey(provider.data, nativeId)) return;
       try {
-        item.title = await this.deps.providers.get(provider.data)?.sessionTitle?.(nativeId) ?? cleanSessionTitle(item.title);
+        item.title = await this.deps.providers.get(provider.data)?.sessionTitle?.(nativeId, { cheapOnly: !resolve }) ?? cleanSessionTitle(item.title);
       } catch { /* Preserve the last recorded title when the CLI is unavailable. */ }
     }));
     return sendJson(res, 200, { sessions: summaries });

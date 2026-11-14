@@ -10,6 +10,7 @@ import { handleEvent, renderState } from "./events.js";
 import { loadSession } from "./chats.js";
 import { publishWorkbookName, readWorkbookName, refreshSheetNames } from "./workbook.js";
 import { submit } from "./turn.js";
+import { prepareRuntime } from "./prepare.js";
 import { app } from "./state.js";
 
 export function createBridgeClient(): BridgeClient {
@@ -59,7 +60,11 @@ export function createBridgeClient(): BridgeClient {
       updater.check(addinBuildId);
       void updatePanel.afterReload();
     },
-    onProviderStatus: ({ provider: id, detection }) => providerPicker.onStatus(id, detection),
+    onProviderStatus: ({ provider: id, detection }) => {
+      providerPicker.onStatus(id, detection);
+      // The bridge answers every provider choice (connecting, switching, signing in) with its status: once the CLI is usable, open it.
+      if (id === app.provider && detection.status === "ready") prepareRuntime();
+    },
     onProviderEvent: handleEvent,
     onBrowserFrame: (frame) => { if (frame.requestId === app.currentRequestId) browserView.push(frame); },
     readWorkbookName,

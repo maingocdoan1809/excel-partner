@@ -13,6 +13,8 @@ function setup(options: { approve?: boolean; reply?: string; targetProvider?: "c
   const sessions = new WorkbookSessions({ ttlMs: 60_000 });
   const source = sessions.create("source", options.sourceHost ? { host: options.sourceHost } : null);
   const target = sessions.create("target", options.targetHost ? { host: options.targetHost } : null);
+  // Another file is open, so the tools for work across files are offered.
+  source.capabilities = { ...source.capabilities, connectedFiles: true };
   source.workbookName = "Budget.xlsx";
   target.workbookName = "Actuals.xlsx";
   target.provider = options.targetProvider === undefined ? "claude" : options.targetProvider;
@@ -109,6 +111,7 @@ describe("send_to_connected_file", () => {
     const sessions = new WorkbookSessions({ ttlMs: 60_000 });
     const source = sessions.create("a", null);
     const target = sessions.create("b", null);
+    source.capabilities = { ...source.capabilities, connectedFiles: true };
     target.workbookName = "Actuals.xlsx";
     target.provider = "claude";
     source.attachSocket({ readyState: 1, close() {}, send(raw: string) { const m = JSON.parse(raw); queueMicrotask(() => source.resolveTool(m.callId, { ok: true, data: m.tool === WORKBOOK_NAME_REQUEST ? { name: source.workbookName } : { approved: true } })); } } as unknown as WebSocket);

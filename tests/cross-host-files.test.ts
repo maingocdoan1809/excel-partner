@@ -26,6 +26,8 @@ function attachPane(session: WorkbookSession, options: { approve?: boolean; repl
       queueMicrotask(() => session.resolveTool(message.callId!, result));
     },
   } as unknown as WebSocket);
+  // Another file is open (these tests are about work across files), so the tools for it are offered, as they are to a real session.
+  session.capabilities = { ...session.capabilities, connectedFiles: true };
   return sent;
 }
 

@@ -152,6 +152,12 @@ export function setupProviderPicker(deps: ProviderPickerDeps) {
     }
   }
 
+  /** The model the next message will use. Before the model list has arrived the picker still shows "Default", so the saved choice stands in. */
+  function chosenModel(): string | null {
+    const provider = deps.getProvider();
+    return els.modelSelect.value || (modelCatalogs.has(provider) ? null : models[provider] ?? null);
+  }
+
   function saveModelChoice(): void {
     const model = els.modelSelect.value;
     if (model) models[deps.getProvider()] = model;
@@ -190,6 +196,6 @@ export function setupProviderPicker(deps: ProviderPickerDeps) {
     }
   }
 
-  return { statusOf, capabilitiesOf, renderProviderMenu, renderAuthNotice, selectProvider, renderModelPicker, refreshModelCatalog, saveModelChoice,
+  return { statusOf, capabilitiesOf, renderProviderMenu, renderAuthNotice, selectProvider, renderModelPicker, refreshModelCatalog, saveModelChoice, chosenModel,
     setupModelPicker, requireLogin, signedIn, invalidateCatalog, onStatus };
 }

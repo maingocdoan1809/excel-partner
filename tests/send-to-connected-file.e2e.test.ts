@@ -60,6 +60,8 @@ async function openPane(wsUrl: string, connectionId: string, name: string, optio
 async function sessionIdOf(pane: PaneClient, name: string): Promise<{ id: string; fileId: string }> {
   await pane.waitFor((m) => m.type === "connected_files" && m.files.some((f) => f.current && f.name === name));
   const session = bridge!.sessions.list().find((item) => item.workbookName === name)!;
+  // A runtime opened beside another file is offered the tools for work across files.
+  session.capabilities = { ...session.capabilities, connectedFiles: true };
   return { id: session.id, fileId: session.fileId };
 }
 

@@ -1,9 +1,9 @@
-import { exposedToolNamesForHost, TOOL_HOSTS, type HostId } from "../../protocol/src/index.js";
+import { exposedToolNamesForHost, TOOL_HOSTS, type HostId, type ToolGroups } from "../../protocol/src/index.js";
 import { ALL_TOOL_DEFINITIONS } from "./tool-definitions.js";
 import { definitionForHost } from "./host-overrides.js";
 
 /** Shared Office Partner catalog and external-MCP bridge tool definitions. */
-export function officeToolCatalog(host: HostId, allowOfficeJs: boolean, capabilities: { webSearch?: boolean; playwright?: boolean }) {
+export function officeToolCatalog(host: HostId, allowOfficeJs: boolean, capabilities: ToolGroups) {
   const exposed = new Set(exposedToolNamesForHost(host, allowOfficeJs, capabilities));
   return ALL_TOOL_DEFINITIONS.filter(tool => exposed.has(tool.name)).map(tool => definitionForHost(host, tool)).map(tool => ({
     name: tool.name, description: tool.description, inputSchema: tool.inputSchema as Record<string, unknown>, annotations: tool.annotations,

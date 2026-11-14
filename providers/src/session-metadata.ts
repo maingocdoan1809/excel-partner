@@ -25,24 +25,43 @@ export async function copilotTitle(id: string, env: NodeJS.ProcessEnv): Promise<
   } catch { return undefined; }
 }
 
+/** What was learned from a Claude transcript so far and how far into it was read: the file only grows, so a later read starts there. */
+const claudeTitles = new Map<string, { offset: number; title?: string; customTitle?: string }>();
+const CLAUDE_TITLE_FILES = 50;
+
 export async function claudeTitle(id: string, cwd: string, env: NodeJS.ProcessEnv): Promise<string | undefined> {
   if (!validNativeId(id)) return undefined;
   const file = path.join(env.CLAUDE_CONFIG_DIR ?? path.join(os.homedir(), ".claude"), "projects",
     cwd.replace(/[^a-zA-Z0-9]/g, "-"), `${id}.jsonl`);
-  let title: string | undefined;
-  let customTitle: string | undefined;
+  let known = claudeTitles.get(file);
   try {
-    for await (const line of createInterface({ input: createReadStream(file), crlfDelay: Infinity })) {
-      try {
-        const event = JSON.parse(line);
-        if (event.sessionId && event.sessionId !== id) continue;
-        if (event.type === "custom-title") { customTitle = nativeTitle(event.customTitle) ?? customTitle; continue; }
-        const value = event.type === "ai-title" ? event.aiTitle : event.type === "summary" ? event.summary : undefined;
-        title = nativeTitle(value) ?? title;
-      } catch { /* An incomplete last line does not hide an existing native title. */ }
-    }
+    const handle = await fs.open(file, "r");
+    try {
+      const { size } = await handle.stat();
+      if (!known || size < known.offset) known = { offset: 0 };
+      if (size > known.offset) {
+        const chunk = Buffer.alloc(size - known.offset);
+        const { bytesRead } = await handle.read(chunk, 0, chunk.length, known.offset);
+        // Only whole lines are taken: the one the CLI is still writing is read again next time.
+        const end = chunk.subarray(0, bytesRead).lastIndexOf(0x0a) + 1;
+        for (const line of chunk.subarray(0, end).toString("utf8").split("\n")) {
+          if (!line.trim()) continue;
+          try {
+            const event = JSON.parse(line);
+            if (event.sessionId && event.sessionId !== id) continue;
+            if (event.type === "custom-title") { known.customTitle = nativeTitle(event.customTitle) ?? known.customTitle; continue; }
+            const value = event.type === "ai-title" ? event.aiTitle : event.type === "summary" ? event.summary : undefined;
+            known.title = nativeTitle(value) ?? known.title;
+          } catch { /* A damaged line does not hide an existing native title. */ }
+        }
+        known.offset += end;
+      }
+    } finally { await handle.close(); }
   } catch { return undefined; }
-  return customTitle ?? title;
+  claudeTitles.delete(file);
+  claudeTitles.set(file, known);
+  if (claudeTitles.size > CLAUDE_TITLE_FILES) claudeTitles.delete(claudeTitles.keys().next().value as string);
+  return known.customTitle ?? known.title;
 }
 
 /** Codex rollout token_count is the cumulative odometer, including work before resume. */

@@ -32,6 +32,9 @@ interface NativeSession {
   active?: { signal: AbortSignal; controller: AbortController; queue: AsyncQueue<ProviderEvent> };
 }
 
+/** The MCP server the Copilot CLI starts for itself. */
+const GITHUB_MCP_SERVER = "github-mcp-server";
+
 /** Copilot's SDK transport exposes ask_user; its ACP transport does not. */
 export class CopilotNativeSessions {
   private readonly sessions = new Map<string, NativeSession>();
@@ -67,7 +70,7 @@ export class CopilotNativeSessions {
     if (ctx.resumeSessionId && !validNativeId(ctx.resumeSessionId)) throw new Error("Invalid Copilot resume session ID");
     const { CopilotClient, RuntimeConnection, ToolSet, convertMcpCallToolResult } = await import("@github/copilot-sdk");
     const web = ctx.mcp.env.EXCEL_WEB_SEARCH === "1";
-    const names = new Set<string>(ctx.mcp.toolNames ?? exposedToolNamesForHost(hostFromEnv(ctx.mcp.env), ctx.mcp.env.EXCEL_ALLOW_OFFICE_JS === "1", { playwright: ctx.mcp.env.EXCEL_PLAYWRIGHT === "1" }));
+    const names = new Set<string>(ctx.mcp.toolNames ?? exposedToolNamesForHost(hostFromEnv(ctx.mcp.env), ctx.mcp.env.EXCEL_ALLOW_OFFICE_JS === "1", { playwright: ctx.mcp.env.EXCEL_PLAYWRIGHT === "1", connectedFiles: ctx.mcp.env.EXCEL_CONNECTED_FILES === "1" }));
     const cliPath = resolveCopilotPath(command, env);
     const client = new CopilotClient({
       connection: RuntimeConnection.forStdio({ path: cliPath, args: ["--no-custom-instructions",
@@ -75,13 +78,22 @@ export class CopilotNativeSessions {
       workingDirectory: ensureWorkspaceDir(), env, logLevel: "error",
     });
     let state: NativeSession | undefined;
+    // What a resumed conversation has used so far is read from its own file while the CLI starts, not after it has opened it.
+    const eventsFile = (id: string) => path.join(env.COPILOT_HOME ?? path.join(os.homedir(), ".copilot"), "session-state", id, "events.jsonl");
+    const earlyReader = ctx.resumeSessionId ? new CopilotUsageReader(eventsFile(ctx.resumeSessionId), ctx.resumeSessionId) : undefined;
+    const earlyBaseline = earlyReader?.snapshot().catch(() => null);
+    // The CLI takes longer to start than the tool server does, and neither needs the other: they start together.
+    const starting = client.start();
+    starting.catch(() => {});
     // The tools are registered with the CLI as the host's own tools, not as an MCP server of the CLI. A Copilot CLI that
     // cannot fetch the organization's MCP policy blocks every MCP server it is given ("blocked by policy: 'excel'"), and
     // one that has more than 30 tools hides MCP tools behind a search the model may not make. Host tools are subject to
     // neither, so the model always sees the whole catalog, which bridge/gateway own and may change when a session
     // resumes: it is listed from the MCP server again each time. The MCP server still runs the tools, started by this
     // process.
-    const bridge = await this.connectTools(ctx.mcp);
+    let bridge: McpToolBridge;
+    try { bridge = await this.connectTools(ctx.mcp); }
+    catch (error) { await starting.catch(() => {}); await client.stop().catch(() => {}); throw error; }
     const tools = new ToolSet();
     if (!ctx.mcp.toolNames || ctx.mcp.env.OFFICE_HOST) tools.addBuiltIn("ask_user");
     const hostTools: Tool[] = [];
@@ -102,6 +114,10 @@ export class CopilotNativeSessions {
     if (web) tools.addBuiltIn(["web_search", "web_fetch"]);
     const config: SessionConfig = {
       model: ctx.model ?? undefined, streaming: true, availableTools: tools,
+      // The CLI starts its own GitHub MCP server with every session, and the first message waits for it to connect (about
+      // a second) although none of its tools are offered to the model. `--disable-builtin-mcps` does not stop that when the CLI
+      // runs under the SDK; this does, and it is only needed when no built-in tool (web search) is asked for.
+      ...(web ? {} : { disabledMcpServers: [GITHUB_MCP_SERVER] }),
       // Auto selects its own reasoning settings. The CLI accepts effort at
       // creation but rejects it on resume, for both workbook and API sessions.
       ...(!ctx.model || ctx.model === "auto" ? {} : { reasoningEffort: ctx.effort }),
@@ -124,7 +140,7 @@ export class CopilotNativeSessions {
       },
     };
     try {
-      await client.start();
+      await starting;
       ctx.signal.throwIfAborted();
       const open = () => ctx.resumeSessionId ? client.resumeSession(ctx.resumeSessionId, config) : client.createSession(config);
       let session: CopilotSession;
@@ -138,11 +154,10 @@ export class CopilotNativeSessions {
         session = await open();
       }
       if (ctx.resumeSessionId && session.sessionId !== ctx.resumeSessionId) throw new Error("Copilot resumed a different session");
-      const reader = new CopilotUsageReader(path.join(env.COPILOT_HOME ?? path.join(os.homedir(), ".copilot"),
-        "session-state", session.sessionId, "events.jsonl"), session.sessionId);
+      const reader = earlyReader ?? new CopilotUsageReader(eventsFile(session.sessionId), session.sessionId);
       state = { client, session, reader, usage: new CumulativeUsage(), baselinePending: false, model: ctx.model ?? null, effort: config.reasoningEffort ?? null, ask: ctx.requestUserInput, bridge };
       if (ctx.resumeSessionId) {
-        const baseline = await reader.snapshot().catch(() => null);
+        const baseline = await earlyBaseline;
         if (baseline) state.usage.next(baseline);
         else state.baselinePending = true;
       }

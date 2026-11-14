@@ -36,6 +36,7 @@ export function sessionMcpEndpoint(config: BridgeConfig, session: WorkbookSessio
       ...(session.enabledMcpServers.size ? { EXCEL_DYNAMIC_TOOLS: "1" } : {}),
       ...(session.capabilities.webSearch ? { EXCEL_WEB_SEARCH: "1" } : {}),
       ...(session.capabilities.playwright ? { EXCEL_PLAYWRIGHT: "1" } : {}),
+      ...(session.capabilities.connectedFiles ? { EXCEL_CONNECTED_FILES: "1" } : {}),
       ...(config.allowOfficeJs ? { EXCEL_ALLOW_OFFICE_JS: "1" } : {}),
       ...(config.tls ? { NODE_EXTRA_CA_CERTS: config.tls.certPath } : {}),
     },

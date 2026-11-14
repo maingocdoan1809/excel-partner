@@ -66,7 +66,8 @@ describe("host through the bridge", () => {
         expect((await prompt(pane, "r1", excelSnapshot)).type).toBe("turn_finished");
         expect(seen.mcp[0]!.env.OFFICE_HOST).toBe("excel");
         expect(seen.selections[0]).toMatchObject({ host: "excel", workbookName: "Book1.xlsx" });
-        expect(enriched()).toBe(1);
+        // The machine's own read of the selection is made when the model asks for it (get_selection), not for every message.
+        expect(enriched()).toBe(0);
       } finally { await pane.close(); await bridge.close(); }
     }
   });

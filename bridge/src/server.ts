@@ -172,7 +172,8 @@ export class Bridge {
     const turns = new TurnRunner({
       isUpdating: () => this.maintenance,
       config, logger: this.logger, providers: this.providers, providerSessions, delegations, externalTools: this.gateway.externalTools,
-      usage, skills: this.skills, systemPrompt, savedReferences, references, enrichSelection, discoverMcp,
+      usage, skills: this.skills, systemPrompt, savedReferences, references, discoverMcp,
+      hasOtherFiles: session => this.sessions.connectedFiles(session).length > 1,
     });
     this.panes = new PaneSockets({
       sessions: this.sessions, logger: this.logger, turns, delegations, logins: this.logins, mcpServers: this.mcpServers,

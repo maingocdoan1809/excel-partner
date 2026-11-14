@@ -183,6 +183,11 @@ export class BridgeClient {
     this.send({ type: "set_provider", provider });
   }
 
+  /** Say what the next prompt will run with, so the bridge opens the provider's CLI now instead of when the prompt arrives. */
+  prepare(settings: { model: string | null; effort: "low" | "medium" | "high"; chatSessionId?: string; resumeSessionId?: string; capabilities: ToolCapabilities }): void {
+    this.send({ type: "prepare", ...settings });
+  }
+
   sendPrompt(requestId: string, prompt: string, selection: PromptSelectionSnapshot | null, context?: string, attachmentIds?: string[], model?: string | null, referencePaths?: string[], effort: "low" | "medium" | "high" = "medium", chatSessionId?: string, resumeSessionId?: string, capabilities?: ToolCapabilities, command?: boolean, delegationId?: string): void {
     this.send({ type: "prompt", requestId, prompt, selection, chatSessionId, resumeSessionId, capabilities, command, model: model ?? null, effort, ...(delegationId ? { delegationId } : {}), ...(context ? { context } : {}), ...(attachmentIds?.length ? { attachmentIds } : {}), ...(referencePaths?.length ? { referencePaths } : {}) });
   }
@@ -196,9 +201,10 @@ export class BridgeClient {
     return result.commands;
   }
 
-  async usageSummaries(sessionId?: string): Promise<import("../../protocol/src/index.js").UsageSummary[]> {
-    const data = await this.sessionFetch<{ sessions: import("../../protocol/src/index.js").UsageSummary[] }>(
-      `/session/usage${sessionId ? `?sessionId=${encodeURIComponent(sessionId)}` : ""}`);
+  /** `resolve`: the usage is being shown to the user, so a CLI that only reports it on request is asked now. */
+  async usageSummaries(sessionId?: string, resolve = false): Promise<import("../../protocol/src/index.js").UsageSummary[]> {
+    const query = [sessionId ? `sessionId=${encodeURIComponent(sessionId)}` : "", resolve ? "resolve=1" : ""].filter(Boolean).join("&");
+    const data = await this.sessionFetch<{ sessions: import("../../protocol/src/index.js").UsageSummary[] }>(`/session/usage${query ? `?${query}` : ""}`);
     return data.sessions;
   }
 

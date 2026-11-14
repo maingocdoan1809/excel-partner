@@ -27,10 +27,15 @@ describe("host system prompts", () => {
   it("mention only tools that exist for that host", () => {
     const names = new Set<string>(ALL_TOOL_NAMES);
     for (const host of ["word", "powerpoint"] as const) {
-      const allowed = new Set(toolsForHost(host, { allowOptIn: true, playwright: true }));
-      const mentioned = (hostSystemPrompt(host, "").match(/\b[a-z]+(?:_[a-z]+)+\b/g) ?? []).filter((word) => names.has(word));
-      expect(mentioned.length).toBeGreaterThan(3);
-      for (const tool of mentioned) expect(allowed.has(tool), `${host}: ${tool}`).toBe(true);
+      // A prompt names only the tools that are offered: the ones for other open files only while another file is open.
+      for (const connectedFiles of [false, true]) {
+        const allowed = new Set(toolsForHost(host, { allowOptIn: true, playwright: true, connectedFiles }));
+        const mentioned = (hostSystemPrompt(host, "", { connectedFiles }).match(/\b[a-z]+(?:_[a-z]+)+\b/g) ?? []).filter((word) => names.has(word));
+        expect(mentioned.length).toBeGreaterThan(3);
+        for (const tool of mentioned) expect(allowed.has(tool), `${host} (connectedFiles ${connectedFiles}): ${tool}`).toBe(true);
+      }
+      expect(hostSystemPrompt(host, "")).not.toContain("list_connected_files");
+      expect(hostSystemPrompt(host, "", { connectedFiles: true })).toContain("list_connected_files");
     }
   });
 });

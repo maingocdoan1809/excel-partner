@@ -33,13 +33,14 @@ export function setupUsagePanel(deps: UsagePanelDeps) {
   let turnUsage: TokenUsage | null = null;
   let usageTimer: number | undefined;
 
-  async function refreshUsage(): Promise<void> {
+  /** `shown`: the person opened the usage, so figures a CLI only gives on request are fetched; otherwise only what is already recorded is read. */
+  async function refreshUsage(shown = false): Promise<void> {
     const id = deps.getSession().id;
     if (usageSummary?.sessionId !== id) usageSummary = undefined;
     renderUsage();
     if (!deps.getClient()?.connected) return;
     try {
-      const summaries = await deps.getClient().usageSummaries(id);
+      const summaries = await deps.getClient().usageSummaries(id, shown);
       if (deps.getSession().id !== id) return;
       usageSummary = summaries[0];
       if (usageSummary?.title) {
@@ -97,7 +98,7 @@ export function setupUsagePanel(deps: UsagePanelDeps) {
     els.usageExport.disabled = true;
     try {
       deps.persistNow();
-      const summaries = await deps.getClient().usageSummaries();
+      const summaries = await deps.getClient().usageSummaries(undefined, true);
       const titles = new Map(store.list().map((item) => [item.id, item.title]));
       const blob = new Blob([usageCsv(summaries, titles)], { type: "text/csv;charset=utf-8" });
       const url = URL.createObjectURL(blob);

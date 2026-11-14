@@ -163,7 +163,7 @@ export const providerPicker = setupProviderPicker({
   closeMenu, openPanel, startNewChat, refreshTools: () => toolSettings.refreshProvider(), append, elements: els,
 });
 export const toolSettings = setupToolSettings(() => providerPicker.capabilitiesOf(app.provider)?.nativeWebSearch ?? false);
-export const { renderProviderMenu, renderAuthNotice, selectProvider, renderModelPicker, refreshModelCatalog, saveModelChoice } = providerPicker;
+export const { renderProviderMenu, renderAuthNotice, selectProvider, renderModelPicker, refreshModelCatalog, saveModelChoice, chosenModel } = providerPicker;
 
 export const { loadTemplateSkills, renderTemplates, addTemplate } = setupTemplatePanel({ getClient: () => app.client, elements: els });
 

@@ -59,7 +59,7 @@ describe("host tool mapping", () => {
         expect(isToolNameForHost(host, name), `${host}:${name}`).toBe(false);
       }
       const own = host === "word" ? WORD_TOOL_NAMES : PPT_TOOL_NAMES;
-      expect(toolsForHost(host, { allowOptIn: true, playwright: true }).sort()).toEqual([...HOST_AGNOSTIC_TOOLS, ...own].sort());
+      expect(toolsForHost(host, { allowOptIn: true, playwright: true, connectedFiles: true }).sort()).toEqual([...HOST_AGNOSTIC_TOOLS, ...own].sort());
     }
     expect(isToolNameForHost("excel", "edit_doc_text")).toBe(false);
     expect(isToolNameForHost("powerpoint", "edit_doc_text")).toBe(false);
@@ -76,7 +76,7 @@ describe("host tool mapping", () => {
 
   it("gives Excel exactly the list it had before hosts existed", () => {
     for (const allowOptIn of [true, false]) {
-      for (const capabilities of [{}, { playwright: true }, { webSearch: true }, { webSearch: true, playwright: true }]) {
+      for (const capabilities of [{}, { playwright: true }, { webSearch: true }, { webSearch: true, playwright: true }, { connectedFiles: true }]) {
         expect(exposedToolNamesForHost("excel", allowOptIn, capabilities)).toEqual(exposedToolNames(allowOptIn, capabilities));
       }
     }
@@ -189,7 +189,7 @@ describe("selection snapshots", () => {
 
 async function connect(host: HostId | undefined) {
   const forward = vi.fn(async () => ({ ok: true as const, data: { forwarded: true } }));
-  const server = createExcelMcpServer({ call: forward }, { allowOptInTools: true, capabilities: { playwright: true }, ...(host ? { host } : {}) });
+  const server = createExcelMcpServer({ call: forward }, { allowOptInTools: true, capabilities: { playwright: true, connectedFiles: true }, ...(host ? { host } : {}) });
   const client = new Client({ name: "test", version: "1" });
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
   await server.connect(serverTransport);
@@ -202,7 +202,7 @@ describe("MCP ListTools per OFFICE_HOST", () => {
     const { client, close } = await connect(host);
     try {
       const listed = (await client.listTools()).tools.map((tool) => tool.name);
-      expect(listed.sort()).toEqual(exposedToolNamesForHost(host ?? "excel", true, { playwright: true }).sort());
+      expect(listed.sort()).toEqual(exposedToolNamesForHost(host ?? "excel", true, { playwright: true, connectedFiles: true }).sort());
       const known = new Set(ALL_TOOL_DEFINITIONS.map((tool) => tool.name));
       for (const name of listed) expect(known.has(name), name).toBe(true);
     } finally { await close(); }
@@ -212,7 +212,7 @@ describe("MCP ListTools per OFFICE_HOST", () => {
     const { client, close } = await connect(undefined);
     try {
       const listed = (await client.listTools()).tools.map((tool) => tool.name);
-      expect([...listed].sort()).toEqual([...exposedToolNames(true, { playwright: true })].sort());
+      expect([...listed].sort()).toEqual([...exposedToolNames(true, { playwright: true, connectedFiles: true })].sort());
     } finally { await close(); }
   });
 
@@ -336,6 +336,22 @@ describe("OfficeRuntime host gate", () => {
     const tab = sessions.create("conn-tab-b", { host: "excel", standalone: true });
     for (const session of [doc, tab]) vi.spyOn(session, "isConnected", "get").mockReturnValue(true);
     expect(sessions.connectedFiles(doc).map((file) => file.id)).toEqual([doc.fileId]);
+  });
+});
+
+describe("the selection note in a prompt", () => {
+  const range = { workbookName: "Book1.xlsx", sheet: "Sheet1", sheetId: null, address: "A1", rowCount: 1, columnCount: 1, values: [[1]], headers: null, truncated: false };
+  const shape = { name: "Box A", type: "GeometricShape", id: "2", text: null, left: 0, top: 0, width: 10, height: 10 };
+
+  it("sends the user to get_selection when a shape is selected, because only that tool reads the whole group", () => {
+    const prompt = buildTurnPrompt("move it", AnySelectionSnapshotSchema.parse({ ...range, activeShape: shape }));
+    expect(prompt).toContain("A shape is selected: call get_selection to see every selected shape.");
+  });
+
+  it("says nothing more for a plain cell selection or once the group is already in the snapshot", () => {
+    expect(buildTurnPrompt("sum", AnySelectionSnapshotSchema.parse(range))).not.toContain("A shape is selected");
+    const named = AnySelectionSnapshotSchema.parse({ ...range, activeShape: shape, selectedShapes: [{ name: "Box A", nativeId: "2", nativeType: 1, connector: false }] });
+    expect(buildTurnPrompt("move", named)).not.toContain("A shape is selected");
   });
 });
 

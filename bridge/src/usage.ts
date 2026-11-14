@@ -1,7 +1,7 @@
 import { appendFileSync, mkdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { z } from "zod";
-import { TokenUsageSchema, type UsageSummary } from "../../protocol/src/index.js";
+import { TokenUsageSchema, type TokenUsage, type UsageSummary } from "../../protocol/src/index.js";
 
 const RecordSchema = z.object({
   sessionId: z.string(),
@@ -17,9 +17,25 @@ const RecordSchema = z.object({
 });
 export type UsageRecord = z.infer<typeof RecordSchema>;
 
+/**
+ * What the provider's CLI reported for a whole conversation at one moment. For a CLI whose usage is read when someone looks at
+ * it (see `ProviderAdapter.sessionUsage`) the turns carry none; this stands for them, up to `at`.
+ */
+const TotalSchema = z.object({
+  total: z.literal(true),
+  provider: z.string(),
+  providerSessionId: z.string(),
+  at: z.number(),
+  usage: TokenUsageSchema,
+});
+type Total = z.infer<typeof TotalSchema>;
+
+const COUNTS = ["inputTokens", "outputTokens", "cachedInputTokens", "totalTokens", "cacheWriteTokens", "uncachedInputTokens", "reasoningTokens"] as const;
+
 /** Append-only local ledger. No prompts, workbook data or credentials. */
 export class UsageStore {
   private readonly records: UsageRecord[] = [];
+  private readonly totals = new Map<string, Total>();
 
   constructor(private readonly file: string | null) {
     if (!file) return;
@@ -32,24 +48,55 @@ export class UsageStore {
     for (const line of contents.split("\n")) {
       if (!line.trim()) continue;
       try {
-        const parsed = RecordSchema.safeParse(JSON.parse(line));
+        const json = JSON.parse(line);
+        const total = TotalSchema.safeParse(json);
+        if (total.success) { this.keepTotal(total.data); continue; }
+        const parsed = RecordSchema.safeParse(json);
         if (parsed.success) this.records.push(parsed.data);
       } catch { /* A damaged line must not discard the rest of the ledger. */ }
     }
   }
 
   append(record: UsageRecord): void {
-    if (this.file) {
-      mkdirSync(path.dirname(this.file), { recursive: true, mode: 0o700 });
-      // A leading newline also isolates an incomplete final line after a crash.
-      appendFileSync(this.file, `\n${JSON.stringify(record)}\n`, { mode: 0o600 });
-    }
+    this.write(record);
     this.records.push(record);
+  }
+
+  private write(entry: object): void {
+    if (!this.file) return;
+    mkdirSync(path.dirname(this.file), { recursive: true, mode: 0o700 });
+    // A leading newline also isolates an incomplete final line after a crash.
+    appendFileSync(this.file, `\n${JSON.stringify(entry)}\n`, { mode: 0o600 });
+  }
+
+  private keepTotal(total: Total): void {
+    const key = `${total.provider}:${total.providerSessionId}`;
+    if ((this.totals.get(key)?.at ?? 0) <= total.at) this.totals.set(key, total);
+  }
+
+  /** Record the CLI's own total for a conversation, read just now. */
+  settle(provider: string, providerSessionId: string, usage: TokenUsage, at = Date.now()): void {
+    const total: Total = { total: true, provider, providerSessionId, at, usage };
+    this.write(total);
+    this.keepTotal(total);
+  }
+
+  /** The conversations (of `sessionId`, or all) with turns the latest recorded total does not cover yet. */
+  unsettled(sessionId?: string | null): Array<{ provider: string; providerSessionId: string }> {
+    const found = new Map<string, { provider: string; providerSessionId: string }>();
+    for (const record of this.records) {
+      if (record.usage || !record.providerSessionId || (sessionId && record.sessionId !== sessionId)) continue;
+      const key = `${record.provider}:${record.providerSessionId}`;
+      if ((this.totals.get(key)?.at ?? 0) < record.startedAt + record.durationMs) found.set(key, { provider: record.provider, providerSessionId: record.providerSessionId });
+    }
+    return [...found.values()];
   }
 
   summaries(): UsageSummary[] {
     const sessions = new Map<string, UsageSummary>();
     const legacyCredits = new Map<string, number>();
+    /** Per chat and CLI conversation: what the turns reported themselves, and how many turns reported nothing but are covered by a recorded total. */
+    const settled = new Map<string, Map<string, { provider: string; recorded: Partial<Record<typeof COUNTS[number], number>>; covered: number }>>();
     for (const record of this.records) {
       let summary = sessions.get(record.sessionId);
       if (!summary) {
@@ -61,6 +108,13 @@ export class UsageStore {
         sessions.set(record.sessionId, summary);
       }
       summary.turns++;
+      if (record.providerSessionId) {
+        const natives = (settled.get(record.sessionId) ?? settled.set(record.sessionId, new Map()).get(record.sessionId)!);
+        const entry = natives.get(record.providerSessionId) ?? { provider: record.provider, recorded: {} as Partial<Record<typeof COUNTS[number], number>>, covered: 0 };
+        natives.set(record.providerSessionId, entry);
+        if (record.usage) for (const key of COUNTS) entry.recorded[key] = (entry.recorded[key] ?? 0) + (record.usage[key] ?? 0);
+        else if ((this.totals.get(`${record.provider}:${record.providerSessionId}`)?.at ?? 0) >= record.startedAt + record.durationMs) entry.covered++;
+      }
       if (record.title) summary.title = record.title;
       if (record.providerSessionId && !summary.providerSessionIds!.includes(record.providerSessionId)) summary.providerSessionIds!.push(record.providerSessionId);
       summary.durationMs += record.durationMs;
@@ -94,6 +148,23 @@ export class UsageStore {
           }
           summary.copilotCredits = (summary.copilotCreditNanoAiu ?? 0) / 1e9 + (legacyCredits.get(record.sessionId) ?? 0);
         }
+      }
+    }
+    // Turns that reported nothing are accounted for by the CLI's own total for their conversation, less what other turns of it reported.
+    for (const [sessionId, natives] of settled) {
+      const summary = sessions.get(sessionId)!;
+      for (const [nativeId, entry] of natives) {
+        const total = this.totals.get(`${entry.provider}:${nativeId}`)?.usage;
+        if (!entry.covered || !total) continue;
+        for (const key of COUNTS) {
+          if (total[key] === undefined) continue;
+          const extra = Math.max(0, total[key]! - (entry.recorded[key] ?? 0));
+          summary[key] = (summary[key] ?? 0) + extra;
+        }
+        summary.reportedTurns += entry.covered;
+        summary.originalReportedTurns = (summary.originalReportedTurns ?? 0) + entry.covered;
+        if (total.reasoningTokens !== undefined) summary.reasoningReportedTurns = (summary.reasoningReportedTurns ?? 0) + entry.covered;
+        if (total.cacheWriteTokens !== undefined && total.uncachedInputTokens !== undefined) summary.cacheSplitReportedTurns = (summary.cacheSplitReportedTurns ?? 0) + entry.covered;
       }
     }
     return [...sessions.values()].sort((a, b) => b.updatedAt - a.updatedAt);
