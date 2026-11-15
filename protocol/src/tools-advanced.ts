@@ -716,8 +716,52 @@ export type CreateArtifactInput = z.infer<typeof CreateArtifactInputSchema>;
 /* Other workbooks open in Excel with this add-in (read-only)                  */
 /* -------------------------------------------------------------------------- */
 
+/* -------------------------------------------------------------------------- */
+/* Analysing a table without reading it into the conversation                  */
+/* -------------------------------------------------------------------------- */
+
+const AnalyzeValue = z.union([z.string(), z.number(), z.boolean()]);
+const ColumnRef = z.string().min(1).max(255);
+
+export const AnalyzeFilterSchema = z
+  .object({
+    column: ColumnRef.describe("Header text (or column letters when there is no header row)."),
+    op: z.enum(["eq", "ne", "gt", "gte", "lt", "lte", "between", "in", "contains", "notContains", "startsWith", "endsWith", "blank", "notBlank"]),
+    value: AnalyzeValue.optional().describe("Dates as YYYY-MM-DD."),
+    value2: AnalyzeValue.optional().describe("Upper bound for `between`."),
+    values: z.array(AnalyzeValue).max(100).optional().describe("Candidates for `in`."),
+  })
+  .superRefine((filter, ctx) => {
+    const needsValue = !["in", "blank", "notBlank"].includes(filter.op);
+    if (needsValue && filter.value === undefined) ctx.addIssue({ code: "custom", path: ["value"], message: `value is required for ${filter.op}` });
+    if (filter.op === "between" && filter.value2 === undefined) ctx.addIssue({ code: "custom", path: ["value2"], message: "value2 is required for between" });
+    if (filter.op === "in" && !filter.values?.length) ctx.addIssue({ code: "custom", path: ["values"], message: "values is required for in" });
+  });
+
+export const AnalyzeAggregateSchema = z
+  .object({
+    fn: z.enum(["count", "sum", "avg", "min", "max", "distinct"]),
+    column: ColumnRef.optional().describe("Column to aggregate; leave out for the number of rows."),
+    as: z.string().min(1).max(64).optional().describe("Name of the result field."),
+  })
+  .refine((aggregate) => aggregate.fn === "count" || aggregate.column !== undefined, { message: "column is required except for count", path: ["column"] });
+
+export const AnalyzeRangeInputSchema = z.object({
+  sheet: Sheet,
+  address: A1AddressSchema.describe("The table, header row included."),
+  mode: z.enum(["profile", "query"]).describe("profile: what each column holds. query: filter, group and aggregate, or list matching rows."),
+  headerRow: z.boolean().default(true).describe("The first row holds the column names."),
+  columns: z.array(ColumnRef).max(60).optional().describe("profile: only these columns. query without groupBy/aggregate: the columns to return (at most 20)."),
+  where: z.array(AnalyzeFilterSchema).max(10).default([]).describe("Keep the rows where every condition holds."),
+  groupBy: z.array(ColumnRef).max(2).default([]),
+  aggregate: z.array(AnalyzeAggregateSchema).max(8).default([]).describe("Default with groupBy: the number of rows."),
+  orderBy: z.object({ by: ColumnRef.describe("A column, an aggregate name, or `rows`."), direction: z.enum(["asc", "desc"]).default("desc") }).optional(),
+  limit: z.number().int().min(1).max(200).default(50),
+});
+export type AnalyzeRangeInput = z.infer<typeof AnalyzeRangeInputSchema>;
+
 /** Reading tools that may be pointed at another connected workbook. Writing is never allowed across files. */
-export const CONNECTED_READ_TOOLS = ["get_sheets", "read_range", "get_cell_ranges", "search_data", "find_errors", "check_formula_consistency", "get_objects"] as const;
+export const CONNECTED_READ_TOOLS = ["get_sheets", "read_range", "get_cell_ranges", "search_data", "analyze_range", "find_errors", "check_formula_consistency", "get_objects"] as const;
 
 /**
  * The same, per kind of file. Another file may be a workbook, a Word document or a presentation, and only its own

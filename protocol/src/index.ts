@@ -6,6 +6,7 @@ export * from "./providers.js";
 export * from "./provider-options.js";
 export * from "./tools.js";
 export * from "./tools-advanced.js";
+export * from "./analyze.js";
 export * from "./tools-testing.js";
 export * from "./tools-word.js";
 export * from "./tools-ppt.js";

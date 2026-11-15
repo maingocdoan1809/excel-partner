@@ -79,7 +79,7 @@ function raw<T>(value: T): T {
   return ((value as unknown as Record<symbol, T>)?.[RAW] ?? value) as T;
 }
 
-const RANGE_PROPS = ["address", "rowIndex", "columnIndex", "rowCount", "columnCount", "values", "formulas", "numberFormat", "left", "top", "width", "height"] as const;
+const RANGE_PROPS = ["address", "rowIndex", "columnIndex", "rowCount", "columnCount", "values", "valueTypes", "formulas", "numberFormat", "left", "top", "width", "height"] as const;
 const SHEET_PROPS = ["name", "id", "position", "visibility", "tabColor", "showGridlines", "showHeadings"] as const;
 const SHAPE_PROPS = ["rotation", "id", "isNullObject", "name", "type", "geometricShapeType", "left", "top", "width", "height"] as const;
 
@@ -505,6 +505,13 @@ export class MockRange {
   }
   get text() {
     return this.values.map((row) => row.map((value) => (value === null || value === undefined ? "" : String(value))));
+  }
+  /** Office.js `valueTypes`: what each cell holds. Errors are strings that start with `#` and end in `!`, `?` or `/A`. */
+  get valueTypes() {
+    return this.values.map((row) => row.map((value) => (value === "" || value === null || value === undefined ? "Empty"
+      : typeof value === "number" ? (Number.isInteger(value) ? "Integer" : "Double")
+      : typeof value === "boolean" ? "Boolean"
+      : /^#(REF!|DIV\/0!|N\/A|NAME\?|VALUE!|NUM!|NULL!)$/.test(String(value)) ? "Error" : "String")));
   }
   get formulas() {
     return this.grid((cell) => cell.f ?? (cell.v === null ? "" : String(cell.v)));

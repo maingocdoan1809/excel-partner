@@ -42,7 +42,7 @@ office-partner status
 
 ## What it can do
 
-- **Read:** selections, ranges, formulas, formatting, tables, charts, pivots, shapes, and a rendered image of a range.
+- **Read:** selections, ranges, formulas, formatting, tables, charts, pivots, shapes, and a rendered image of a range. `analyze_range` answers totals, counts, rankings and data checks over thousands of rows (profile the columns, or filter, group and aggregate) without reading the rows into the chat.
 - **Write:** values and formulas (with a check for `#REF!`/`#NAME?` errors), formatting, sort, filter, merge, validation, conditional formatting, named ranges, print layout, sheets.
 - **Build:** tables, charts, pivot tables, flowcharts with attached connectors.
 - **Audit:** `find_errors` scans for formula errors; writes refuse to overwrite existing data unless overwrite is approved.

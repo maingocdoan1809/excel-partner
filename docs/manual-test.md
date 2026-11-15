@@ -20,6 +20,7 @@ Gọi get_sheets và manage_names (operation list). Cho tôi xem danh sách shee
 # Bước 1. Khảo sát (chỉ đọc)
 Gọi get_selection. Chọn sheet có nhiều dữ liệu nhất làm "NGUỒN" và tìm vùng bảng chính của nó: đọc bằng read_range (format csv, includeText=true), get_cell_ranges với includeStyles=true cho khoảng 5 dòng đầu, read_range_image cho khoảng 20 dòng đầu. Báo cho tôi: tên sheet NGUỒN, vùng dữ liệu, số cột, cột nào là số, cột nào là chữ, có công thức không, có Excel Table/biểu đồ/pivot không (get_objects), có hình không (list_shapes).
 Rồi dùng search_data: một lần với từ khóa lấy từ dữ liệu thật, một lần với matchFormulas (nếu có công thức), một lần với useRegex. Mỗi lần phải có kết quả khớp với dữ liệu bạn đã đọc.
+Rồi dùng analyze_range trên bảng dữ liệu lớn nhất (có hàng tiêu đề): mode profile (kiểu, số ô trống, min/max, giá trị phổ biến từng cột phải khớp với những gì bạn thấy), rồi mode query: tổng theo một cột nhóm (groupBy + sum), một điều kiện where trên cột ngày dạng YYYY-MM-DD, và liệt kê 5 dòng khớp (kèm số dòng trên sheet). So từng con số với PivotTable hoặc SUMIFS làm tay. Thử một tên cột sai: phải báo lỗi kèm danh sách cột.
 
 # Bước 2. Kiểm tra chất lượng trên dữ liệu thật (chỉ đọc)
 Gọi find_errors trên toàn workbook và check_formula_consistency trên sheet NGUỒN (nếu có công thức). Liệt kê phát hiện. Đừng sửa gì.

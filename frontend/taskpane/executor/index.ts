@@ -40,7 +40,9 @@ import type {
   ToolResult,
   UpdateShapeInput,
   WriteRangeInput,
+  AnalyzeRangeInput,
 } from "../../../protocol/src/index.js";
+import { analyzeRange } from "./analyze.js";
 import { checkFormulaConsistency, findErrors } from "./audit.js";
 import { findReplace } from "./replace.js";
 import { copyTo, getCellRanges, readRangeImage, resizeRange, setCells } from "./cells.js";
@@ -126,6 +128,8 @@ function run(tool: string, args: unknown): Promise<unknown> {
       return getCellRanges(args as GetCellRangesInput);
     case "search_data":
       return searchData(args as SearchDataInput);
+    case "analyze_range":
+      return analyzeRange(args as AnalyzeRangeInput);
     case "find_errors":
       return findErrors(args as FindErrorsInput);
     case "check_formula_consistency":

@@ -29,6 +29,7 @@ export const TOOL_SUMMARIES: Readonly<Record<string, string>> = {
   manage_doc_pictures: "WRITE (operation list only reads). List the inline pictures; resize one or set its alt text; delete one.",
   read_connected_file: "READ ONLY. Run one read tool of that file's own application in ANOTHER open file (see list_connected_files).",
   send_to_connected_file: "Send a request to the assistant of ANOTHER open file, which does the work there and replies.",
+  analyze_range: "READ. Profile a table's columns, or filter, group and aggregate its rows (totals, counts, rankings) without reading them.",
   get_selection: "READ. What is selected now: cells, text or slide shapes, depending on the open application.",
   insert_image: "WRITE. Put a picture (web address, file or base64) into the open file where it is selected.",
   update_skill: "WRITE. Update a text file of a user-installed skill (SKILL.md, references or scripts).",
