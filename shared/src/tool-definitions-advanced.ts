@@ -107,6 +107,13 @@ const META: Partial<Record<ExcelToolName, Meta>> = {
       "WRITE. Copy a range to another place; the source pattern repeats to fill a larger destination and relative " +
       "references adjust (C2=B2 becomes C3=B3). Refuses to overwrite non-empty destination cells unless allowOverwrite.",
   },
+  get_tool_definition: {
+    title: "Get tool definition",
+    annotations: READ,
+    description:
+      "READ. Full input schema of tools offered by summary only. Call it with the names you are about to use, before the first use of each. " +
+      "A name that is not exact is matched to the closest tools; if nothing matches (or no name is given) every tool is listed.",
+  },
   list_skills: {
     title: "List skills",
     annotations: READ,

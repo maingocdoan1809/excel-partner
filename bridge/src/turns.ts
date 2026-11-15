@@ -145,7 +145,7 @@ export class TurnRunner {
     await this.deps.providerSessions.ensure(session, {
       model, effort, chatSessionId, resumeSessionId,
       capabilities: { ...input.capabilities, webSearch: input.capabilities.webSearch && adapter.capabilities.nativeWebSearch,
-        connectedFiles: this.deps.hasOtherFiles(session) },
+        connectedFiles: this.deps.hasOtherFiles(session), lazySchemas: this.deps.config.toolSchemas === "lazy" },
       systemPromptRevision: `${promptSettings.revision}:${catalogRevision}`,
     }, () => ({
       requestUserInput: (request, requestSignal) => session.requestUserInput(request, requestSignal),
@@ -254,7 +254,7 @@ export class TurnRunner {
       sessionId: resumeSessionId ? providerSessionKey(session.provider, resumeSessionId) : chatSessionId ?? session.id,
       providerSessionId: resumeSessionId, requestId, provider: session.provider,
       model: selectedModel, startedAt: Date.now(), durationMs: 0, reason: "completed", usage: null,
-      catalogChars: toolCatalogChars(session.host, this.deps.config.allowOfficeJs, session.capabilities),
+      catalogChars: toolCatalogChars(session.host, this.deps.config.allowOfficeJs, { ...session.capabilities, lazySchemas: this.deps.config.toolSchemas === "lazy" }),
     });
     // `/skill-name request` loads the skill's instructions into this turn.
     const expanded = isCommand ? { prompt, skill: undefined } : expandSkillPrompt(prompt, skills);

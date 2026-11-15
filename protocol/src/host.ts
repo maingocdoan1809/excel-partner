@@ -30,6 +30,7 @@ export const HOST_AGNOSTIC_TOOLS: readonly ExcelToolName[] = [
   "execute_office_js",
   "insert_image",
   "create_artifact",
+  "get_tool_definition",
   "list_skills",
   "read_skill",
   "save_skill",

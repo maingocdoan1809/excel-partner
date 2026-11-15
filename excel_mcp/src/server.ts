@@ -1,5 +1,5 @@
 import { toolResultToMcp } from "../../shared/src/results.js";
-import { officeToolCatalog } from "../../shared/src/catalog.js";
+import { officeToolCatalog, schemaHintFor, unknownToolHint } from "../../shared/src/catalog.js";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import {
   CallToolRequestSchema,
@@ -30,7 +30,9 @@ function fail(error: ToolError): CallToolResult { return toolResultToMcp({ ok: f
  */
 export function createExcelMcpServer(forwarder: ToolForwarder, options: ExcelMcpOptions = {}): Server {
   const host = options.host ?? DEFAULT_HOST;
-  const exposed = new Set<string>(exposedToolNamesForHost(host, options.allowOptInTools ?? false, options.capabilities));
+  const allowOptIn = options.allowOptInTools ?? false;
+  const groups = options.capabilities ?? {};
+  const exposed = new Set<string>(exposedToolNamesForHost(host, allowOptIn, groups));
   const server = new Server(SERVER_INFO, { capabilities: { tools: {} } });
 
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
@@ -44,7 +46,7 @@ export function createExcelMcpServer(forwarder: ToolForwarder, options: ExcelMcp
       return toolResultToMcp(await forwarder.call(name, request.params.arguments ?? {}));
     }
     if (!isKnownToolName(name) || !exposed.has(name)) {
-      return fail({ code: "unknown_tool", message: `unknown tool '${name}'` });
+      return fail({ code: "unknown_tool", message: `unknown tool '${name}'.${unknownToolHint(host, allowOptIn, groups, name)}` });
     }
 
     let parsed: unknown;
@@ -54,7 +56,7 @@ export function createExcelMcpServer(forwarder: ToolForwarder, options: ExcelMcp
       if (error instanceof ZodError) {
         return fail({
           code: "invalid_arguments",
-          message: `invalid arguments for ${name}`,
+          message: `invalid arguments for ${name}.${schemaHintFor(host, allowOptIn, groups, name)}`,
           detail: error.issues,
         });
       }

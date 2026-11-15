@@ -39,6 +39,7 @@ import {
   SendToConnectedFileInputSchema,
   ListReferenceFilesInputSchema,
   ListSkillsInputSchema,
+  GetToolDefinitionInputSchema,
   SaveSkillInputSchema,
   UpdateSkillInputSchema,
   ReadWorkbookFileInputSchema,
@@ -121,6 +122,7 @@ export const ExcelToolInputSchemas = {
   insert_image: InsertImageInputSchema,
   // skills (answered by the bridge itself)
   list_skills: ListSkillsInputSchema,
+  get_tool_definition: GetToolDefinitionInputSchema,
   save_skill: SaveSkillInputSchema,
   update_skill: UpdateSkillInputSchema,
   read_skill: ReadSkillInputSchema,
@@ -162,7 +164,7 @@ export type ToolName = keyof typeof ToolInputSchemas;
 export const ALL_TOOL_NAMES = Object.keys(ToolInputSchemas) as ToolName[];
 
 /** Tools the bridge answers itself instead of forwarding to the task pane. */
-export const SERVER_TOOLS: readonly ExcelToolName[] = ["playwright_browser", "list_skills", "read_skill", "save_skill", "update_skill", "run_skill_script", "run_python", "list_reference_files", "read_workbook_file", "read_attached_image", "read_attached_file", "read_document_file", "list_connected_files", "read_connected_file", "send_to_connected_file", "list_test_sessions", "open_test_browser", "read_site_knowledge", "save_site_knowledge", "delete_site_knowledge", "save_test_script", "finish_test_run"];
+export const SERVER_TOOLS: readonly ExcelToolName[] = ["playwright_browser", "get_tool_definition", "list_skills", "read_skill", "save_skill", "update_skill", "run_skill_script", "run_python", "list_reference_files", "read_workbook_file", "read_attached_image", "read_attached_file", "read_document_file", "list_connected_files", "read_connected_file", "send_to_connected_file", "list_test_sessions", "open_test_browser", "read_site_knowledge", "save_site_knowledge", "delete_site_knowledge", "save_test_script", "finish_test_run"];
 
 /** Tools that need the user to have switched on the browser (Playwright) in Tools. */
 export const BROWSER_TOOLS: readonly ExcelToolName[] = ["playwright_browser", "list_test_sessions", "open_test_browser", "save_test_script", "finish_test_run"];
@@ -180,10 +182,23 @@ export const CONNECTED_FILE_TOOLS: readonly ExcelToolName[] = ["list_connected_f
 export const OPT_IN_TOOLS: readonly ToolName[] = ["execute_office_js", "edit_slide_xml"];
 
 /** What a session offers beyond the tools every conversation has: each is switched on by the user (web search, browser) or by the situation (another file open). */
-export interface ToolGroups { webSearch?: boolean; playwright?: boolean; connectedFiles?: boolean }
+export interface ToolGroups {
+  webSearch?: boolean; playwright?: boolean; connectedFiles?: boolean;
+  /** Set by the bridge from its `toolSchemas` setting: most tools carry a summary only and `get_tool_definition` gives the schema. */
+  lazySchemas?: boolean;
+}
+
+/** The groups a provider's MCP process was started with (the bridge passes them as environment variables). */
+export function toolGroupsFromEnv(env: Record<string, string | undefined>): ToolGroups {
+  return {
+    webSearch: env.EXCEL_WEB_SEARCH === "1", playwright: env.EXCEL_PLAYWRIGHT === "1", connectedFiles: env.EXCEL_CONNECTED_FILES === "1",
+    lazySchemas: env.EXCEL_TOOL_SCHEMAS === "lazy",
+  };
+}
 
 /** Whether the tool is offered given the groups that are on. */
 export function toolInGroups(name: string, groups: ToolGroups): boolean {
+  if (name === "get_tool_definition") return groups.lazySchemas === true;
   if ((BROWSER_TOOLS as readonly string[]).includes(name) || (WEB_TESTING_TOOLS as readonly string[]).includes(name)) return groups.playwright === true;
   if ((CONNECTED_FILE_TOOLS as readonly string[]).includes(name)) return groups.connectedFiles === true;
   return true;

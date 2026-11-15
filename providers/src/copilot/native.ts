@@ -4,7 +4,7 @@ import path from "node:path";
 import fs from "node:fs";
 import { createRequire } from "node:module";
 import type { CopilotClient, CopilotSession, SessionConfig, Tool } from "@github/copilot-sdk";
-import { exposedToolNamesForHost, hostFromEnv, UserInputRequestSchema, type ProviderEvent } from "../../../protocol/src/index.js";
+import { exposedToolNamesForHost, hostFromEnv, toolGroupsFromEnv, UserInputRequestSchema, type ProviderEvent } from "../../../protocol/src/index.js";
 import { AsyncQueue } from "../async-queue.js";
 import { askProviderQuestions } from "../user-input.js";
 import { CopilotUsageReader } from "./usage.js";
@@ -70,7 +70,7 @@ export class CopilotNativeSessions {
     if (ctx.resumeSessionId && !validNativeId(ctx.resumeSessionId)) throw new Error("Invalid Copilot resume session ID");
     const { CopilotClient, RuntimeConnection, ToolSet, convertMcpCallToolResult } = await import("@github/copilot-sdk");
     const web = ctx.mcp.env.EXCEL_WEB_SEARCH === "1";
-    const names = new Set<string>(ctx.mcp.toolNames ?? exposedToolNamesForHost(hostFromEnv(ctx.mcp.env), ctx.mcp.env.EXCEL_ALLOW_OFFICE_JS === "1", { playwright: ctx.mcp.env.EXCEL_PLAYWRIGHT === "1", connectedFiles: ctx.mcp.env.EXCEL_CONNECTED_FILES === "1" }));
+    const names = new Set<string>(ctx.mcp.toolNames ?? exposedToolNamesForHost(hostFromEnv(ctx.mcp.env), ctx.mcp.env.EXCEL_ALLOW_OFFICE_JS === "1", toolGroupsFromEnv(ctx.mcp.env)));
     const cliPath = resolveCopilotPath(command, env);
     const client = new CopilotClient({
       connection: RuntimeConnection.forStdio({ path: cliPath, args: ["--no-custom-instructions",

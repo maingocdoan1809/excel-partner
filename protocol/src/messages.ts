@@ -71,6 +71,8 @@ export const ToolCapabilitiesSchema = z.object({
   playwright: z.boolean().default(false),
   /** Set by the bridge, never by the pane: another file is open, so the tools for work across files are offered. */
   connectedFiles: z.boolean().optional(),
+  /** Set by the bridge, never by the pane: most tools are offered by summary and `get_tool_definition` gives their schema. */
+  lazySchemas: z.boolean().optional(),
 });
 export type ToolCapabilities = z.infer<typeof ToolCapabilitiesSchema>;
 

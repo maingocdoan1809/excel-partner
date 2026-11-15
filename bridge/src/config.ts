@@ -42,6 +42,8 @@ export interface LocalConfig {
   /** Extra folders searched for skills. */
   skillDirs?: string[];
   allowOfficeJs?: boolean;
+  /** `lazy`: offer most tools by summary and give their schema through `get_tool_definition` (see shared/src/lazy-tools.ts). */
+  toolSchemas?: "full" | "lazy";
   /** Extra hostnames the bridge answers to (e.g. a WSL IP); `office-partner allow-host` edits this. */
   allowedHosts?: string[];
 }
@@ -51,7 +53,8 @@ function readLocalConfig(): LocalConfig {
     const raw = JSON.parse(fs.readFileSync(process.env.BRIDGE_CONFIG ?? path.join(PROJECT_ROOT, "excel-partner.config.json"), "utf8")) as LocalConfig;
     const strings = (v: unknown) => (Array.isArray(v) ? v.filter((x): x is string => typeof x === "string" && x.trim() !== "") : []);
     return { referenceDirs: strings(raw.referenceDirs), skillDirs: strings(raw.skillDirs), allowedHosts: strings(raw.allowedHosts),
-      allowOfficeJs: typeof raw.allowOfficeJs === "boolean" ? raw.allowOfficeJs : undefined };
+      allowOfficeJs: typeof raw.allowOfficeJs === "boolean" ? raw.allowOfficeJs : undefined,
+      toolSchemas: raw.toolSchemas === "lazy" || raw.toolSchemas === "full" ? raw.toolSchemas : undefined };
   } catch {
     return {};
   }
@@ -85,6 +88,8 @@ export interface BridgeConfig {
   skillDirs: string[];
   /** Expose execute_office_js (arbitrary Office.js). On by default; can be disabled explicitly. */
   allowOfficeJs: boolean;
+  /** How the tool catalog is offered: every schema (`full`, the default) or summaries plus `get_tool_definition` (`lazy`). */
+  toolSchemas: "full" | "lazy";
   logLevel: "debug" | "info" | "warn" | "error";
   /** Local settings file (config.json), re-read on every use. */
   configFile: string;
@@ -136,6 +141,7 @@ export function loadConfig(overrides: Partial<BridgeConfig> = {}): BridgeConfig 
     skillDirs: defaultSkillDirs([...(local.skillDirs ?? []), ...splitPaths(process.env.BRIDGE_SKILL_DIRS)]),
     referenceDirs: [...(local.referenceDirs ?? []), ...splitPaths(process.env.BRIDGE_REFERENCE_DIRS)],
     allowOfficeJs: envBool("BRIDGE_ALLOW_OFFICE_JS", local.allowOfficeJs ?? true),
+    toolSchemas: (process.env.BRIDGE_TOOL_SCHEMAS ?? local.toolSchemas) === "lazy" ? "lazy" : "full",
     logLevel: (process.env.BRIDGE_LOG_LEVEL as BridgeConfig["logLevel"]) ?? "info",
     configFile: process.env.BRIDGE_CONFIG ?? path.join(PROJECT_ROOT, "excel-partner.config.json"),
     mcp: {

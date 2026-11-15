@@ -1,3 +1,5 @@
+import { describableTools, schemaHintFor, unknownToolHint } from "../../shared/src/catalog.js";
+import { GET_TOOL_DEFINITION, lookupTools, requestedToolNames } from "../../shared/src/lazy-tools.js";
 import { invokeRegisteredMcpTool } from "../../shared/src/mcp-catalog.js";
 import type { McpServers } from "../../shared/src/mcp-servers.js";
 import { OPEN_POLICY, toolResultChars, type AdminPolicy } from "../../protocol/src/index.js";
@@ -130,7 +132,7 @@ export class OfficeRuntime {
     }
 
     if (!isKnownToolName(request.tool)) {
-      return error("unknown_tool", `unknown tool '${request.tool}'`);
+      return error("unknown_tool", `unknown tool '${request.tool}'.${unknownToolHint(session.host, this.allowOptInTools, session.capabilities, request.tool)}`);
     }
 
     if (!isToolNameForHost(session.host, request.tool)) {
@@ -151,11 +153,12 @@ export class OfficeRuntime {
       parsed = parseToolInputForHost(session.host, request.tool, request.args);
     } catch (err) {
       if (err instanceof ZodError) {
-        return error("invalid_arguments", `invalid arguments for ${request.tool}`, err.issues);
+        return error("invalid_arguments", `invalid arguments for ${request.tool}.${schemaHintFor(session.host, this.allowOptInTools, session.capabilities, request.tool)}`, err.issues);
       }
       return error("invalid_arguments", String(err));
     }
 
+    if (request.tool === GET_TOOL_DEFINITION) return { ok: true, data: lookupTools(requestedToolNames(parsed), describableTools(session.host, this.allowOptInTools, session.capabilities)) };
     if (request.tool === "list_connected_files") return this.listConnectedFiles(session);
     if (request.tool === "read_connected_file") return this.readConnectedFile(session, parsed as ReadConnectedFileInput, request.signal);
     if (request.tool === "send_to_connected_file") return this.sendToConnectedFile(session, parsed as SendToConnectedFileInput, request.signal);

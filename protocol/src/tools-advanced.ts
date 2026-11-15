@@ -556,6 +556,16 @@ export type AddLineInput = z.infer<typeof AddLineInputSchema>;
 /* -------------------------------------------------------------------------- */
 
 export const ListSkillsInputSchema = z.object({});
+/**
+ * `get_tool_definition` (lazy tool schemas, see shared/src/lazy-tools.ts). Lenient on purpose: a name given as one string,
+ * extra parameters or a parameter of the wrong type must still get an answer, because the answer to a wrong request is the list.
+ */
+export const GetToolDefinitionInputSchema = z.object({
+  names: z.preprocess(
+    value => typeof value === "string" ? [value] : Array.isArray(value) ? value.filter((item): item is string => typeof item === "string").slice(0, 40) : undefined,
+    z.array(z.string()).optional(),
+  ).describe("Names of the tools to describe. Leave out to list every tool."),
+}).passthrough();
 export const SaveSkillInputSchema = z.object({
   name: z.string().regex(/^[a-z0-9][a-z0-9_-]{0,63}$/).describe("New skill name, used as its folder name and slash command."),
   description: z.string().max(2000).default("").describe("Short summary of when to use this skill."),

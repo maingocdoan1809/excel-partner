@@ -59,7 +59,9 @@ describe("host tool mapping", () => {
         expect(isToolNameForHost(host, name), `${host}:${name}`).toBe(false);
       }
       const own = host === "word" ? WORD_TOOL_NAMES : PPT_TOOL_NAMES;
-      expect(toolsForHost(host, { allowOptIn: true, playwright: true, connectedFiles: true }).sort()).toEqual([...HOST_AGNOSTIC_TOOLS, ...own].sort());
+      // get_tool_definition is offered only when the bridge offers tools by summary.
+      expect(toolsForHost(host, { allowOptIn: true, playwright: true, connectedFiles: true }).sort()).toEqual([...HOST_AGNOSTIC_TOOLS.filter(name => name !== "get_tool_definition"), ...own].sort());
+      expect(toolsForHost(host, { allowOptIn: true, playwright: true, connectedFiles: true, lazySchemas: true }).sort()).toEqual([...HOST_AGNOSTIC_TOOLS, ...own].sort());
     }
     expect(isToolNameForHost("excel", "edit_doc_text")).toBe(false);
     expect(isToolNameForHost("powerpoint", "edit_doc_text")).toBe(false);

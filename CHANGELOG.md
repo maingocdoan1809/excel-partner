@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- **Lighter tool list (`toolSchemas: "lazy"`, off by default).** Tools are offered by name and one line; `get_tool_definition` returns the full definition, matches a name that is slightly wrong and lists every tool when nothing matches. Wrong calls are answered with the closest names or the tool's schema.
+- **The usage ledger records, per turn, the calls, failures and result size of each tool and the size of the tool definitions offered.** `node scripts/usage-tools.mjs` summarises them. Names and sizes only.
+- **The tool catalog has a size budget per host** (`tests/catalog-budget.test.ts`).
+- **Fix:** the lockfile pinned `@github/copilot-sdk` 1.0.18 and `koffi` 3.2.1 while `package.json` asks for 1.0.34 and 3.3.6, so `npm ci` failed and the published shrinkwrap carried the old SDK. One lockfile (`npm-shrinkwrap.json`) remains.
+
 ## 0.1.23
 
 ### Security
