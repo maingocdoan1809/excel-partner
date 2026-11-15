@@ -4,6 +4,8 @@
  * rules real Excel enforces, and records what was formatted. Install it with
  * `installOfficeMock()` before calling the executor.
  */
+import { parseRange, splitSheetAddress } from "../../protocol/src/address.js";
+
 type Cell = { v: string | number | boolean | null; f: string | null };
 const MAX_ROW = 1_048_576;
 const MAX_COL = 16_384;
@@ -119,6 +121,17 @@ function colToNum(letters: string): number {
   for (const ch of letters.toUpperCase()) n = n * 26 + ch.charCodeAt(0) - 64;
   return n;
 }
+/** The ranges a formula names, each as `Sheet!A1` or `Sheet!A1:B2` (the formula's own sheet where none is written). Good enough for test formulas: no function names with digits. */
+function formulaReferences(formula: string, ownSheet: string): string[] {
+  const out: string[] = [];
+  for (const match of formula.matchAll(/(?:('(?:[^']|'')+'|[A-Za-z0-9_]+)!)?(\$?[A-Z]{1,3}\$?\d+(?::\$?[A-Z]{1,3}\$?\d+)?)/g)) {
+    const quoted = match[1];
+    const sheet = quoted ? (quoted.startsWith("'") ? quoted.slice(1, -1).replace(/''/g, "'") : quoted) : ownSheet;
+    out.push(`${sheet}!${match[2]!.replace(/\$/g, "")}`);
+  }
+  return out;
+}
+
 function numToCol(n: number): string {
   let out = "";
   while (n > 0) {
@@ -506,6 +519,33 @@ export class MockRange {
   get text() {
     return this.values.map((row) => row.map((value) => (value === null || value === undefined ? "" : String(value))));
   }
+  /** ExcelApi 1.12: the ranges the formulas in this range read, on any sheet. Found by reading the formula text. */
+  getDirectPrecedents() {
+    const found = new Set<string>();
+    for (let r = 0; r < this.rowCount; r++) for (let c = 0; c < this.columnCount; c++) {
+      const formula = this.sheet.cell(this.rowIndex + r, this.columnIndex + c).f;
+      if (formula) for (const reference of formulaReferences(formula, this.sheet.name)) found.add(reference);
+    }
+    return { addresses: [...found], load() { return this; } };
+  }
+  /** ExcelApi 1.12: the cells, on any sheet, whose formulas read a cell of this range. */
+  getDirectDependents() {
+    const mine = { sheet: this.sheet.name, r0: this.rowIndex, c0: this.columnIndex, r1: this.rowIndex + this.rowCount - 1, c1: this.columnIndex + this.columnCount - 1 };
+    const found: string[] = [];
+    for (const sheet of this.sheet.book.sheets) {
+      for (const [at, cell] of sheet.cells) {
+        if (!cell.f) continue;
+        const [r, c] = at.split(",").map(Number) as [number, number];
+        const reads = formulaReferences(cell.f, sheet.name).some((reference) => {
+          const { sheet: name, range } = splitSheetAddress(reference);
+          const box = parseRange(range);
+          return name === mine.sheet && box !== null && box.start.row - 1 <= mine.r1 && box.end.row - 1 >= mine.r0 && box.start.col - 1 <= mine.c1 && box.end.col - 1 >= mine.c0;
+        });
+        if (reads) found.push(`${sheet.name}!${numToCol(c + 1)}${r + 1}`);
+      }
+    }
+    return { addresses: found, load() { return this; } };
+  }
   /** Office.js `valueTypes`: what each cell holds. Errors are strings that start with `#` and end in `!`, `?` or `/A`. */
   get valueTypes() {
     return this.values.map((row) => row.map((value) => (value === "" || value === null || value === undefined ? "Empty"
@@ -755,13 +795,18 @@ export class MockRange {
   }
 }
 
-/** Evaluate only what tests need: a bare `=A1*B1`-style product/sum of cell refs. */
-function computeFormula(sheet: MockSheet, formula: string): number | string {
-  const expr = formula.slice(1);
-  const resolved = expr.replace(/\$?([A-Z]{1,3})\$?(\d+)/g, (_m, col, row) => {
-    const v = sheet.cell(+row - 1, colToNum(col) - 1);
-    return String(v.f ? computeFormula(sheet, v.f) : (v.v ?? 0));
+/** Evaluate only what tests need: a bare `=A1*B1`-style product/sum of cell refs, on this sheet or another (`Sheet!A1`). */
+function computeFormula(sheet: MockSheet, formula: string, depth = 0): number | string {
+  if (depth > 20) return formula;
+  const valueOf = (on: MockSheet, col: string, row: string) => {
+    const v = on.cell(+row - 1, colToNum(col) - 1);
+    return String(v.f ? computeFormula(on, v.f, depth + 1) : (v.v ?? 0));
+  };
+  const qualified = formula.slice(1).replace(/(?:'((?:[^']|'')+)'|([A-Za-z0-9_]+))!\$?([A-Z]{1,3})\$?(\d+)/g, (_m, quoted, plain, col, row) => {
+    const other = sheet.book.sheets.find((candidate) => candidate.name === (quoted ? String(quoted).replace(/''/g, "'") : plain));
+    return other ? valueOf(other, col, row) : "0";
   });
+  const resolved = qualified.replace(/\$?([A-Z]{1,3})\$?(\d+)/g, (_m, col, row) => valueOf(sheet, col, row));
   if (!/^[\d+\-*/().\s]+$/.test(resolved)) return formula;
   try {
     return Function(`"use strict"; return (${resolved})`)() as number;

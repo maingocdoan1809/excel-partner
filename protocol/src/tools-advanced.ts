@@ -761,6 +761,19 @@ export const AnalyzeRangeInputSchema = z.object({
 export type AnalyzeRangeInput = z.infer<typeof AnalyzeRangeInputSchema>;
 
 /* -------------------------------------------------------------------------- */
+/* Where a cell's value comes from, and what depends on it                     */
+/* -------------------------------------------------------------------------- */
+
+export const TraceFormulaInputSchema = z.object({
+  sheet: Sheet,
+  address: CellAddress.describe("The cell to trace, e.g. D10."),
+  direction: z.enum(["precedents", "dependents", "both"]).default("precedents").describe("precedents: the cells its formula reads. dependents: the cells that read it."),
+  depth: z.number().int().min(1).max(3).default(1).describe("How many steps to follow."),
+  limit: z.number().int().min(1).max(300).default(100).describe("Most cells and ranges to return."),
+});
+export type TraceFormulaInput = z.infer<typeof TraceFormulaInputSchema>;
+
+/* -------------------------------------------------------------------------- */
 /* Several steps in one call                                                   */
 /* -------------------------------------------------------------------------- */
 
@@ -770,7 +783,7 @@ export type AnalyzeRangeInput = z.infer<typeof AnalyzeRangeInputSchema>;
  * returns a picture, and the free-form Office.js tool.
  */
 export const BATCHABLE_TOOLS = [
-  "get_sheets", "read_range", "get_cell_ranges", "search_data", "analyze_range", "find_errors", "check_formula_consistency", "get_objects",
+  "get_sheets", "read_range", "get_cell_ranges", "search_data", "analyze_range", "trace_formula", "find_errors", "check_formula_consistency", "get_objects",
   "write_range", "set_cells", "set_formula", "format_range", "clear_range", "copy_to", "find_replace", "resize_range", "merge_range", "sort_range", "filter_range",
   "insert_rows", "modify_structure", "manage_sheet", "manage_names", "conditional_format", "data_validation", "page_layout", "sheet_view",
   "modify_table", "modify_chart", "modify_pivot_table",
@@ -788,7 +801,7 @@ export const BatchInputSchema = z.object({
 export type BatchInput = z.infer<typeof BatchInputSchema>;
 
 /** Reading tools that may be pointed at another connected workbook. Writing is never allowed across files. */
-export const CONNECTED_READ_TOOLS = ["get_sheets", "read_range", "get_cell_ranges", "search_data", "analyze_range", "find_errors", "check_formula_consistency", "get_objects"] as const;
+export const CONNECTED_READ_TOOLS = ["get_sheets", "read_range", "get_cell_ranges", "search_data", "analyze_range", "trace_formula", "find_errors", "check_formula_consistency", "get_objects"] as const;
 
 /**
  * The same, per kind of file. Another file may be a workbook, a Word document or a presentation, and only its own

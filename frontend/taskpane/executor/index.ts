@@ -41,8 +41,10 @@ import type {
   UpdateShapeInput,
   WriteRangeInput,
   AnalyzeRangeInput,
+  TraceFormulaInput,
 } from "../../../protocol/src/index.js";
 import { analyzeRange } from "./analyze.js";
+import { traceFormula } from "./trace.js";
 import { checkFormulaConsistency, findErrors } from "./audit.js";
 import { findReplace } from "./replace.js";
 import { copyTo, getCellRanges, readRangeImage, resizeRange, setCells } from "./cells.js";
@@ -130,6 +132,8 @@ function run(tool: string, args: unknown): Promise<unknown> {
       return searchData(args as SearchDataInput);
     case "analyze_range":
       return analyzeRange(args as AnalyzeRangeInput);
+    case "trace_formula":
+      return traceFormula(args as TraceFormulaInput);
     case "find_errors":
       return findErrors(args as FindErrorsInput);
     case "check_formula_consistency":

@@ -38,6 +38,15 @@ export function parseCell(cell: string): CellRef | null {
   return { col: columnToNumber(match[1]!), row: Number.parseInt(match[2]!, 10) };
 }
 
+/** `Sheet1!A1:B2` or `'My Sheet'!A1` as the sheet's name (unquoted) and the range; `sheet` is null when the address has none. */
+export function splitSheetAddress(address: string): { sheet: string | null; range: string } {
+  const bang = address.lastIndexOf("!");
+  if (bang === -1) return { sheet: null, range: address };
+  const raw = address.slice(0, bang);
+  const sheet = raw.startsWith("'") && raw.endsWith("'") && raw.length >= 2 ? raw.slice(1, -1).replace(/''/g, "'") : raw;
+  return { sheet, range: address.slice(bang + 1) };
+}
+
 /** Parse an A1 range like `A1`, `A1:C3`, `$A$1:$C$3`. */
 export function parseRange(address: string): ParsedRange | null {
   const parts = address.trim().split(":");

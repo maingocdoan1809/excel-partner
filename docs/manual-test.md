@@ -21,6 +21,7 @@ Gọi get_sheets và manage_names (operation list). Cho tôi xem danh sách shee
 Gọi get_selection. Chọn sheet có nhiều dữ liệu nhất làm "NGUỒN" và tìm vùng bảng chính của nó: đọc bằng read_range (format csv, includeText=true), get_cell_ranges với includeStyles=true cho khoảng 5 dòng đầu, read_range_image cho khoảng 20 dòng đầu. Báo cho tôi: tên sheet NGUỒN, vùng dữ liệu, số cột, cột nào là số, cột nào là chữ, có công thức không, có Excel Table/biểu đồ/pivot không (get_objects), có hình không (list_shapes).
 Rồi dùng search_data: một lần với từ khóa lấy từ dữ liệu thật, một lần với matchFormulas (nếu có công thức), một lần với useRegex. Mỗi lần phải có kết quả khớp với dữ liệu bạn đã đọc.
 Rồi dùng analyze_range trên bảng dữ liệu lớn nhất (có hàng tiêu đề): mode profile (kiểu, số ô trống, min/max, giá trị phổ biến từng cột phải khớp với những gì bạn thấy), rồi mode query: tổng theo một cột nhóm (groupBy + sum), một điều kiện where trên cột ngày dạng YYYY-MM-DD, và liệt kê 5 dòng khớp (kèm số dòng trên sheet). So từng con số với PivotTable hoặc SUMIFS làm tay. Thử một tên cột sai: phải báo lỗi kèm danh sách cột.
+Rồi dùng trace_formula (cần Excel 365): trên một ô công thức có tham chiếu sang sheet khác, direction precedents với depth 1 rồi 2 (so với Trace Precedents của Excel), một ô dữ liệu với direction dependents (so với Trace Dependents), và direction both. Ô không có công thức phải báo "holds no formula". Bản Excel cũ phải báo cần ExcelApi 1.12, không lỗi khác. Đây là chỗ DUY NHẤT code chưa chạy thử trên Excel thật (test dùng bản mô phỏng): getDirectPrecedents/getDirectDependents trả `addresses` có kèm tên sheet không, và có lỗi khi ô không có công thức không.
 Rồi dùng batch trên sheet nháp: một lần gồm write_range vào ô trống, format_range, data_validation (3 bước), kiểm tra cả ba áp dụng và mục Changes liệt kê từng bước. Lần nữa với bước thứ hai ghi vào ô đã có dữ liệu ở chế độ Ask (phải hỏi như khi gọi riêng, bước 3 không chạy nếu từ chối) và một lần có bước sai tham số (không bước nào được chạy).
 
 # Bước 2. Kiểm tra chất lượng trên dữ liệu thật (chỉ đọc)
@@ -157,3 +158,15 @@ Mở cùng lúc một file Word, một file Excel và một file PowerPoint, m�
 ## Hồi quy Excel
 
 Chạy lại Bước 0 đến Bước 10 ở trên: kết quả phải giống trước khi có Word/PowerPoint.
+
+
+# Chế độ lazy: toolSchemas = lazy
+
+Chạy sau khi bật `BRIDGE_TOOL_SCHEMAS=lazy` (hoặc `"toolSchemas": "lazy"` trong config.json) và khởi động lại bridge. Lặp lại với TỪNG provider (Claude, Copilot, Codex, OpenCode): cách mỗi CLI xử lý tool có schema mở là điều test tự động không kiểm chứng được.
+
+1. Mở một chat mới ở Excel và nhờ: "Tô nền đỏ các ô lớn hơn 100 ở cột C bằng conditional formatting". Quan sát: assistant gọi get_tool_definition trước (xem thẻ tool), rồi conditional_format đúng tham số ngay lần đầu. Ghi lại số lượt gọi tool.
+2. Nhờ một việc chỉ dùng tool đã có sẵn schema (đọc A1:C10 rồi ghi tổng vào D1): không được gọi get_tool_definition.
+3. Nhờ việc dùng nhiều tool lạ cùng lúc (định dạng + data validation + page layout): phải lấy nhiều tên trong MỘT lần get_tool_definition.
+4. Bảo assistant gọi get_tool_definition với một tên sai (ví dụ "conditionalformat" hoặc "sort_rnge"): phải trả đúng tool hoặc gợi ý tên gần nhất; với tên vô nghĩa: trả toàn bộ danh sách tool.
+5. Cố ý để assistant gọi một tool lạ với tham số sai: lỗi phải kèm schema của tool đó, và lần thử lại phải đúng.
+6. So sánh với chế độ full (cùng yêu cầu 1): số lượt gọi tool, tổng token (Usage) và `node scripts/usage-tools.mjs`. Chỉ đổi mặc định sang lazy khi lượt gọi và token thực sự giảm.
