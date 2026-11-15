@@ -17,6 +17,7 @@ import { ensureWorkspaceDir } from "../workspace.js";
 import { codexTokenBaseline, nativeTitle, validNativeId } from "../session-metadata.js";
 import { answerCodexQuestions, type RequestUserInput } from "../user-input.js";
 import { CODEX_COMMANDS } from "./commands.js";
+import { importCodexSession, listCodexSessions } from "./external.js";
 
 interface CodexSession {
   model?: string;
@@ -49,6 +50,8 @@ interface TurnLike {
  */
 export class CodexAdapter extends BaseCliAdapter {
   async listCommands() { return CODEX_COMMANDS; }
+  listExternalSessions() { return listCodexSessions(this.sessionHomes.source); }
+  importExternalSession(id: string) { return importCodexSession(this.sessionHomes, id); }
   async sessionTitle(id: string): Promise<string | undefined> {
     const session = [...this.sessions.values()].find(s => s.threadId === id);
     if (!session) return undefined;
@@ -90,7 +93,7 @@ export class CodexAdapter extends BaseCliAdapter {
 
   static readonly logoutArgs = ["logout"];
 
-  static readonly terminal: TerminalAgentSpec = mcpAddRemove("codex");
+  static readonly terminal: TerminalAgentSpec = mcpAddRemove("codex", { label: "Codex CLI", client: /codex/i });
 
   static readonly capabilities: ProviderCapabilities = {
     streaming: true,
@@ -104,6 +107,7 @@ export class CodexAdapter extends BaseCliAdapter {
     logout: true,
     liveModel: false,
     liveEffort: true,
+    importSessions: true,
   };
   readonly capabilities = CodexAdapter.capabilities;
 

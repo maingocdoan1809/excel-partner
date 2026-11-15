@@ -16,7 +16,7 @@ import type {
 } from "../../../protocol/src/index.js";
 import { acpPermissionOutcome, contentText, toolNameOf } from "../acp.js";
 import { AsyncQueue } from "../async-queue.js";
-import { BaseCliAdapter, cliEnvironment, execCli, type CliProbe } from "../base.js";
+import { BaseCliAdapter, cliEnvironment, execCli, extractVersion, type CliProbe } from "../base.js";
 import { ProviderLoginError, type CliLoginSpec } from "../login.js";
 import { mcpAddRemove, type TerminalAgentSpec } from "../terminal-agent.js";
 import { JsonRpcPeer } from "../jsonrpc.js";
@@ -25,6 +25,7 @@ import { MCP_SERVER_NAME, type ProviderModelCatalog, type SendTurnInput, type St
 import { ensureWorkspaceDir } from "../workspace.js";
 import { effortConfig, type EffortConfigOption } from "../effort.js";
 import { CopilotNativeSessions, resolveCopilotPath } from "./native.js";
+import { importCopilotSession, listCopilotSessions } from "./external.js";
 import { cachedCommands } from "../commands.js";
 
 interface CopilotSession {
@@ -64,6 +65,11 @@ export class CopilotAdapter extends BaseCliAdapter {
   private readonly commandCatalog = cachedCommands(() => this.native.listCommands(this.command, this.env));
   async listCommands(id?: string) { return id && this.native.has(id) ? this.native.listCommands(this.command, this.env, id) : this.commandCatalog(); }
   async sessionTitle(id: string): Promise<string | undefined> { return copilotTitle(id, this.env); }
+  listExternalSessions() { return listCopilotSessions(this.sessionHomes.source); }
+  async importExternalSession(id: string) {
+    const { version } = await this.detect();
+    return importCopilotSession(this.sessionHomes, id, version ? extractVersion(version) : undefined);
+  }
   async listModels(): Promise<ProviderModelCatalog> {
     const peer = new JsonRpcPeer({
       command: this.command,
@@ -103,7 +109,7 @@ export class CopilotAdapter extends BaseCliAdapter {
     instructions: "Enter the code on GitHub. Office Partner will update when you finish signing in.",
   };
 
-  static readonly terminal: TerminalAgentSpec = mcpAddRemove("copilot");
+  static readonly terminal: TerminalAgentSpec = mcpAddRemove("copilot", { label: "Copilot CLI", client: /copilot/i });
 
   static readonly capabilities: ProviderCapabilities = {
     streaming: true,
@@ -118,6 +124,7 @@ export class CopilotAdapter extends BaseCliAdapter {
     logout: false,
     liveModel: true,
     liveEffort: true,
+    importSessions: true,
   };
   readonly capabilities = CopilotAdapter.capabilities;
 

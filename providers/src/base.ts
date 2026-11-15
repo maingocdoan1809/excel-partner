@@ -10,6 +10,7 @@ import type {
 } from "../../protocol/src/index.js";
 import { CliLoginAttempt, ProviderLoginError, type CliLoginSpec } from "./login.js";
 import { installProvider, minimumVersion, uninstallProvider } from "./profiled.js";
+import type { SessionHomes } from "./external-sessions.js";
 import type { McpEndpoint, ProviderAdapter, ProviderLoginAttempt, ProviderRuntime, SendTurnInput, StartSessionContext } from "./types.js";
 
 export const cliEnvironment = (): string => process.platform === "win32" ? "Windows" : "WSL/Linux";
@@ -92,6 +93,9 @@ export abstract class BaseCliAdapter implements ProviderAdapter {
     this.runtime.logger.debug(`detect ${this.id}`, detection);
     return detection;
   }
+
+  /** Where conversations from outside the add-in are read (the person's own CLI folder) and where this adapter's CLI looks to resume them. */
+  protected get sessionHomes(): SessionHomes { return { source: process.env, target: this.env }; }
 
   /** Oldest CLI version the release has been verified against: `minVersion` in the runtime manifest. */
   protected get minVersion(): string | null {

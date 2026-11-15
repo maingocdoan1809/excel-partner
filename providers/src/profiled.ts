@@ -83,6 +83,12 @@ export class ProfiledAdapter implements ProviderAdapter {
   async listModels() { return (await this.resolve().listModels?.()) ?? { models: [], defaultModelId: null }; }
   async listCommands(id?: string) { return ((id && this.sessions.get(id)) || this.resolve()).listCommands?.(id) ?? []; }
   async sessionTitle(nativeId: string) { return this.resolve().sessionTitle?.(nativeId); }
+  async listExternalSessions() { return (await this.resolve().listExternalSessions?.()) ?? []; }
+  async importExternalSession(id: string) {
+    const adapter = this.resolve();
+    if (!adapter.importExternalSession) throw new Error("This provider cannot import conversations.");
+    return adapter.importExternalSession(id);
+  }
   async startSession(ctx: StartSessionContext) {
     const adapter = this.resolve();
     let starting = true, closed = false, accepted = false;

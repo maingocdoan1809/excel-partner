@@ -7,6 +7,7 @@ import type {
   PromptSelectionSnapshot,
 } from "../../protocol/src/index.js";
 import type { ProviderOption } from "../../protocol/src/provider-options.js";
+import type { ExternalSessionSummary, ImportedSession } from "../../protocol/src/external-sessions.js";
 import type { LoginAccount, LoginChoice, ProviderLoginStatus } from "../../protocol/src/provider-login.js";
 
 /**
@@ -137,6 +138,13 @@ export interface ProviderAdapter {
   listModels?(): Promise<ProviderModelCatalog>;
   /** Read the native title without a model request. Missing titles stay unknown. */
   sessionTitle?(nativeSessionId: string, options?: { cheapOnly?: boolean }): Promise<string | undefined>;
+  /** Conversations the provider's own tools (terminal CLI, VS Code extension) saved on this computer, newest first. Not the add-in's own. */
+  listExternalSessions?(): Promise<ExternalSessionSummary[]>;
+  /**
+   * Reads one of them and prepares it so `startSession({ resumeSessionId })` continues it with the same context. The
+   * returned `providerSessionId` is that resume id; importing the same conversation again returns the same one.
+   */
+  importExternalSession?(id: string): Promise<ImportedSession>;
   /**
    * What the CLI itself recorded for a conversation: the session's total token usage. Only for a CLI whose per-turn
    * figure is not complete or costs a process to read; it is asked for when someone looks at the usage, not after every turn.

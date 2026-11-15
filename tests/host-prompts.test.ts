@@ -34,6 +34,12 @@ describe("host system prompts", () => {
         expect(mentioned.length).toBeGreaterThan(3);
         for (const tool of mentioned) expect(allowed.has(tool), `${host} (connectedFiles ${connectedFiles}): ${tool}`).toBe(true);
       }
+      // With execute_office_js turned off (BRIDGE_ALLOW_OFFICE_JS=0) the prompt must not name it.
+      const without = toolsForHost(host, { allowOptIn: false, playwright: true, connectedFiles: false });
+      const named = (hostSystemPrompt(host, "", { officeJs: false }).match(/[a-z]+(?:_[a-z]+)+/g) ?? []).filter((word) => names.has(word));
+      for (const tool of named) expect(without.includes(tool), `${host} without execute_office_js: ${tool}`).toBe(true);
+      expect(hostSystemPrompt(host, "", { officeJs: false })).not.toContain("execute_office_js");
+      expect(hostSystemPrompt(host, "")).toContain("execute_office_js");
       expect(hostSystemPrompt(host, "")).not.toContain("list_connected_files");
       expect(hostSystemPrompt(host, "", { connectedFiles: true })).toContain("list_connected_files");
     }

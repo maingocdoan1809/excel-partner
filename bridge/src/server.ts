@@ -20,6 +20,7 @@ import { ProviderLoginManager } from "./provider-login.js";
 import { ReferenceFiles } from "./reference-files.js";
 import { FileRoutes } from "./routes/files.js";
 import { McpRoutes } from "./routes/mcp.js";
+import { ExternalSessionRoutes } from "./routes/external-sessions.js";
 import { ProviderRoutes } from "./routes/providers.js";
 import { SkillRoutes } from "./routes/skills.js";
 import { TestingRoutes } from "./routes/testing.js";
@@ -102,7 +103,7 @@ export class Bridge {
   private readonly updater: UpdateService | null;
   private readonly panes: PaneSockets;
   private readonly routes: {
-    files: FileRoutes; mcp: McpRoutes; providers: ProviderRoutes; skills: SkillRoutes; testing: TestingRoutes; workspaces: WorkspaceRoutes; system: SystemRoutes; peer: PeerRoutes;
+    files: FileRoutes; external: ExternalSessionRoutes; mcp: McpRoutes; providers: ProviderRoutes; skills: SkillRoutes; testing: TestingRoutes; workspaces: WorkspaceRoutes; system: SystemRoutes; peer: PeerRoutes;
   };
 
   constructor(config: BridgeConfig, options: BridgeOptions = {}) {
@@ -206,6 +207,7 @@ export class Bridge {
       peer: new PeerRoutes({ sessions: this.sessions, delegations, tokenFile: path.join(dataDir, "peer-token.txt") }),
       system:new SystemRoutes(this.sessions, this.providers, this.updater, () => this.logins.isBusy),
       files: new FileRoutes({ sessions: this.sessions, logger: this.logger, activateWorkbook: options.activateWorkbook ?? activateWorkbook }),
+      external: new ExternalSessionRoutes({ sessions: this.sessions, providers: this.providers, history: this.history, logger: this.logger.child("external-sessions"), disabled: policy.disabledProviders }),
       mcp: new McpRoutes({ sessions: this.sessions, mcpServers: this.mcpServers, discover: discoverMcp }),
       providers: new ProviderRoutes({ sessions: this.sessions, providers: this.providers, logins: this.logins, usage, logger: this.logger, disabled: policy.disabledProviders }),
       skills: new SkillRoutes({ sessions: this.sessions, skills: this.skills, userSkills, systemPrompt }),
@@ -294,6 +296,7 @@ export class Bridge {
     const { files, mcp, providers, skills, testing, workspaces } = this.routes;
     if (this.maintenance && url.pathname.startsWith("/session/") && method !== "GET") return sendJson(res, 503, { error: "Office Partner is switching releases. Retry after it reconnects." });
     if (url.pathname === "/session/history") return this.history.handle(req, res, url);
+    if (url.pathname === "/session/external") return this.routes.external.handle(req, res, url);
     if (url.pathname === "/session/system") return this.routes.system.handle(req, res, url);
     if (url.pathname.startsWith("/peer/")) return this.routes.peer.handle(req, res, url);
 

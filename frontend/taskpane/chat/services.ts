@@ -178,8 +178,9 @@ export const { recordChange, renderChanges } = setupChangesPanel({
   getSession: () => app.session, schedulePersist, goTo: target => navigation.goTo(target), elements: els,
 });
 
-export const { renderHistory, continueViewedSession, deleteViewedSession, clearHistory } = setupHistoryPanel({
+export const { renderHistory, continueViewedSession, deleteViewedSession, clearHistory, toggleImport } = setupHistoryPanel({
   getClient: () => app.client, getSession: () => app.session, getRequestId: () => app.currentRequestId,
+  getProvider: () => app.provider, canImport: () => providerPicker.capabilitiesOf(app.provider)?.importSessions ?? false,
   store, providerNames: PROVIDER_NAMES, elements: els,
   persistNow, abandonRequest, refreshUsage, loadSession, renderMessage, showPanel,
   resetChat: () => {

@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 import { loadConfig } from "../bridge/src/config.js";
 import { peerServerFor } from "../bridge/src/terminal-agents.js";
 import { terminalAgents } from "../providers/src/registry.js";
-import { syncTerminalAgents, type TerminalMcpServer } from "../providers/src/terminal-agent.js";
+import { syncTerminalAgents, terminalAgentLabel, type TerminalMcpServer } from "../providers/src/terminal-agent.js";
 
 const server: TerminalMcpServer = { name: "office-partner", command: "node", args: ["C:\\app\\peer-cli.js"], env: { OFFICE_PARTNER_DATA_DIR: "C:\\data" } };
 const agents = terminalAgents();
@@ -29,6 +29,16 @@ describe("registering the peer MCP server in the terminal CLIs", () => {
     expect(claude.spec.add(server)).toEqual(["mcp", "add", "--scope", "user", "office-partner", "-e", "OFFICE_PARTNER_DATA_DIR=C:\\data", "--", "node", "C:\\app\\peer-cli.js"]);
     expect(agents.find(agent => agent.id === "copilot")!.spec.add(server)).toEqual(["mcp", "add", "office-partner", "--env", "OFFICE_PARTNER_DATA_DIR=C:\\data", "--", "node", "C:\\app\\peer-cli.js"]);
     expect(claude.spec.remove("office-partner")).toEqual(["mcp", "remove", "--scope", "user", "office-partner"]);
+  });
+
+  it("shows the person who is asking from the name the CLI gave in the MCP handshake, each provider supplying its own label", () => {
+    expect(agents.map(agent => agent.spec.label)).toEqual(["Claude Code", "Copilot CLI", "Codex CLI"]);
+    expect(terminalAgentLabel(agents, "claude-code")).toBe("Claude Code (terminal)");
+    expect(terminalAgentLabel(agents, "GitHub-Copilot-CLI")).toBe("Copilot CLI (terminal)");
+    expect(terminalAgentLabel(agents, "codex-mcp-client")).toBe("Codex CLI (terminal)");
+    expect(terminalAgentLabel(agents, "my-agent")).toBe("my-agent (terminal)");
+    expect(terminalAgentLabel(agents, undefined)).toBe("Terminal agent");
+    expect(terminalAgentLabel(agents, "  ")).toBe("Terminal agent");
   });
 
   it("registers in the CLIs that are installed and skips the rest", async () => {

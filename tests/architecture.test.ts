@@ -88,4 +88,17 @@ describe("the folders depend on each other in one direction only", () => {
     }
     expect(found).toEqual([]);
   });
+
+  it("only the providers folder knows how a terminal CLI calls itself", () => {
+    // The name a person sees for a terminal CLI and the pattern that recognises it both come from its provider's `static terminal`. The pane's own
+    // provider picker (frontend) is a separate, older list of display names and is left out.
+    const shown = /\b(?:Claude Code|Copilot CLI|Codex CLI)\b|\/(?:claude|copilot|codex|opencode)(?:\|(?:claude|copilot|codex|opencode))*\/[a-z]*i\b/;
+    const found: string[] = [];
+    for (const folder of ["shared", "bridge", "gateway", "excel_mcp"]) {
+      for (const file of sources(folder)) {
+        fs.readFileSync(file, "utf8").split(/\r?\n/).forEach((line, index) => { if (shown.test(line)) found.push(`${file.split(path.sep).join("/")}:${index + 1}`); });
+      }
+    }
+    expect(found).toEqual([]);
+  });
 });

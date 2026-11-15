@@ -40,6 +40,8 @@ export const ProviderCapabilitiesSchema = z.object({
   /** The CLI changes its model (`liveModel`) or reasoning effort (`liveEffort`) in the middle of a session, from the next turn on, so the bridge does not restart it for that. */
   liveModel: z.boolean(),
   liveEffort: z.boolean(),
+  /** The CLI's conversations from outside the add-in (terminal, VS Code) can be listed and imported, then resumed here. */
+  importSessions: z.boolean(),
 });
 export type ProviderCapabilities = z.infer<typeof ProviderCapabilitiesSchema>;
 

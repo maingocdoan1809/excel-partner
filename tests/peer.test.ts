@@ -5,7 +5,7 @@ import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { afterEach, describe, expect, it } from "vitest";
 import { Bridge } from "../bridge/src/server.js";
 import { loadConfig } from "../bridge/src/config.js";
-import { createPeerServer, httpPeerClient, terminalAgentName } from "../excel_mcp/src/peer.js";
+import { createPeerServer, httpPeerClient } from "../excel_mcp/src/peer.js";
 import { MockAdapter } from "../providers/src/mock.js";
 import { ProviderRegistry } from "../providers/src/registry.js";
 import { PaneClient, getFreePort } from "./helpers.js";
@@ -84,15 +84,6 @@ describe("a terminal agent asking the assistant of an open file", () => {
     expect(seen.delegated).toEqual([{ from: { id: "terminal", name: "Claude Code (terminal)" }, text: "Fill column D with totals" }]);
     await pane.waitFor((m) => m.type === "turn_finished" && m.requestId === "turn-1");
     await pane.close();
-  });
-
-  it("tells the person which terminal program is asking, from the name it gave in the MCP handshake", () => {
-    expect(terminalAgentName("claude-code")).toBe("Claude Code (terminal)");
-    expect(terminalAgentName("GitHub-Copilot-CLI")).toBe("Copilot CLI (terminal)");
-    expect(terminalAgentName("codex-mcp-client")).toBe("Codex CLI (terminal)");
-    expect(terminalAgentName("my-agent")).toBe("my-agent (terminal)");
-    expect(terminalAgentName(undefined)).toBeUndefined();
-    expect(terminalAgentName("  ")).toBeUndefined();
   });
 
   it("does nothing in the file when the person declines", async () => {

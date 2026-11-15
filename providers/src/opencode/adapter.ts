@@ -192,6 +192,7 @@ export class OpencodeAdapter extends BaseCliAdapter {
     logout: true,
     liveModel: true,
     liveEffort: true,
+    importSessions: false,
   };
   readonly capabilities = OpencodeAdapter.capabilities;
 

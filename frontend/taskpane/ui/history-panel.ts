@@ -1,5 +1,6 @@
 import type { ChatHistoryStore } from "./durable-history.js";
 import type { ProviderId } from "../../../protocol/src/index.js";
+import type { ExternalSessionSummary } from "../../../protocol/src/external-sessions.js";
 import type { BridgeClient } from "../bridge-client.js";
 import { formatWhen, type StoredMessage, type StoredSession } from "./sessions.js";
 
@@ -7,6 +8,9 @@ export interface HistoryPanelDeps {
   getClient(): BridgeClient;
   getSession(): StoredSession;
   getRequestId(): string | null;
+  getProvider(): ProviderId;
+  /** The current provider can import the conversations its own tools saved. */
+  canImport(): boolean;
   store: ChatHistoryStore;
   providerNames: Record<ProviderId, string>;
   persistNow(): void;
@@ -18,6 +22,8 @@ export interface HistoryPanelDeps {
   showPanel(name: "session" | "history" | null): void;
   elements: {
     historyClear: HTMLButtonElement;
+    historyImport: HTMLButtonElement;
+    historyImportList: HTMLElement;
     historyList: HTMLElement;
     sessionTitle: HTMLElement;
     sessionMeta: HTMLElement;
@@ -37,6 +43,8 @@ export function setupHistoryPanel(deps: HistoryPanelDeps) {
   const currentId = () => store.savedId?.(deps.getSession().id) ?? deps.getSession().id;
 
   async function renderHistory(refreshTitles = true, more = false): Promise<void> {
+    showImport(false);
+    els.historyImport.hidden = !deps.canImport();
     deps.persistNow(); // so the current chat is listed too
     let pendingWarning = "";
     try { await store.flush?.(); } catch { pendingWarning = "Some chats are not saved yet. They are kept and saved again automatically; use Settings to export or recover them."; }
@@ -131,6 +139,57 @@ export function setupHistoryPanel(deps: HistoryPanelDeps) {
     } catch (error) { els.historyList.textContent = `Could not open history: ${error instanceof Error ? error.message : String(error)}`; }
   }
 
+  /** Saved chats, or the list of conversations the provider's own tools saved (terminal, VS Code) to import from. */
+  function showImport(on: boolean): void {
+    els.historyImportList.hidden = !on;
+    els.historyList.hidden = on;
+    els.historyImport.textContent = on ? "Back" : "Import";
+    els.historyClear.hidden = on || store.list().length === 0;
+  }
+
+  async function toggleImport(): Promise<void> {
+    if (!els.historyImportList.hidden) return void renderHistory(false);
+    showImport(true);
+    const list = els.historyImportList;
+    const message = (text: string) => { const note = document.createElement("p"); note.className = "settings-description"; note.textContent = text; list.replaceChildren(note); };
+    message("Looking for conversations on this computer…");
+    const provider = deps.getProvider();
+    try {
+      const { sessions } = await deps.getClient().externalSessions(provider);
+      if (list.hidden) return;
+      if (!sessions.length) return message(`No ${PROVIDER_NAMES[provider]} conversations from the terminal or VS Code were found on this computer.`);
+      const intro = document.createElement("p");
+      intro.className = "settings-description";
+      intro.textContent = "Pick a conversation to bring into History. You can then continue it here with its full context.";
+      list.replaceChildren(intro, ...sessions.map((item) => importRow(provider, item, message)));
+    } catch (error) { message(`Could not read the conversations: ${error instanceof Error ? error.message : String(error)}`); }
+  }
+
+  function importRow(provider: ProviderId, item: ExternalSessionSummary, message: (text: string) => void): HTMLElement {
+    const row = document.createElement("button");
+    row.type = "button";
+    row.className = "history-item";
+    const title = document.createElement("span");
+    title.className = "history-title";
+    title.textContent = item.title;
+    const meta = document.createElement("span");
+    meta.className = "history-meta";
+    meta.textContent = [item.origin, item.cwd, formatWhen(item.updatedAt), item.messageCount ? `${item.messageCount} message${item.messageCount === 1 ? "" : "s"}` : null].filter(Boolean).join(" · ");
+    row.append(title, meta);
+    row.addEventListener("click", () => {
+      row.disabled = true;
+      meta.textContent = "Importing…";
+      void (async () => {
+        try {
+          const saved = await deps.getClient().importExternalSession(provider, item.id);
+          await openSession(saved.id);
+          void renderHistory(false);
+        } catch (error) { row.disabled = false; meta.textContent = `Could not import: ${error instanceof Error ? error.message : String(error)}`; }
+      })();
+    });
+    return row;
+  }
+
   function renderTranscript() {
     els.sessionTranscript.replaceChildren();
     if (!viewing) return;
@@ -209,5 +268,5 @@ export function setupHistoryPanel(deps: HistoryPanelDeps) {
     els.historyClear.textContent = "Delete all";
   }
 
-  return { renderHistory, continueViewedSession, deleteViewedSession, clearHistory };
+  return { renderHistory, continueViewedSession, deleteViewedSession, clearHistory, toggleImport };
 }

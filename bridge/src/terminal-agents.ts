@@ -19,7 +19,7 @@ export function peerServerFor(config: BridgeConfig): TerminalMcpServer {
 }
 
 /**
- * Makes every terminal CLI on this computer (Claude Code, Copilot CLI, Codex CLI) able to ask the assistant of an open file,
+ * Makes every terminal CLI on this computer that a provider knows how to register in able to ask the assistant of an open file,
  * without the person running anything. Runs in the background after start; a CLI that is missing or refuses is only logged.
  * Turn it off with OFFICE_PARTNER_TERMINAL_AGENTS=0 or `{"disabled": true}` in terminal-agents.json in the data folder.
  */

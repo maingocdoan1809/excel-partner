@@ -50,6 +50,7 @@ export class MockAdapter implements ProviderAdapter {
     logout: false,
     liveModel: false,
     liveEffort: false,
+    importSessions: false,
   };
   readonly capabilities = MockAdapter.capabilities;
 

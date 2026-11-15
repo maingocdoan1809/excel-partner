@@ -129,7 +129,7 @@ export class TurnRunner {
     const stored = this.deps.systemPrompt.forHost(session.host).read();
     // Excel keeps the user's prompt as it is; Word and PowerPoint add their own rules (and a new revision, so a running session restarts with them).
     if (session.host === "excel") return stored;
-    const content = hostSystemPrompt(session.host, stored.content, { connectedFiles: this.deps.hasOtherFiles(session) });
+    const content = hostSystemPrompt(session.host, stored.content, { connectedFiles: this.deps.hasOtherFiles(session), officeJs: this.deps.config.allowOfficeJs });
     return { ...stored, content, revision: createHash("sha256").update(`${stored.revision}:${session.host}:${content}`).digest("hex") };
   }
 

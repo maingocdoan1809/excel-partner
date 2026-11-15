@@ -283,7 +283,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
   {
     name: "insert_rows",
     title: "Insert rows",
-    description: "WRITE. Insert blank rows above or below a row reference.",
+    description: "WRITE. Insert `count` (1-1000) blank rows above or below the row named by `at` (a row number or cell reference such as `5` or `A5`; whole rows, not a range). `position` is `above` (default) or `below`.",
     inputSchema: {
       type: "object",
       properties: {

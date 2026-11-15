@@ -2,6 +2,8 @@ import type http from "node:http";
 import fs from "node:fs";
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import { MAX_DELEGATED_TEXT, UNNAMED_FILE, type ToolResult } from "../../../protocol/src/index.js";
+import { terminalAgents } from "../../../providers/src/registry.js";
+import { terminalAgentLabel } from "../../../providers/src/terminal-agent.js";
 import type { Delegations } from "../delegations.js";
 import { toolError as fail } from "../tool-error.js";
 import { readBody, sendJson } from "../http-util.js";
@@ -15,7 +17,6 @@ export interface PeerRouteDeps {
 }
 
 const PEER_HEADER = "x-office-partner-peer";
-const DEFAULT_PEER_NAME = "Claude Code (terminal)";
 
 /**
  * `/peer/*`: a program on this computer (a terminal agent) talking to the assistant of an open file. It rides on the
@@ -50,11 +51,11 @@ export class PeerRoutes {
   }
 
   private async ask(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
-    let body: { file?: unknown; message?: unknown; from?: unknown };
+    let body: { file?: unknown; message?: unknown; client?: unknown };
     try { body = JSON.parse(await readBody(req, 64_000)); }
     catch { return sendJson(res, 400, { error: "invalid_json" }); }
     if (typeof body.file !== "string" || typeof body.message !== "string" || !body.message.trim()) return sendJson(res, 400, { error: "file and message are required" });
-    const from = typeof body.from === "string" && body.from.trim() ? body.from.trim().slice(0, 80) : DEFAULT_PEER_NAME;
+    const from = terminalAgentLabel(terminalAgents(), typeof body.client === "string" ? body.client : undefined);
     // A caller that hangs up must not leave the other file working for nobody.
     const callerGone = new AbortController();
     res.on("close", () => { if (!res.writableFinished) callerGone.abort(); });

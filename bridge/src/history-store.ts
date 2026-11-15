@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { createRequire } from "node:module";
 import type Database from "better-sqlite3";
 import { StoredSessionSchema, type StoredSession, type SessionHost, type HistorySave, type HistoryAck, type HistoryRecord, type HistorySummary } from "../../protocol/src/history.js";
@@ -97,6 +97,19 @@ export class HistoryStore {
         this.db.prepare("DELETE FROM history_entries WHERE host=? AND chat=? AND kind=? AND ordinal>=?").run(host, session.id, kind, items.length);
       }
       return { revision, generation };
+    })();
+  }
+  /**
+   * Adds a conversation imported from outside the add-in. One already in History is left as it is, so importing the same
+   * conversation twice (or after continuing it here) never overwrites work; one deleted earlier is added back.
+   */
+  saveImported(host: SessionHost, session: StoredSession): { id: string; existing: boolean } {
+    return this.db.transaction(() => {
+      const row = this.row(host, session.id);
+      if (row && !row.deleted) return { id: session.id, existing: true };
+      if (row) this.db.prepare("UPDATE history_chats SET deleted=0 WHERE host=? AND id=?").run(host, session.id);
+      this.save(host, { session, baseRevision: row?.revision ?? 0, generation: this.generation(host), operationId: randomUUID() });
+      return { id: session.id, existing: false };
     })();
   }
   list(host: SessionHost, offset = 0, limit = 40) { return this.db.transaction(() => this.listSnapshot(host, offset, limit))(); }

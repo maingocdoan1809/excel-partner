@@ -37,6 +37,8 @@ export const els = {
   changesList: byId<HTMLElement>("changes-list"),
   historyList: byId<HTMLElement>("history-list"),
   historyClear: byId<HTMLButtonElement>("history-clear"),
+  historyImport: byId<HTMLButtonElement>("history-import"),
+  historyImportList: byId<HTMLElement>("history-import-list"),
   templateSkill: byId<HTMLSelectElement>("template-skill"),
   templateAdd: byId<HTMLButtonElement>("template-add"),
   templateInput: byId<HTMLInputElement>("template-input"),

@@ -359,6 +359,10 @@ export class BridgeClient {
   }
   historyImport(sessions: StoredSession[]): Promise<{ imported: number }> { return this.sessionFetch("/session/history", { method: "POST", body: JSON.stringify({ action: "import", sessions }) }); }
   historyDelete(id?: string): Promise<HistoryStats> { return this.sessionFetch(`/session/history${id ? `?id=${encodeURIComponent(id)}` : ""}`, { method: "DELETE" }); }
+  /** Conversations the provider's own tools (terminal, VS Code) saved on this computer. */
+  externalSessions(provider: string): Promise<{ sessions: import("../../protocol/src/external-sessions.js").ExternalSessionSummary[] }> { return this.sessionFetch(`/session/external?provider=${encodeURIComponent(provider)}`); }
+  /** Saves one of them in History, ready to continue; `id` is that chat's History id. */
+  importExternalSession(provider: string, id: string): Promise<{ id: string; existing: boolean }> { return this.sessionFetch("/session/external", { method: "POST", body: JSON.stringify({ provider, id }) }); }
   historyExport(): Promise<{ sessions: StoredSession[] }> { return this.sessionFetch("/session/history?view=export"); }
 
   async systemInfo(): Promise<import("./ui/system-panel.js").SystemInfo> { return this.sessionFetch("/session/system"); }

@@ -17,6 +17,7 @@ import { buildTurnPrompt, SYSTEM_PROMPT } from "../prompt.js";
 import { MCP_SERVER_NAME, type McpEndpoint, type ProviderModelCatalog, type SendTurnInput, type StartSessionContext } from "../types.js";
 import { ensureWorkspaceDir } from "../workspace.js";
 import { claudeTitle, validNativeId } from "../session-metadata.js";
+import { importClaudeSession, listClaudeSessions } from "./external.js";
 import { answerClaudeQuestion, type RequestUserInput } from "../user-input.js";
 import { cachedCommands, normalizeCommands } from "../commands.js";
 import { discoverClaudeCommands } from "../command-discovery.js";
@@ -109,6 +110,8 @@ export class ClaudeAdapter extends BaseCliAdapter {
     ])];
   }
   async sessionTitle(id: string): Promise<string | undefined> { return claudeTitle(id, ensureWorkspaceDir(), this.env); }
+  listExternalSessions() { return listClaudeSessions(this.sessionHomes.source); }
+  importExternalSession(id: string) { return importClaudeSession(this.sessionHomes, id); }
   /**
    * Ask the CLI itself: the `initialize` control request of the stream-json
    * protocol returns the same account-filtered model list as `/model`
@@ -169,7 +172,7 @@ export class ClaudeAdapter extends BaseCliAdapter {
 
   /** `claude mcp add --scope user`: available in every folder the person works in. */
   static readonly terminal: TerminalAgentSpec = {
-    command: "claude",
+    command: "claude", label: "Claude Code", client: /claude/i,
     add: server => ["mcp", "add", "--scope", "user", server.name, ...Object.entries(server.env).flatMap(([key, value]) => ["-e", `${key}=${value}`]), "--", server.command, ...server.args],
     remove: name => ["mcp", "remove", "--scope", "user", name],
   };
@@ -186,6 +189,7 @@ export class ClaudeAdapter extends BaseCliAdapter {
     logout: true,
     liveModel: true,
     liveEffort: true,
+    importSessions: true,
   };
   readonly capabilities = ClaudeAdapter.capabilities;
 

@@ -18,17 +18,29 @@ export interface TerminalMcpServer {
 export interface TerminalAgentSpec {
   /** The executable looked up on PATH. */
   command: string;
+  /** What the person sees when this CLI asks for something ("Claude Code"). */
+  label: string;
+  /** Matches the name this CLI gives itself in the MCP handshake. */
+  client: RegExp;
   add(server: TerminalMcpServer): string[];
   remove(name: string): string[];
 }
 
 /** The form `copilot mcp add` and `codex mcp add` share: `<cli> mcp add <name> --env K=V -- <command> <args>`. */
-export function mcpAddRemove(command: string): TerminalAgentSpec {
+export function mcpAddRemove(command: string, identity: Pick<TerminalAgentSpec, "label" | "client">): TerminalAgentSpec {
   return {
     command,
+    ...identity,
     add: server => ["mcp", "add", server.name, ...Object.entries(server.env).flatMap(([key, value]) => ["--env", `${key}=${value}`]), "--", server.command, ...server.args],
     remove: name => ["mcp", "remove", name],
   };
+}
+
+/** Who is asking, as the person sees it: the label of the provider whose CLI introduced itself with this MCP client name. */
+export function terminalAgentLabel(agents: Array<{ spec: TerminalAgentSpec }>, clientName?: string): string {
+  const name = clientName?.trim();
+  if (!name) return "Terminal agent";
+  return `${agents.find(({ spec }) => spec.client.test(name))?.spec.label ?? name.slice(0, 40)} (terminal)`;
 }
 
 export type TerminalAgentOutcome = "registered" | "unchanged" | "not_installed" | "disabled" | "failed";

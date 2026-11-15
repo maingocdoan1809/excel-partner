@@ -12,7 +12,7 @@ export class HistoryRoutes {
     private readonly openStore: (file: string) => HistoryStore = file => new HistoryStore(file)) {}
   /** After this, requests get HISTORY_RESTARTING (the pane retries quietly) and the database is never reopened by this bridge. */
   close() { this.closed = true; this.store?.close(); }
-  private open() {
+  open() {
     if (this.closed) throw new HistoryError("HISTORY_CLOSED");
     return this.store ??= this.openStore(this.file);
   }

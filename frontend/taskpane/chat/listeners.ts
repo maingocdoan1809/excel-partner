@@ -9,7 +9,7 @@ import { atomicBadgeDeletion, fileMentionRanges } from "../ui/file-mentions.js";
 import { slashBadgeRange } from "../ui/slash.js";
 import { filesFromClipboard } from "../ui/transfer-files.js";
 import { els } from "../ui/elements.js";
-import { addTemplate, backFromPanel, chooseLocalFiles, clearHistory, closeFloating, closeMenu, continueViewedSession, deleteViewedSession, exportUsage, mcpSettings, navigation, openFloating, openPanel, refreshUsage, renderTemplates, saveModelChoice, selectProvider, setupFileDrop, showPanel, slash, store, updateMentionMenu, userSkills } from "./services.js";
+import { addTemplate, backFromPanel, chooseLocalFiles, clearHistory, closeFloating, closeMenu, continueViewedSession, deleteViewedSession, exportUsage, mcpSettings, navigation, openFloating, openPanel, refreshUsage, renderTemplates, saveModelChoice, selectProvider, setupFileDrop, showPanel, slash, store, toggleImport, updateMentionMenu, userSkills } from "./services.js";
 import { persistNow, startNewChat } from "./chats.js";
 import { renderComposerPreview, selectPermissionMode, syncAttachmentsWithInput, syncSelectedSlashToken } from "./composer.js";
 import { app, pendingAttachments } from "./state.js";
@@ -99,6 +99,7 @@ export function bindListeners(): void {
   els.sessionContinue.addEventListener("click", continueViewedSession);
   els.sessionDelete.addEventListener("click", deleteViewedSession);
   els.historyClear.addEventListener("click", clearHistory);
+  els.historyImport.addEventListener("click", toggleImport);
   els.templateSkill.addEventListener("change", () => void renderTemplates());
   els.templateAdd.addEventListener("click", () => els.templateInput.click());
   els.templateInput.addEventListener("change", () => {
