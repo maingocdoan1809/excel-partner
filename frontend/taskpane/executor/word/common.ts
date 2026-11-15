@@ -1,5 +1,5 @@
 import { ToolFailure } from "../common.js";
-import { requireSupport, type Requirement } from "../../host/requirements.js";
+import { isSupported, requireSupport, type Requirement } from "../../host/requirements.js";
 
 /** Word tool results are cut to this many JSON characters before they reach the model. */
 export const RESULT_LIMIT = 30_000;
@@ -73,6 +73,17 @@ export function assertWithinLimit(data: unknown): void {
 
 export function isBlankText(text: string): boolean {
   return /^[ \t\r\n\u00a0]*$/.test(text);
+}
+
+/** Said with a deletion while Track Changes is on: the text stays, marked deleted, until the change is accepted. */
+export const TRACKED_DELETE_NOTE = "Track Changes is on, so the deletion is a tracked change: the text stays in the document, marked deleted, and still counts in paragraph indexes until the change is accepted (accept_reject_changes).";
+
+/** Whether the document records edits as tracked changes now (false where Word cannot say). */
+export async function isTracking(context: Word.RequestContext): Promise<boolean> {
+  if (!isSupported(WORD_TRACK_MODE)) return false;
+  context.document.load("changeTrackingMode");
+  await context.sync();
+  return context.document.changeTrackingMode !== "Off";
 }
 
 export function assertParagraphIndex(index: number, count: number, what = "paragraph_index"): void {

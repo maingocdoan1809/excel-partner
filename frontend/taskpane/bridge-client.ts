@@ -25,7 +25,7 @@ import {
   type UserInputResponse,
 } from "../../protocol/src/index.js";
 import { activeHost, detectHost } from "./host/index.js";
-import { authorizeSkillScript, describeSiteKnowledgeApproval, describeTestBrowserApproval, executeWithPermission, type PermissionMode, type SiteKnowledgeApproval, type TestBrowserApproval } from "./permissions.js";
+import { approvalDetail, authorizeSkillScript, describeSiteKnowledgeApproval, describeTestBrowserApproval, executeWithPermission, type PermissionMode, type SiteKnowledgeApproval, type TestBrowserApproval } from "./permissions.js";
 import { DEFAULT_PROVIDER } from "../../protocol/src/providers.js";
 import type { LoginAccount, LoginChoice, ProviderLoginStatus } from "../../protocol/src/provider-login.js";
 
@@ -552,6 +552,10 @@ export class BridgeClient {
       ? { ok: true as const, data: { approved: auto || await this.authorizeConnectedFile(message.args as ConnectedFileApproval, message.timeoutMs) } }
       : message.tool === "__authorize_test_browser"
       ? await this.authorizeTestBrowser(message.args as TestBrowserApproval, message.timeoutMs)
+      : message.tool === "__authorize_image_url"
+      ? { ok: true as const, data: { approved: auto || await this.askPermission("Download a picture?",
+        "The assistant wants to download this picture from the internet and put it into your file. Only the address is requested; nothing from your file is sent.",
+        "Download picture", message.timeoutMs, String((message.args as { url?: unknown }).url ?? "").slice(0, 2000)) } }
       : message.tool === "__authorize_reference_path"
       ? auto
         ? { ok: true as const, data: { approved: true } }
@@ -562,7 +566,7 @@ export class BridgeClient {
         this.autoApproveAllowed ? this.permissionMode : "ask",
         execute,
         (detail) => this.askPermission(`Allow ${activeHost().noun} change?`, detail, "Allow change", message.timeoutMs,
-          JSON.stringify(message.args, null, 2).slice(0, 8000)),
+          approvalDetail(message.args)),
       );
     this.operations.delete(controller);
     this.send({ type: "tool_result", callId: message.callId, result });

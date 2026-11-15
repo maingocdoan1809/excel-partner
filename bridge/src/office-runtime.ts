@@ -24,8 +24,11 @@ import { resolveSkillScript, runSkillScript, skillFile } from "./skill-runner.js
 import { runPython, PythonError, PYTHON_FILE_BYTES } from "./python-runner.js";
 import type { RunPythonInput } from "../../protocol/src/index.js";
 import type { ReadConnectedFileInput, ReadDocumentFileInput, SendToConnectedFileInput } from "../../protocol/src/index.js";
+import { MAX_INSERT_IMAGE_BYTES, type InsertImageInput, type ResolvedInsertImageInput } from "../../protocol/src/index.js";
 import type { Delegations } from "./delegations.js";
-import { toolError as error } from "./tool-error.js";
+import { ToolResultError, toolError as error } from "./tool-error.js";
+import { ImageDownloadError, downloadImage, type ImageDownloader } from "./image-download.js";
+import { ImageSourceError, resolveImage, type ImageSources } from "./image-source.js";
 import { cellLinkMarkdown, columnToNumber, isA1Range, normalizeOrigin, type FinishTestRunInput, type OpenTestBrowserInput, type RecordTestResultsInput, type SaveTestScriptInput } from "../../protocol/src/index.js";
 import { XlsxError, listSheetNames, readSheetDetails, readWorkbookOverview } from "./xlsx-reader.js";
 import { AttachmentError, attachmentId, attachmentPath, createAttachment, MAX_ATTACHMENT_BYTES } from "./attachments.js";
@@ -92,6 +95,7 @@ export class OfficeRuntime {
     private readonly knowledge: SiteKnowledge | null = null,
     private readonly scripts: TestScripts | null = null,
     private readonly delegations: Delegations | null = null,
+    private readonly fetchImage: ImageDownloader = downloadImage,
   ) {}
 
   async invoke(request: InternalToolRequest): Promise<ToolResult> {
@@ -218,6 +222,11 @@ export class OfficeRuntime {
     }
     if (request.tool === "insert_sheets_from_file") {
       const enriched = await this.attachWorkbookFile(session, parsed as InsertArgs);
+      if ("ok" in enriched) return enriched;
+      parsed = enriched;
+    }
+    if (request.tool === "insert_image") {
+      const enriched = await this.attachImage(session, parsed as InsertImageInput);
       if ("ok" in enriched) return enriched;
       parsed = enriched;
     }
@@ -682,6 +691,44 @@ export class OfficeRuntime {
       };
     } catch (err) {
       if (err instanceof ReferenceError_ || err instanceof XlsxError || err instanceof SkillError || err instanceof AttachmentError || err instanceof DocumentReadError) return error("invalid_arguments", err.message);
+      throw err;
+    }
+  }
+
+  /** The pane can neither read the bridge's disk nor download freely, so the picture travels with the request. */
+  private async attachImage(session: WorkbookSession, input: InsertImageInput): Promise<ResolvedInsertImageInput | ToolResult> {
+    const signal = session.turnController?.signal;
+    const sources: ImageSources = {
+      attachment: (id) => session.attachments.get(id),
+      template: (uri) => {
+        if (!this.skills) return null;
+        const { template, bytes } = this.skills.readTemplate(uri);
+        return { name: template.name, kind: template.kind, bytes };
+      },
+      localFile: async (path) => {
+        if (!this.references) throw new ImageSourceError("reference files are not configured");
+        const denied = await this.authorizePath(session, path, "file");
+        if (denied) throw new ToolResultError(denied);
+        const selected = this.references.selectedPath(path, session.referenceGrants);
+        if (fs.statSync(selected).size > MAX_INSERT_IMAGE_BYTES) throw new ImageSourceError(`the file is over the ${MAX_INSERT_IMAGE_BYTES} byte limit; use a smaller picture`);
+        return { name: pathModule.basename(selected), bytes: fs.readFileSync(selected) };
+      },
+      download: async (url) => {
+        // Fetching a page or a picture from the internet is what the administrator's web switch controls.
+        if (!this.policy.allowWebSearch) throw new ToolResultError(error("unsupported", "Downloading pictures from the internet is turned off by your administrator."));
+        const requestId = session.activeRequestId;
+        const answer = await session.requestTool("__authorize_image_url", { url }, 120_000);
+        if (!answer.ok) throw new ToolResultError(answer);
+        if ((answer.data as { approved?: unknown })?.approved !== true) throw new ToolResultError(error("cancelled", "The user declined downloading this picture."));
+        if (signal?.aborted || session.activeRequestId !== requestId) throw new ToolResultError(error("cancelled", "The request ended before the picture was downloaded."));
+        return this.fetchImage(url, { maxBytes: MAX_INSERT_IMAGE_BYTES, signal });
+      },
+    };
+    try {
+      return { ...input, ...await resolveImage(input.source, sources) };
+    } catch (err) {
+      if (err instanceof ToolResultError) return err.result;
+      if (err instanceof ImageSourceError || err instanceof ImageDownloadError || err instanceof ReferenceError_ || err instanceof SkillError) return error("invalid_arguments", err.message);
       throw err;
     }
   }

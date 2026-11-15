@@ -33,7 +33,7 @@ function connectedFileTools(own: string, readTools: string): Record<string, Pick
 }
 
 const WORD_READ_TOOLS = "get_doc_outline, read_doc_section, search_doc_text, read_comments, read_tracked_changes";
-const PPT_READ_TOOLS = "get_presentation_metadata, list_slide_shapes, read_slide_text";
+const PPT_READ_TOOLS = "get_presentation_metadata, list_slide_shapes, read_slide_text, read_slide_notes";
 
 const OVERRIDES: Partial<Record<HostId, Record<string, Pick<ToolDefinition, "title" | "description" | "annotations"> & { code?: string }>>> = {
   word: {
@@ -42,6 +42,14 @@ const OVERRIDES: Partial<Record<HostId, Record<string, Pick<ToolDefinition, "tit
       title: "Get selection", annotations: READ,
       description: "READ. What the user has selected in Word: text (truncated), whether it is only a cursor, paragraph style and count, highlight, comments on it and whether track changes is on. " +
         "It is a pointer, not the document: read around it with read_doc_section or search_doc_text before editing. Call this first to understand what the user is pointing at.",
+    },
+    insert_image: {
+      title: "Insert image", annotations: WRITE,
+      description: "WRITE. Insert a picture into the document, in a paragraph of its own: after paragraph `after_paragraph` (0-based, as the read tools number them), or at the end when omitted. " +
+        "`source` is where the picture comes from: an https:// address of an image on the internet (the user is asked to allow the download), base64 you produced (plain text or a data:image/png;base64,... URI), " +
+        "an attachment:// path, a skill-template:// image, or a file path on the user's computer (a file outside the allowed folders asks the user). PNG, JPEG or GIF, up to 10 MB; convert anything else first (for example with run_python). " +
+        "`width`/`height` are in points (give one and the other follows the proportions; with neither the picture keeps its size but is at most 468 points wide, the width of a normal text column). Set `alt_text` to describe it. " +
+        "Ignores left, top, sheet, anchor and slide_id. Check the result with get_doc_outline or read_doc_section.",
     },
     execute_office_js: {
       title: "Run Office.js (advanced)", annotations: WRITE,
@@ -55,6 +63,15 @@ const OVERRIDES: Partial<Record<HostId, Record<string, Pick<ToolDefinition, "tit
       title: "Get selection", annotations: READ,
       description: "READ. What the user has selected in PowerPoint: the selected slides (id, position, title) and shapes (ref \"slideId:shapeId\", name, type). Before PowerPointApi 1.5 only the active slide is known. " +
         "It is a pointer: list_slide_shapes and read_slide_text give the content. Call this first to understand what the user is pointing at.",
+    },
+    insert_image: {
+      title: "Insert image", annotations: WRITE,
+      description: "WRITE. Add a picture to a slide (`slide_id`, the selected slide when omitted). " +
+        "`source` is where the picture comes from: an https:// address of an image on the internet (the user is asked to allow the download), base64 you produced (plain text or a data:image/png;base64,... URI), " +
+        "an attachment:// path, a skill-template:// image, or a file path on the user's computer (a file outside the allowed folders asks the user). PNG, JPEG or GIF, up to 10 MB; convert anything else first (for example with run_python). " +
+        "`left`/`top`/`width`/`height` are in points from the slide's top-left corner (give one of width and height and the other follows the proportions). With none given the picture is centred and fitted inside the slide. " +
+        "Set `alt_text` to describe it. The result gives the picture's `ref` for update_slide_shape (move, resize), set_shape_zorder and remove_slide_element. PowerPoint selects the slide while it inserts, so the user sees it jump there. " +
+        "Ignores sheet, anchor and after_paragraph. Check the layout with verify_slide_visual.",
     },
     execute_office_js: {
       title: "Run Office.js (advanced)", annotations: WRITE,

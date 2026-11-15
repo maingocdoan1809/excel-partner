@@ -1,5 +1,6 @@
 import path from "node:path";
 import { randomUUID } from "node:crypto";
+import { IMAGE_EXTENSIONS, detectImage } from "./image-info.js";
 
 export const MAX_ATTACHMENT_BYTES = 30 * 1024 * 1024;
 
@@ -23,13 +24,10 @@ export function createAttachment(name: string, bytes: Buffer): SessionAttachment
   if ([".xlsx", ".xlsm", ".xltx", ".xltm"].includes(ext) && zip) {
     return { id: randomUUID(), name: safeName, kind: "workbook", mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", bytes };
   }
-  const png = ext === ".png" && bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]));
-  const jpeg = [".jpg", ".jpeg"].includes(ext) && bytes.subarray(0, 3).equals(Buffer.from([255, 216, 255]));
-  const gif = ext === ".gif" && ["GIF87a", "GIF89a"].includes(bytes.subarray(0, 6).toString());
-  const webp = ext === ".webp" && bytes.subarray(0, 4).toString() === "RIFF" && bytes.subarray(8, 12).toString() === "WEBP";
-  if (png || jpeg || gif || webp) {
+  const image = detectImage(bytes);
+  if (image && IMAGE_EXTENSIONS[image.mimeType].includes(ext)) {
     if (bytes.length > 10 * 1024 * 1024) throw new AttachmentError("image exceeds the 10 MB limit");
-    return { id: randomUUID(), name: safeName, kind: "image", mimeType: png ? "image/png" : jpeg ? "image/jpeg" : gif ? "image/gif" : "image/webp", bytes };
+    return { id: randomUUID(), name: safeName, kind: "image", mimeType: image.mimeType, bytes };
   }
   return { id: randomUUID(), name: safeName, kind: "file", mimeType: "application/octet-stream", bytes };
 }

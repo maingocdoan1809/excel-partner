@@ -251,6 +251,9 @@ body.settings-active .settings-panel { padding: 0; }
 .tool-call-chevron { flex: 0 0 11px; width: 11px; height: 11px; color: var(--muted); transition: transform .12s; }
 .tool-call[open] > summary .tool-call-chevron { transform: rotate(90deg); }
 .tool-call-body { margin: 12px 0 0 28px; border: 1px solid var(--border); border-radius: 9px; padding: 14px; overflow: hidden; }
+.tool-call-picture { margin-bottom: 12px; }
+.tool-call-picture img { display: block; max-width: 100%; max-height: 320px; height: auto; margin: 0 auto; border: 1px solid var(--border); border-radius: 6px; background: #fff; cursor: zoom-in; }
+.tool-call-picture.expanded img { max-height: none; cursor: zoom-out; }
 .tool-call-section + .tool-call-section { margin-top: 18px; }
 .tool-call-label { color: var(--text); font-size: 11px; margin-bottom: 10px; }
 .tool-call pre { max-height: 340px; overflow: auto; margin: 0; padding: 0; font: 11px/1.65 Consolas, ui-monospace, monospace; white-space: pre-wrap; overflow-wrap: anywhere; tab-size: 2; }

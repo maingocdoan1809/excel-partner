@@ -65,6 +65,8 @@ Trên sheet nháp: add_shape 3 hình (Terminator, Process, Diamond), add_connect
 - run_python: tính tổng một cột số từ dữ liệu bạn đã đọc, in kết quả. So khớp với một công thức SUM trong sheet nháp. Nếu chưa có Python, SKIPPED.
 - list_skills; nếu có skill thì read_skill một skill bất kỳ (chỉ đọc).
 - list_reference_files.
+- Word: edit_doc_paragraphs (chèn 3 đoạn sau một heading, thay 2 đoạn bằng 1, xóa 1 đoạn; đoạn sau heading phải là Normal, có thử track:true) và manage_doc_pictures (list, đổi cỡ giữ tỉ lệ, alt text, xóa). PowerPoint: read_slide_notes, set_slide_notes trên slide đã có notes và slide chưa có notes (slide đổi id; mở Notes pane xem đúng chữ), update_slide_shape đổi cỡ một ảnh giữ tỉ lệ.
+- insert_image (Excel, Word, PowerPoint): trong file nháp chèn một ảnh từ địa chỉ https (một logo công khai bất kỳ), một ảnh từ base64 (tự tạo một PNG nhỏ) và một ảnh từ file trong thư mục đã cho phép. Kiểm tra: ảnh nằm đúng chỗ (ô được chọn / sau đoạn văn / giữa slide), không méo tỉ lệ, có alt text; Ask hỏi trước khi tải ảnh từ web và trước khi ghi vào file. Thử thêm một địa chỉ http://localhost:8765/ (phải bị từ chối: không phải địa chỉ công khai) và một file .webp (phải báo cần đổi sang PNG). PowerPoint: slide được chọn nhảy tới slide đích khi chèn.
 - Các tool cần file bên ngoài (read_workbook_file, insert_sheets_from_file, read_attached_file, read_attached_image, run_skill_script, save_skill, update_skill, playwright_browser): hỏi tôi một lần xem tôi có file nào để thử không. Nếu tôi không trả lời, ghi SKIPPED.
 
 # Bước 9. Đường lỗi (chỉ những ca an toàn)

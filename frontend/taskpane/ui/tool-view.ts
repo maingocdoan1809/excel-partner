@@ -1,11 +1,17 @@
 import type { StoredTool } from "./sessions.js";
 
+/** A picture a tool returned: its type and base64 data, as in the response. */
+export interface ToolPicture {
+  mimeType: "image/jpeg" | "image/png" | "image/gif" | "image/webp";
+  data: string;
+}
+
 const names: Record<string, string> = {
   read_range: "Reading cells", get_cell_ranges: "Reading cells", get_selection: "Reading selection",
   get_sheet_info: "Reading worksheet", get_objects: "Reading workbook objects", list_shapes: "Reading shapes",
   write_range: "Writing cells", set_cells: "Writing cells", set_formula: "Writing formulas",
   execute_office_js: "Running Office code", read_range_image: "Viewing cells", manage_sheet: "Updating worksheet",
-  format_range: "Formatting cells", modify_chart: "Updating chart", modify_table: "Updating table",
+  insert_image: "Inserting picture", format_range: "Formatting cells", modify_chart: "Updating chart", modify_table: "Updating table",
   get_sheets: "Reading sheets", search_data: "Searching cells", find_errors: "Checking formula errors",
   check_formula_consistency: "Checking formula consistency", find_replace: "Replacing text", get_range_as_csv: "Reading cells as CSV",
 };
@@ -43,16 +49,54 @@ function toolLabel(tool: StoredTool): string {
   return names[tool.name] ?? tool.name.replace(/_/g, " ");
 }
 
-/** Bound local history size and do not render binary/image payloads as prose. */
+const PICTURE_TYPES: ReadonlySet<string> = new Set(["image/jpeg", "image/png", "image/gif", "image/webp"]);
+
+function asPicture(value: unknown): ToolPicture | null {
+  const item = value as { mimeType?: unknown; data?: unknown } | null;
+  return item && typeof item === "object" && typeof item.data === "string" && item.data.length > 0 && typeof item.mimeType === "string" && PICTURE_TYPES.has(item.mimeType)
+    ? { mimeType: item.mimeType as ToolPicture["mimeType"], data: item.data }
+    : null;
+}
+
+/** The pictures inside a value (anything with an image mimeType and base64 data, such as a tool result's `image`), in order. */
+export function picturesIn(value: unknown, depth = 0): ToolPicture[] {
+  const picture = asPicture(value);
+  if (picture) return [picture];
+  if (!value || typeof value !== "object" || depth > 6) return [];
+  return Object.values(value as Record<string, unknown>).flatMap((item) => picturesIn(item, depth + 1));
+}
+
+/** The JSON text of a value; pictures are kept whole, or left out with `keepPictures` false. */
+function stringify(value: unknown, keepPictures: boolean): string {
+  return JSON.stringify(value, function (this: unknown, key: string, item: unknown) {
+    if (asPicture(item)) return keepPictures ? item : undefined;
+    if (item && typeof item === "object" && (item as { type?: unknown }).type === "image") return { type: "image", detail: "Image data omitted from text view" };
+    // insert_image: the bridge adds the picture itself to the call; it is not text anyone reads.
+    if (key === "imageBase64" && typeof item === "string") return `[picture data, ${item.length} characters]`;
+    // A picture's own data stays whole, so the card can show it.
+    if (typeof item === "string" && item.length > 8000 && !(key === "data" && asPicture(this))) return `${item.slice(0, 8000)}… [truncated; ${item.length} characters]`;
+    return item;
+  }, 2) ?? "null";
+}
+
+/** Bound local history size and do not render binary payloads as prose. A picture in a result stays in it whole, for the card to show. */
 export function formatToolValue(value: unknown): string {
   try {
-    const text = JSON.stringify(value, (_key, item) => {
-      if (item && typeof item === "object" && item.type === "image") return { type: "image", detail: "Image data omitted from text view" };
-      if (typeof item === "string" && item.length > 8000) return `${item.slice(0, 8000)}… [truncated; ${item.length} characters]`;
-      return item;
-    }, 2) ?? "null";
-    return text.length > 16000 ? `${text.slice(0, 16000)}\n… [Display truncated]` : text;
+    const bare = stringify(value, false);
+    if (bare.length > 16000) return `${bare.slice(0, 16000)}\n… [Display truncated]`;
+    return picturesIn(value).length ? stringify(value, true) : bare;
   } catch { return "This value could not be displayed as JSON."; }
+}
+
+/** A stored result as the card shows it: its pictures, and its text without their data. */
+export function splitPictures(text: string): { pictures: ToolPicture[]; text: string } {
+  try {
+    const value = JSON.parse(text) as unknown;
+    const pictures = picturesIn(value);
+    return pictures.length ? { pictures, text: stringify(value, false) } : { pictures, text };
+  } catch {
+    return { pictures: [], text };
+  }
 }
 
 function jsonCode(text: string): HTMLElement {
@@ -96,7 +140,19 @@ export function paintTool(card: HTMLElement, tool: StoredTool): void {
   card.querySelector(".tool-call-state")!.textContent = tool.state === "running" ? "Running…" : tool.state === "error" ? "Failed" : "";
   const body = card.querySelector(".tool-call-body")!;
   body.replaceChildren();
-  for (const [label, value] of [["Arguments", tool.input || tool.args], [tool.error ? "Error" : "Result", tool.result ?? tool.error]] as const) {
+  // A result that holds a picture shows the picture, and its other fields as text.
+  const result = tool.result ? splitPictures(tool.result) : null;
+  for (const picture of result?.pictures ?? []) {
+    const section = document.createElement("section"); section.className = "tool-call-section tool-call-picture";
+    const image = document.createElement("img");
+    image.src = `data:${picture.mimeType};base64,${picture.data}`;
+    image.alt = `Picture returned by ${toolLabel(tool)}`;
+    image.loading = "lazy";
+    image.title = "Click to see it at full width";
+    image.addEventListener("click", () => section.classList.toggle("expanded"));
+    section.append(image); body.append(section);
+  }
+  for (const [label, value] of [["Arguments", tool.input || tool.args], [tool.error ? "Error" : "Result", result?.text ?? tool.error]] as const) {
     if (!value) continue;
     const section = document.createElement("section"); section.className = "tool-call-section";
     const heading = document.createElement("div"); heading.className = "tool-call-label"; heading.textContent = label;

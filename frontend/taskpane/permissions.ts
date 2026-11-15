@@ -1,6 +1,6 @@
 import type { ToolResult } from "../../protocol/src/index.js";
 import type { RunSkillScriptInput } from "../../protocol/src/index.js";
-import { WORD_WRITE_TOOLS, PPT_WRITE_TOOLS } from "../../protocol/src/index.js";
+import { WORD_WRITE_TOOLS, PPT_WRITE_TOOLS, SHARED_WRITE_TOOLS } from "../../protocol/src/index.js";
 
 export type PermissionMode = "ask" | "auto";
 
@@ -18,9 +18,18 @@ export async function authorizeSkillScript(
 }
 
 const OVERWRITE_TOOLS = new Set(["write_range", "set_formula", "set_cells", "copy_to", "merge_range"]);
-const ASK_BEFORE_WRITE = new Set<string>([...WORD_WRITE_TOOLS, ...PPT_WRITE_TOOLS, "execute_office_js", "clear_range"]);
+const ASK_BEFORE_WRITE = new Set<string>([...WORD_WRITE_TOOLS, ...PPT_WRITE_TOOLS, ...SHARED_WRITE_TOOLS, "clear_range"]);
 // The proposal card collects approval itself. Slide deletion uses the guarded retry below.
 ASK_BEFORE_WRITE.delete("propose_doc_edits");
+
+/** The call as the person reads it in an approval. A picture's data is long and means nothing to read, so it is summarised. */
+export function approvalDetail(args: unknown): string {
+  return (JSON.stringify(args, (key, value) => {
+    if (key === "imageBase64" && typeof value === "string") return `[picture data, ${value.length} characters]`;
+    if (key === "source" && typeof value === "string" && value.length > 300) return `${value.slice(0, 120)}… [${value.length} characters]`;
+    return value;
+  }, 2) ?? "").slice(0, 8000);
+}
 
 function withPermissionFlag(tool: string, args: unknown, enabled: boolean): unknown {
   if (!args || typeof args !== "object" || Array.isArray(args)) return args;

@@ -197,6 +197,15 @@ const META: Partial<Record<ExcelToolName, Meta>> = {
       "WRITE. Read a closed .xlsx (asking the user for access if needed) and copy sheets into the OPEN workbook. The source file is never edited. Keeps formatting, merges and shapes " +
       "(like Move/Copy sheet). Use this to start a new document from a user-provided template instead of rebuilding it. Needs a recent Excel (ExcelApi 1.13).",
   },
+  insert_image: {
+    title: "Insert image",
+    annotations: WRITE,
+    description:
+      "WRITE. Put a picture on a sheet as a floating picture. `source` is where the picture comes from: an https:// address of an image on the internet (the user is asked to allow the download), base64 you produced (plain text or a data:image/png;base64,... URI), " +
+      "an attachment:// path, a skill-template:// image, or a file path on the user's computer (a file outside the allowed folders asks the user). PNG, JPEG or GIF, up to 10 MB; convert anything else first (for example with run_python). " +
+      "Placement: `anchor` fits the picture inside a cell range without stretching it; otherwise `left`/`top` (points from the sheet's corner) and `width`/`height` (points; give one and the other follows the proportions). With nothing given it goes at the selected cell, at its own size but at most 480 x 360 points. " +
+      "Set `alt_text` to describe it. The result names the picture (a shape): move or resize it with update_shape, remove it with delete_shapes. Needs ExcelApi 1.9.",
+  },
   add_line: {
     title: "Add line",
     annotations: WRITE,

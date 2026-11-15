@@ -63,6 +63,28 @@ export const EditDocListInputSchema = z.object({
 }).strict();
 export type EditDocListInput = z.infer<typeof EditDocListInputSchema>;
 
+export const NewParagraphSchema = z.union([
+  Text.describe("Paragraph text; \\n starts another paragraph with the same style."),
+  z.object({
+    text: Text,
+    style: z.string().min(1).max(100).optional().describe('Paragraph style, e.g. "Heading 2", "Normal", "Quote", "List Bullet".'),
+  }).strict(),
+]);
+
+export const EditDocParagraphsInputSchema = z.object({
+  operation: z.enum(["insert", "replace", "delete"]).describe("insert new paragraphs; replace the text of paragraphs (their formatting stays); delete paragraphs."),
+  paragraph_index: ParagraphIndex.optional().describe("insert: the paragraph to insert next to (the end of the document when omitted). replace / delete: the first paragraph."),
+  position: z.enum(["after", "before"]).default("after").describe("insert: after or before paragraph_index. Use before with 0 to write at the top."),
+  count: z.number().int().min(1).max(500).default(1).describe("replace / delete: how many paragraphs from paragraph_index."),
+  paragraphs: z.array(NewParagraphSchema).min(1).max(200).optional().describe("insert / replace: the new paragraphs, in order. replace may give more or fewer than `count`: extra ones are inserted, missing ones deleted."),
+  track: z.boolean().optional().describe("Turn track changes on for this edit (needs WordApi 1.6). Left as the document has it when omitted."),
+}).strict().superRefine((v, ctx) => {
+  if (v.operation !== "delete" && v.paragraphs === undefined) ctx.addIssue({ code: "custom", path: ["paragraphs"], message: `paragraphs is required for ${v.operation}` });
+  if (v.operation === "delete" && v.paragraphs !== undefined) ctx.addIssue({ code: "custom", path: ["paragraphs"], message: "delete takes no paragraphs" });
+  if (v.operation !== "insert" && v.paragraph_index === undefined) ctx.addIssue({ code: "custom", path: ["paragraph_index"], message: `paragraph_index is required for ${v.operation}` });
+});
+export type EditDocParagraphsInput = z.infer<typeof EditDocParagraphsInputSchema>;
+
 export const CollapseBlankParagraphsInputSchema = z.object({
   max: z.number().int().min(0).max(5).default(1).describe("Most blank paragraphs allowed in a row; longer runs are cut down to this many."),
   preview: z.boolean().default(false).describe("Only count the paragraphs that would be removed."),
@@ -202,6 +224,18 @@ export const ManageContentControlsInputSchema = z.object({
 });
 export type ManageContentControlsInput = z.infer<typeof ManageContentControlsInputSchema>;
 
+export const ManageDocPicturesInputSchema = z.object({
+  operation: z.enum(["list", "set", "delete"]),
+  picture_index: z.number().int().min(0).max(10_000).optional().describe("set / delete: 0-based position of the picture in the document, from list."),
+  width: z.number().min(1).max(5000).optional().describe("set: width in points; with only one of width and height the other keeps the proportions."),
+  height: z.number().min(1).max(5000).optional().describe("set: height in points."),
+  alt_text: z.string().max(500).optional().describe("set: alternative text."),
+}).strict().superRefine((v, ctx) => {
+  if (v.operation !== "list" && v.picture_index === undefined) ctx.addIssue({ code: "custom", message: `picture_index is required for ${v.operation}`, path: ["picture_index"] });
+  if (v.operation === "set" && v.width === undefined && v.height === undefined && v.alt_text === undefined) ctx.addIssue({ code: "custom", message: "set needs width, height or alt_text", path: ["width"] });
+});
+export type ManageDocPicturesInput = z.infer<typeof ManageDocPicturesInputSchema>;
+
 export const InsertFieldInputSchema = z.object({
   field_type: z.enum(["Page", "NumPages", "Date", "Time", "Author", "Title", "FileName", "Seq", "Ref", "PageRef", "StyleRef", "DocProperty"]),
   text: z.string().max(500).optional().describe("Field instruction text, e.g. the bookmark name for Ref/PageRef or the sequence name for Seq."),
@@ -271,6 +305,7 @@ export const WordToolInputSchemas = {
   search_doc_text: SearchDocTextInputSchema,
   edit_doc_text: EditDocTextInputSchema,
   edit_doc_list: EditDocListInputSchema,
+  edit_doc_paragraphs: EditDocParagraphsInputSchema,
   collapse_blank_paragraphs: CollapseBlankParagraphsInputSchema,
   propose_doc_edits: ProposeDocEditsInputSchema,
   read_comments: ReadCommentsInputSchema,
@@ -284,6 +319,7 @@ export const WordToolInputSchemas = {
   insert_table: InsertTableInputSchema,
   edit_table: EditTableInputSchema,
   manage_content_controls: ManageContentControlsInputSchema,
+  manage_doc_pictures: ManageDocPicturesInputSchema,
   insert_field: InsertFieldInputSchema,
   update_fields: UpdateFieldsInputSchema,
   insert_toc: InsertTocInputSchema,
@@ -300,7 +336,7 @@ export const WORD_TOOL_NAMES = Object.keys(WordToolInputSchemas) as WordToolName
 
 /** Word tools that change the document. */
 export const WORD_WRITE_TOOLS: readonly WordToolName[] = [
-  "edit_doc_text", "edit_doc_list", "collapse_blank_paragraphs", "propose_doc_edits", "add_comment", "reply_comment", "resolve_comment",
-  "accept_reject_changes", "set_track_changes", "apply_style", "insert_table", "edit_table", "manage_content_controls", "insert_field",
+  "edit_doc_text", "edit_doc_list", "edit_doc_paragraphs", "collapse_blank_paragraphs", "propose_doc_edits", "add_comment", "reply_comment", "resolve_comment",
+  "accept_reject_changes", "set_track_changes", "apply_style", "insert_table", "edit_table", "manage_content_controls", "manage_doc_pictures", "insert_field",
   "update_fields", "insert_toc", "update_toc", "insert_hyperlink", "insert_bookmark", "manage_headers_footers", "insert_footnote", "set_page_layout",
 ];

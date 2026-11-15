@@ -34,6 +34,12 @@ const META: Record<WordToolName, Meta> = {
     title: "Insert list", annotations: WRITE,
     description: "WRITE. Insert a NEW bulleted or numbered list from items (strings, or {text, level 0-8} for nesting) after paragraph `after_paragraph`, or at the end of the document. It does not change an existing list; edit those items with edit_doc_text.",
   },
+  edit_doc_paragraphs: {
+    title: "Insert, replace or delete paragraphs", annotations: WRITE,
+    description: "WRITE. Whole paragraphs by index (0-based, from get_doc_outline / read_doc_section). insert: NEW paragraphs (strings or {text, style}) after paragraph_index (position before: ahead of it), or at the end; with no style, text after a heading or list item is Normal. " +
+      "replace: new text into `count` paragraphs from paragraph_index, keeping their style; more or fewer paragraphs than count grow or shrink the passage; pictures in them are lost. delete: remove `count` paragraphs. " +
+      "Table cells are refused (edit_table). For a few words use edit_doc_text. track:true tracks it (WordApi 1.6). Indexes shift: re-read.",
+  },
   collapse_blank_paragraphs: {
     title: "Collapse blank paragraphs", annotations: WRITE,
     description: "WRITE. Cut runs of empty paragraphs down to `max` (default 1). Only paragraphs of spaces, tabs and line ends count as blank: page and section breaks, table cells, pictures and content controls are never removed. Use preview:true to count first. Paragraph indexes shift afterwards.",
@@ -85,6 +91,12 @@ const META: Record<WordToolName, Meta> = {
   manage_content_controls: {
     title: "Manage content controls", annotations: WRITE,
     description: "WRITE (operation list only reads). list, set_text (fill a template placeholder), insert (wraps the current selection) or delete (keeps the text) content controls, picked by tag or title.",
+  },
+  manage_doc_pictures: {
+    title: "Manage pictures", annotations: WRITE,
+    description: "WRITE (operation list only reads). list: the inline pictures in the body in document order, each with picture_index, size in points, alt text and the text of its paragraph. " +
+      "set: resize a picture by picture_index (width or height alone keeps the proportions; both fit it inside that box) and/or set its alt text. delete: remove it (WordApi 1.2). " +
+      "Indexes shift after a delete or insert_image: list again. Floating pictures and shapes are not listed. To add a picture use insert_image.",
   },
   insert_field: {
     title: "Insert field", annotations: WRITE,

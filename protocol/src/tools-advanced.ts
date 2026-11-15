@@ -649,6 +649,45 @@ export const InsertSheetsFromFileInputSchema = z.object({
 export type InsertSheetsFromFileInput = z.infer<typeof InsertSheetsFromFileInputSchema>;
 
 /* -------------------------------------------------------------------------- */
+/* Pictures (every host)                                                       */
+/* -------------------------------------------------------------------------- */
+
+/** Image types the Office hosts take through their picture APIs. */
+export const INSERT_IMAGE_MIME_TYPES = ["image/png", "image/jpeg", "image/gif"] as const;
+export type InsertImageMimeType = (typeof INSERT_IMAGE_MIME_TYPES)[number];
+/** Largest picture the bridge reads, downloads or decodes. */
+export const MAX_INSERT_IMAGE_BYTES = 10 * 1024 * 1024;
+
+export const InsertImageInputSchema = z.object({
+  source: z.string().min(1).max(Math.ceil(MAX_INSERT_IMAGE_BYTES * 4 / 3) + 100).describe(
+    "The picture: an https:// (or http://) address, a data:image/...;base64 URI, plain base64 text, an attachment:// path, a skill-template:// image or a local file path. PNG, JPEG or GIF, up to 10 MB.",
+  ),
+  alt_text: z.string().max(500).optional().describe("Alternative text for the picture (accessibility)."),
+  name: z.string().min(1).max(64).optional().describe("Name for the picture. Excel and PowerPoint only; Word pictures have no name."),
+  width: z.number().min(1).max(100_000).optional().describe("Width in points. With only one of width and height the other follows the picture's proportions; with both the picture is fitted inside that box without stretching."),
+  height: z.number().min(1).max(100_000).optional().describe("Height in points."),
+  left: z.number().min(0).max(1_000_000).optional().describe("Excel and PowerPoint: distance from the left edge (sheet or slide) in points."),
+  top: z.number().min(0).max(1_000_000).optional().describe("Excel and PowerPoint: distance from the top edge (sheet or slide) in points."),
+  sheet: SheetRefSchema.optional().describe("Excel: the sheet (the active one when omitted)."),
+  anchor: RangeRefSchema.optional().describe("Excel: a cell range the picture is fitted into and placed at (instead of left/top/width/height)."),
+  slide_id: z.string().min(1).max(100).optional().describe("PowerPoint: the slide (the selected one when omitted). Placed centred when left/top are omitted."),
+  after_paragraph: z.number().int().min(0).max(1_000_000).optional().describe("Word: insert as its own paragraph after this paragraph index; at the end of the document when omitted."),
+}).strict();
+export type InsertImageInput = z.infer<typeof InsertImageInputSchema>;
+
+/** What the bridge adds before the call reaches the pane: the picture itself, read from `source`. Never sent by the model. */
+export interface ResolvedImage {
+  imageBase64: string;
+  mimeType: InsertImageMimeType;
+  /** Pixel size read from the file; absent when it could not be told. */
+  naturalWidth?: number;
+  naturalHeight?: number;
+  /** Where the picture came from, for the summary: a host name, a file name, "pasted data". Never the data itself. */
+  sourceLabel: string;
+}
+export type ResolvedInsertImageInput = InsertImageInput & ResolvedImage;
+
+/* -------------------------------------------------------------------------- */
 /* Artifacts (files the user previews in the task pane)                        */
 /* -------------------------------------------------------------------------- */
 
@@ -677,7 +716,7 @@ export const CONNECTED_READ_TOOLS = ["get_sheets", "read_range", "get_cell_range
 export const CONNECTED_READ_TOOLS_BY_HOST = {
   excel: CONNECTED_READ_TOOLS,
   word: ["get_doc_outline", "read_doc_section", "search_doc_text", "read_comments", "read_tracked_changes"],
-  powerpoint: ["get_presentation_metadata", "list_slide_shapes", "read_slide_text"],
+  powerpoint: ["get_presentation_metadata", "list_slide_shapes", "read_slide_text", "read_slide_notes"],
 } as const satisfies Record<"excel" | "word" | "powerpoint", readonly string[]>;
 export const ALL_CONNECTED_READ_TOOLS = [...CONNECTED_READ_TOOLS, ...CONNECTED_READ_TOOLS_BY_HOST.word, ...CONNECTED_READ_TOOLS_BY_HOST.powerpoint] as const;
 

@@ -1,4 +1,4 @@
-import { PPT_WRITE_TOOLS, type ToolResult } from "../../../protocol/src/index.js";
+import { PPT_WRITE_TOOLS, SHARED_WRITE_TOOLS, type ToolResult } from "../../../protocol/src/index.js";
 import { toToolError } from "../executor/common.js";
 import { executePptTool, getPptSelection, getPptSelectionLabel, readPptPresentationName } from "../executor/powerpoint/index.js";
 import { executeSharedTool } from "./shared.js";
@@ -8,7 +8,7 @@ export const powerpointHost: HostAdapter = {
   id: "powerpoint",
   app: "PowerPoint",
   noun: "presentation",
-  writeTools: new Set<string>([...PPT_WRITE_TOOLS, "execute_office_js"]),
+  writeTools: new Set<string>([...PPT_WRITE_TOOLS, ...SHARED_WRITE_TOOLS]),
   execute: async (tool, args): Promise<ToolResult> => {
     const shared = await executeSharedTool("powerpoint", tool, args);
     if (shared) return shared;

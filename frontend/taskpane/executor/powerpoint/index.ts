@@ -1,8 +1,9 @@
 import { PptToolInputSchemas, type PptToolName, type ToolResult } from "../../../../protocol/src/index.js";
 import { ToolFailure, toToolError } from "../common.js";
+import { readSlideNotes, setSlideNotes } from "./notes.js";
 import { editSlideText } from "./text.js";
 import { getPresentationMetadata, listLayouts, listSlideShapes, readSlideText } from "./read.js";
-import { alignShapes, groupShapes, insertSlideElement, removeSlideElement, setShapeAltText, setShapeZOrder, setSlideHyperlink, ungroupShapes } from "./shapes.js";
+import { alignShapes, groupShapes, insertSlideElement, removeSlideElement, setShapeAltText, setShapeZOrder, setSlideHyperlink, ungroupShapes, updateSlideShape } from "./shapes.js";
 import { addSlide, duplicateSlide, modifyPresentationStructure, moveSlide, setSlideBackground } from "./slides.js";
 import { editSlideTable, insertSlideTable } from "./tables.js";
 import { capResult, requirePowerPoint, resultSize, MAX_RESULT_CHARS } from "./util.js";
@@ -20,9 +21,12 @@ const HANDLERS: Record<PptToolName, (args: never) => Promise<unknown>> = {
   list_slide_shapes: listSlideShapes,
   read_slide_text: readSlideText,
   edit_slide_text: editSlideText,
+  read_slide_notes: readSlideNotes,
+  set_slide_notes: setSlideNotes,
   edit_slide_xml: editSlideXml,
   insert_slide_element: insertSlideElement,
   remove_slide_element: removeSlideElement,
+  update_slide_shape: updateSlideShape,
   duplicate_slide: duplicateSlide,
   move_slide: moveSlide,
   modify_presentation_structure: modifyPresentationStructure,

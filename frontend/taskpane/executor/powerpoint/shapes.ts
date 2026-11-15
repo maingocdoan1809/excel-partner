@@ -7,6 +7,7 @@ import type {
   SetShapeZOrderInput,
   SetSlideHyperlinkInput,
   UngroupShapesInput,
+  UpdateSlideShapeInput,
 } from "../../../../protocol/src/index.js";
 import { ToolFailure } from "../common.js";
 import { NS, getSlideSize, roundTripSlide } from "./ooxml.js";
@@ -128,6 +129,35 @@ export async function removeSlideElement(input: RemoveSlideElementInput): Promis
       slide_id: input.slide_id,
       removed: found.map((item, i) => ({ ref: makeRef(input.slide_id, item.id), name: names[i] })),
       not_found: missing,
+    };
+  });
+}
+
+export async function updateSlideShape(input: UpdateSlideShapeInput): Promise<unknown> {
+  requireSupport("update_slide_shape", PPT_GEOMETRY, "Moving and resizing shapes needs PowerPointApi 1.4.");
+  return PowerPoint.run(async (context) => {
+    const { slideId, shapeId } = parseShapeRef(input.ref);
+    const { shape } = await requireShape(context, slideId, shapeId);
+    shape.load("name,type,left,top,width,height");
+    await context.sync();
+    const before = { left: shape.left, top: shape.top, width: shape.width, height: shape.height };
+    let { width, height } = input;
+    const proportional = input.keep_proportions !== false && before.width > 0 && before.height > 0;
+    if (proportional && width !== undefined && height === undefined) height = round(before.height * width / before.width, 2);
+    if (proportional && height !== undefined && width === undefined) width = round(before.width * height / before.height, 2);
+    if (input.left !== undefined) shape.left = input.left;
+    if (input.top !== undefined) shape.top = input.top;
+    if (width !== undefined) shape.width = width;
+    if (height !== undefined) shape.height = height;
+    if (input.name !== undefined) shape.name = input.name;
+    shape.load("name,left,top,width,height");
+    await context.sync();
+    return {
+      summary: `Updated ${String(shape.type).toLowerCase()} "${shape.name}" on slide ${slideId}`,
+      ref: input.ref,
+      name: shape.name,
+      before: { left: round(before.left), top: round(before.top), width: round(before.width), height: round(before.height) },
+      left: round(shape.left), top: round(shape.top), width: round(shape.width), height: round(shape.height),
     };
   });
 }

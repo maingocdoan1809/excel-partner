@@ -28,6 +28,7 @@ export function isHostId(value: unknown): value is HostId {
 export const HOST_AGNOSTIC_TOOLS: readonly ExcelToolName[] = [
   "get_selection",
   "execute_office_js",
+  "insert_image",
   "create_artifact",
   "list_skills",
   "read_skill",
@@ -45,6 +46,9 @@ export const HOST_AGNOSTIC_TOOLS: readonly ExcelToolName[] = [
   "read_connected_file",
   "send_to_connected_file",
 ];
+
+/** Host-agnostic tools that change the open file (the rest of the write tools are named per host). */
+export const SHARED_WRITE_TOOLS: readonly string[] = ["execute_office_js", "insert_image"];
 
 /** Tools only Word has. */
 export const WORD_TOOLS: readonly string[] = WORD_TOOL_NAMES;

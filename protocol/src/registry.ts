@@ -32,6 +32,7 @@ import {
   FindErrorsInputSchema,
   GetCellRangesInputSchema,
   GetObjectsInputSchema,
+  InsertImageInputSchema,
   InsertSheetsFromFileInputSchema,
   ListConnectedFilesInputSchema,
   ReadConnectedFileInputSchema,
@@ -116,6 +117,8 @@ export const ExcelToolInputSchemas = {
   add_line: AddLineInputSchema,
   update_shape: UpdateShapeInputSchema,
   delete_shapes: DeleteShapesInputSchema,
+  // pictures: the bridge reads the source, the pane puts it in the open file (every host)
+  insert_image: InsertImageInputSchema,
   // skills (answered by the bridge itself)
   list_skills: ListSkillsInputSchema,
   save_skill: SaveSkillInputSchema,

@@ -62,6 +62,8 @@ export interface DSlide {
   shapes: DShape[];
   background?: string;
   externalLinks: string[];
+  /** Speaker notes; undefined when the slide has no notes page. */
+  notes?: string;
 }
 
 interface DLayout {
@@ -807,7 +809,16 @@ export class FakeDeck {
     }
   }
 
+  /** The picture API of the common Office API (ImageCoercion 1.2): off for a version that lacks it. */
+  imageCoercion = true;
+  /** Pictures put in with setSelectedDataAsync: the slide, the data and the options as they arrived. */
+  pictureRequests: Array<{ slideId: string; data: string; options: Record<string, unknown> }> = [];
+  failPicture = false;
+  /** Whether exported slides carry the deck's notes master (needed to give a slide its first notes). */
+  notesMaster = true;
+
   isSetSupported(set: string, version: string): boolean {
+    if (set === "ImageCoercion") return this.imageCoercion && version === "1.2";
     if (set !== "PowerPointApi") return false;
     return Number(version.split(".")[1]) <= this.api;
   }
@@ -875,6 +886,7 @@ export class FakeDeck {
       `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">` +
       `<Relationship Id="rId1" Type="${NS_R}/slideLayout" Target="../slideLayouts/slideLayout1.xml"/>` +
       slide.externalLinks.map((url, i) => `<Relationship Id="rId${i + 2}" Type="${NS_R}/hyperlink" Target="${url}" TargetMode="External"/>`).join("") +
+      (slide.notes !== undefined ? `<Relationship Id="rId9" Type="${NS_R}/notesSlide" Target="../notesSlides/notesSlide1.xml"/>` : "") +
       `</Relationships>`;
     const files: Record<string, Uint8Array> = {
       "[Content_Types].xml": strToU8(`<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"/>`),
@@ -886,6 +898,13 @@ export class FakeDeck {
       "ppt/slideLayouts/slideLayout1.xml": strToU8(`<?xml version="1.0"?><p:sldLayout xmlns:p="${NS_P}" name="${layout?.name ?? ""}" data-id="${slide.layoutId}" data-master="${slide.masterId}"/>`),
       "ppt/slideMasters/slideMaster1.xml": strToU8(`<?xml version="1.0"?><p:sldMaster xmlns:p="${NS_P}"/>`),
     };
+    if (this.notesMaster) files["ppt/notesMasters/notesMaster1.xml"] = strToU8(`<?xml version="1.0"?><p:notesMaster xmlns:p="${NS_P}"/>`);
+    if (slide.notes !== undefined) {
+      const esc = (t: string) => t.replace(/&/g, "&amp;").replace(/</g, "&lt;");
+      const paragraphs = slide.notes.split("\n").map((line) => `<a:p>${line ? `<a:r><a:rPr lang="en-US" sz="1200"/><a:t>${esc(line)}</a:t></a:r>` : ""}</a:p>`).join("");
+      files["ppt/notesSlides/notesSlide1.xml"] = strToU8(`<?xml version="1.0"?><p:notes xmlns:p="${NS_P}" xmlns:a="${NS_A}"><p:cSld><p:spTree><p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr><p:grpSpPr/><p:sp><p:nvSpPr><p:cNvPr id="2" name="Slide Image"/><p:cNvSpPr/><p:nvPr><p:ph type="sldImg"/></p:nvPr></p:nvSpPr><p:spPr/></p:sp><p:sp><p:nvSpPr><p:cNvPr id="3" name="Notes"/><p:cNvSpPr/><p:nvPr><p:ph type="body" idx="1"/></p:nvPr></p:nvSpPr><p:spPr/><p:txBody><a:bodyPr/><a:lstStyle/>${paragraphs}</p:txBody></p:sp></p:spTree></p:cSld></p:notes>`);
+      files["ppt/notesSlides/_rels/notesSlide1.xml.rels"] = strToU8(`<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="${NS_R}/notesMaster" Target="../notesMasters/notesMaster1.xml"/></Relationships>`);
+    }
     return Buffer.from(zipSync(files)).toString("base64");
   }
 
@@ -921,6 +940,18 @@ export class FakeDeck {
       slide.shapes.map((s) => this.shapeXml(s)).join("") +
       `</p:spTree></p:cSld><p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr></p:sld>`
     );
+  }
+
+  /** Notes of an inserted slide, found the way PowerPoint does: the slide's notesSlide relationship, its body placeholder. */
+  private importedNotes(files: Record<string, Uint8Array>, rels: string, parser: DOMParser): { notes?: string } {
+    const target = /Type="[^"]*\/notesSlide" Target="\.\.\/([^"]+)"/.exec(rels)?.[1];
+    const bytes = target ? files[`ppt/${target}`] : undefined;
+    if (!bytes) return {};
+    if (!files[`ppt/notesSlides/_rels/${target!.split("/").pop()}.rels`]) throw new OfficeError("InvalidArgument", "notes page without relationships");
+    const xml = parser.parseFromString(strFromU8(bytes), "application/xml");
+    const body = Array.from(xml.getElementsByTagNameNS(NS_P, "sp")).find((sp) => sp.getElementsByTagNameNS(NS_P, "ph")[0]?.getAttribute("type") === "body");
+    const notes = body ? Array.from(body.getElementsByTagNameNS(NS_A, "p")).map((p) => Array.from(p.getElementsByTagNameNS(NS_A, "t")).map((t) => t.textContent ?? "").join("")).join("\n") : "";
+    return { notes };
   }
 
   insertSlides(base64: string, options: { formatting?: string; targetSlideId?: string }): void {
@@ -981,7 +1012,7 @@ export class FakeDeck {
     };
     shapes.push(...(this.dropShapesOnInsert ? [] : parse(Array.from(tree.children))));
     const bg = xml.getElementsByTagNameNS(NS_A, "srgbClr")[0]?.parentElement?.parentElement?.parentElement?.localName === "bg" ? `#${xml.getElementsByTagNameNS(NS_A, "srgbClr")[0]!.getAttribute("val")}` : undefined;
-    const slide: DSlide = { id: `${this.nextSlide++}#`, layoutId, masterId, shapes, background: bg, externalLinks: [] };
+    const slide: DSlide = { id: `${this.nextSlide++}#`, layoutId, masterId, shapes, background: bg, externalLinks: [], ...this.importedNotes(files, rels, parser) };
     this.slides.splice(at, 0, slide);
     this.log.push(`insert ${slide.id} at ${at}`);
   }
@@ -1016,6 +1047,22 @@ export function installFakePowerPoint(deck: FakeDeck = new FakeDeck()): Installe
       requirements: { isSetSupported: (set: string, version: string) => deck.isSetSupported(set, version) },
       document: {
         get url() { return deck.url; },
+        goToByIdAsync: (id: number, _type: string, callback: (result: { status: string; error?: { message: string } }) => void) => {
+          const slide = deck.slides.find((s) => Number(s.id.replace(/\D/g, "")) === id);
+          if (slide) deck.selection = { slideIds: [slide.id], shapes: [] };
+          queueMicrotask(() => callback(slide ? { status: "succeeded" } : { status: "failed", error: { message: "the slide does not exist" } }));
+        },
+        setSelectedDataAsync: (data: string, options: Record<string, unknown>, callback: (result: { status: string; error?: { message: string } }) => void) => {
+          const slide = deck.slides.find((s) => s.id === deck.selection.slideIds[0]);
+          if (!slide || deck.failPicture) return queueMicrotask(() => callback({ status: "failed", error: { message: "PowerPoint cannot take this picture" } }));
+          deck.pictureRequests.push({ slideId: slide.id, data, options });
+          const next = Math.max(1, ...slide.shapes.map((s) => Number(s.id) || 0)) + 1;
+          slide.shapes.push(shape({
+            id: String(next), name: `Picture ${next}`, type: "Image",
+            left: Number(options.imageLeft ?? 0), top: Number(options.imageTop ?? 0), width: Number(options.imageWidth ?? 96), height: Number(options.imageHeight ?? 96),
+          }));
+          queueMicrotask(() => callback({ status: "succeeded" }));
+        },
         getSelectedDataAsync: (coercion: string, callback: (result: { status: string; value?: unknown; error?: { message: string } }) => void) => {
           const first = deck.slides.find((s) => s.id === deck.selection.slideIds[0]);
           queueMicrotask(() =>
@@ -1028,7 +1075,8 @@ export function installFakePowerPoint(deck: FakeDeck = new FakeDeck()): Installe
         },
       },
     },
-    CoercionType: { SlideRange: "slideRange" },
+    CoercionType: { SlideRange: "slideRange", Image: "image" },
+    GoToType: { Slide: "slide" },
     AsyncResultStatus: { Succeeded: "succeeded", Failed: "failed" },
   };
   return {

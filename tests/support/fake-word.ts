@@ -141,6 +141,8 @@ export class FakeWordDoc {
   notes: Array<{ kind: string; text: string; after: string }> = [];
   tocs: Array<{ options: unknown; updatedPageNumbers: number }> = [];
   htmlInserts: Array<{ html: string; location: string }> = [];
+  /** Pictures put in with insertInlinePictureFromBase64, with the size they were given. */
+  pictureLog: Array<{ base64: string; location: string; paragraph: ParaData; width: number; height: number; lockAspectRatio: boolean; altTextDescription: string }> = [];
   lists = new Map<number, { bullets: Record<number, string>; numbering: Record<number, string> }>();
   sections = [{
     header: { Primary: "", FirstPage: "", EvenPages: "" } as Record<string, string>,
@@ -534,7 +536,16 @@ class FPara {
     return rw(r);
   }
   delete(): void { this.getRange("Whole").delete(); }
+  insertText(text: string, location: string): FRange { return this.getRange("Whole").insertText(text, location); }
+  clear(): void { this.data.text = ""; }
+  detachFromList(): void { this.doc.requires("WordApi", "1.3", "detachFromList"); this.data.listId = null; this.data.level = 0; }
   insertParagraph(text: string, location: string): object { return paraInsert(this.doc, this.data, text, location); }
+  insertInlinePictureFromBase64(base64: string, location: string): object {
+    this.data.pictures += 1;
+    const picture = { base64, location, paragraph: this.data, width: 200, height: 100, lockAspectRatio: true, altTextDescription: "" };
+    this.doc.pictureLog.push(picture);
+    return wrap(picture, "InlinePicture", ["width", "height"]);
+  }
   insertHtml(html: string, location: string): FRange { return this.getRange("Whole").insertHtml(html, location === "Replace" ? "Replace" : location); }
   insertTable(rows: number, columns: number, location: string, values?: string[][]): object { return addTable(this.doc, rows, columns, values, this.data); }
   startNewList(): object {
@@ -723,6 +734,17 @@ function buildBody(doc: FakeWordDoc): object {
   const body = {
     get paragraphs() { return memo(this, "paragraphs", () => collection(() => doc.paragraphs.map(paraWrap(doc)), "ParagraphCollection")); },
     get tables() { doc.requires("WordApi", "1.3", "Body.tables"); return memo(this, "tables", () => collection(() => doc.orderedTables().map(tableWrap(doc)), "TableCollection")); },
+    get inlinePictures() {
+      const ordered = () => [...doc.pictureLog].sort((a, b) => doc.paragraphs.indexOf(a.paragraph) - doc.paragraphs.indexOf(b.paragraph));
+      return memo(this, "pictures", () => collection(() => ordered().map((entry) => memo(entry, "view", () => wrap({
+        get width() { return entry.width; }, set width(v: number) { entry.width = v; },
+        get height() { return entry.height; }, set height(v: number) { entry.height = v; },
+        get altTextDescription() { return entry.altTextDescription; }, set altTextDescription(v: string) { entry.altTextDescription = v; },
+        get lockAspectRatio() { return entry.lockAspectRatio; }, set lockAspectRatio(v: boolean) { entry.lockAspectRatio = v; },
+        get paragraph() { doc.requires("WordApi", "1.2", "InlinePicture.paragraph"); return paraWrap(doc)(entry.paragraph); },
+        delete() { doc.requires("WordApi", "1.2", "InlinePicture.delete"); doc.pictureLog.splice(doc.pictureLog.indexOf(entry), 1); entry.paragraph.pictures -= 1; },
+      }, "InlinePicture", ["width", "height", "altTextDescription"]))), "InlinePictureCollection"));
+    },
     get fields() { doc.requires("WordApi", "1.4", "Body.fields"); return memo(this, "fields", () => collection(() => doc.fields.map(fieldWrap(doc)), "FieldCollection")); },
     get contentControls() {
       return memo(this, "controls", () => collection(() => doc.controls.map(controlWrap(doc)), "ContentControlCollection", {

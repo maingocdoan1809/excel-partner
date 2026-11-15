@@ -16,7 +16,7 @@ export function builtInStyleId(name: string): string | undefined {
 
 type Styled = Word.Paragraph | Word.Range;
 
-function setStyle(target: Styled, style: string): void {
+export function setStyle(target: Styled, style: string): void {
   const builtIn = builtInStyleId(style);
   // The built-in id is language independent; the name is only used when the host cannot take the id.
   if (builtIn && isSupported(WORD_API_1_3)) (target as { styleBuiltIn: string }).styleBuiltIn = builtIn;

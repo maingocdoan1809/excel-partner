@@ -198,6 +198,8 @@ export class MockShape {
   private _geometric: string;
   name = "";
   deleted = false;
+  altTextDescription = "";
+  lockAspectRatio = false;
   fillColor: string | null = null;
   /** Mirrors a real Excel quirk: outline weight must be a whole number of points. */
   lineFormat: Record<string, unknown> = new Proxy({} as Record<string, unknown>, {
@@ -217,7 +219,7 @@ export class MockShape {
   frame: Record<string, unknown> = {};
   connections: { begin?: { shape: MockShape; site: number }; end?: { shape: MockShape; site: number } } = {};
   lineProps: Record<string, unknown> = {};
-  constructor(readonly type: "GeometricShape" | "Line" | "TextBox" | "Group", geometric: string) {
+  constructor(readonly type: "GeometricShape" | "Line" | "TextBox" | "Group" | "Image", geometric: string) {
     this._geometric = geometric;
   }
   load() { return this; }
@@ -288,6 +290,8 @@ export class MockSheet {
       getItemOrNullObject: (name: string) => wrapShape(live().find((s) => s.name === name) ?? Object.assign(new MockShape("GeometricShape", ""), { isNullObject: true })),
       addGeometricShape: (type: string) => make(new MockShape("GeometricShape", type)),
       addTextBox: (text: string) => Object.assign(make(new MockShape("TextBox", "TextBox")), { text }),
+      /** A picture comes in at its own size, here 200 x 100 points. */
+      addImage: (base64: string) => Object.assign(make(new MockShape("Image", "")), { imageBase64: base64, width: 200, height: 100 }),
       addLine: (x1: number, y1: number, x2: number, y2: number, kind: string) => {
         const line = make(new MockShape("Line", ""));
         Object.assign(line, { left: Math.min(x1, x2), top: Math.min(y1, y2), width: Math.abs(x2 - x1), height: Math.abs(y2 - y1) });

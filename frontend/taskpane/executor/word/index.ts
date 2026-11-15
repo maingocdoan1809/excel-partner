@@ -2,8 +2,9 @@ import { WordToolInputSchemas, type ToolResult, type WordToolName } from "../../
 import { ToolFailure, toToolError } from "../common.js";
 import { addComment, readComments, replyComment, resolveComment } from "./comments.js";
 import { assertWithinLimit, asWordFailure } from "./common.js";
-import { collapseBlankParagraphs, editDocList, editDocText } from "./edit.js";
+import { collapseBlankParagraphs, editDocList, editDocParagraphs, editDocText } from "./edit.js";
 import { applyStyle } from "./format.js";
+import { manageDocPictures } from "./images.js";
 import { proposeDocEdits } from "./proposal.js";
 import { getDocOutline, readDocSection, searchDocText } from "./read.js";
 import { getWordSelection } from "./selection.js";
@@ -35,6 +36,7 @@ const HANDLERS: Record<WordToolName, Handler> = {
   search_doc_text: searchDocText,
   edit_doc_text: editDocText,
   edit_doc_list: editDocList,
+  edit_doc_paragraphs: editDocParagraphs,
   collapse_blank_paragraphs: collapseBlankParagraphs,
   propose_doc_edits: proposeDocEdits,
   read_comments: readComments,
@@ -48,6 +50,7 @@ const HANDLERS: Record<WordToolName, Handler> = {
   insert_table: insertTable,
   edit_table: editTable,
   manage_content_controls: manageContentControls,
+  manage_doc_pictures: manageDocPictures,
   insert_field: insertField,
   update_fields: updateFields,
   insert_toc: insertToc,

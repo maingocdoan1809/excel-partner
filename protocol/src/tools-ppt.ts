@@ -179,6 +179,26 @@ export const AlignShapesInputSchema = z.object({
 }).strict().refine((v) => v.align !== undefined || v.distribute !== undefined, { message: "give align or distribute" });
 export type AlignShapesInput = z.infer<typeof AlignShapesInputSchema>;
 
+export const UpdateSlideShapeInputSchema = z.object({
+  ref: ShapeRef,
+  left: Points.optional(), top: Points.optional(),
+  width: z.number().min(1).max(100_000).optional(), height: z.number().min(1).max(100_000).optional(),
+  keep_proportions: z.boolean().default(true).describe("With only width or only height, change the other in proportion (pictures do not get stretched)."),
+  name: z.string().min(1).max(100).optional(),
+}).strict().refine((v) => [v.left, v.top, v.width, v.height, v.name].some((x) => x !== undefined), { message: "give left, top, width, height or name" });
+export type UpdateSlideShapeInput = z.infer<typeof UpdateSlideShapeInputSchema>;
+
+export const ReadSlideNotesInputSchema = z.object({
+  slide_ids: z.array(SlideId).min(1).max(100).optional().describe("Slides to read; every slide (up to 60) when omitted."),
+}).strict();
+export type ReadSlideNotesInput = z.infer<typeof ReadSlideNotesInputSchema>;
+
+export const SetSlideNotesInputSchema = z.object({
+  slide_id: SlideId,
+  text: z.string().max(20_000).describe("The whole new speaker notes; \\n starts a new paragraph, empty text clears them."),
+}).strict();
+export type SetSlideNotesInput = z.infer<typeof SetSlideNotesInputSchema>;
+
 /** Name -> schema, in the order the tools are listed. */
 export const PptToolInputSchemas = {
   get_presentation_metadata: GetPresentationMetadataInputSchema,
@@ -187,9 +207,12 @@ export const PptToolInputSchemas = {
   list_slide_shapes: ListSlideShapesInputSchema,
   read_slide_text: ReadSlideTextInputSchema,
   edit_slide_text: EditSlideTextInputSchema,
+  read_slide_notes: ReadSlideNotesInputSchema,
+  set_slide_notes: SetSlideNotesInputSchema,
   edit_slide_xml: EditSlideXmlInputSchema,
   insert_slide_element: InsertSlideElementInputSchema,
   remove_slide_element: RemoveSlideElementInputSchema,
+  update_slide_shape: UpdateSlideShapeInputSchema,
   duplicate_slide: DuplicateSlideInputSchema,
   move_slide: MoveSlideInputSchema,
   modify_presentation_structure: ModifyPresentationStructureInputSchema,
@@ -212,7 +235,7 @@ export const PPT_TOOL_NAMES = Object.keys(PptToolInputSchemas) as PptToolName[];
 
 /** PowerPoint tools that change the presentation. */
 export const PPT_WRITE_TOOLS: readonly PptToolName[] = [
-  "add_slide", "edit_slide_text", "edit_slide_xml", "insert_slide_element", "remove_slide_element", "duplicate_slide", "move_slide",
+  "add_slide", "edit_slide_text", "set_slide_notes", "edit_slide_xml", "insert_slide_element", "remove_slide_element", "update_slide_shape", "duplicate_slide", "move_slide",
   "modify_presentation_structure", "insert_slide_table", "edit_slide_table", "set_slide_background", "set_shape_alt_text", "set_slide_hyperlink",
   "set_shape_zorder", "group_shapes", "ungroup_shapes", "align_shapes",
 ];

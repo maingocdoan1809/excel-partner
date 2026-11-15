@@ -1,7 +1,8 @@
-import type { CollapseBlankParagraphsInput, EditDocListInput, EditDocTextInput } from "../../../../protocol/src/index.js";
+import type { CollapseBlankParagraphsInput, EditDocListInput, EditDocParagraphsInput, EditDocTextInput } from "../../../../protocol/src/index.js";
 import { ToolFailure } from "../common.js";
 import { isSupported, WORD_LISTS, WORD_TRACK } from "../../host/requirements.js";
-import { assertParagraphIndex, clip, isBlankText, preview, requireSupport, WORD_API_1_3, wordRun } from "./common.js";
+import { assertParagraphIndex, clip, isBlankText, isTracking, preview, requireSupport, TRACKED_DELETE_NOTE, WORD_API_1_3, wordRun } from "./common.js";
+import { setStyle } from "./format.js";
 import { deleteParagraph } from "./paragraphs.js";
 import { pickTargets, type PickedTarget } from "./search.js";
 
@@ -41,11 +42,24 @@ export async function replaceText(context: Word.RequestContext, spec: ReplaceSpe
   return targets;
 }
 
+/** `track: true` needs WordApi 1.6; stop before touching the document when it is missing. */
+function requireTracking(track: boolean): void {
+  if (track) requireSupport("Editing with Track Changes on", WORD_TRACK, "Edit without track, or ask the person to turn Track Changes on in the Review tab and then edit.");
+}
+
+/** Turn Track Changes on for an edit that asked for it. True when it was off before (it is left on, so the person sees it). */
+async function startTracking(context: Word.RequestContext, track: boolean): Promise<boolean> {
+  if (!track) return false;
+  context.document.load("changeTrackingMode");
+  await context.sync();
+  const wasOff = context.document.changeTrackingMode === "Off";
+  context.document.changeTrackingMode = "TrackAll";
+  return wasOff;
+}
+
 export async function editDocText(input: EditDocTextInput): Promise<unknown> {
   const track = input.track === true;
-  if (track) {
-    requireSupport("Editing with Track Changes on", WORD_TRACK, "Edit without track, or ask the person to turn Track Changes on in the Review tab and then edit.");
-  }
+  requireTracking(track);
   return wordRun(async (context) => {
     const spec: ReplaceSpec = {
       oldText: input.old_text,
@@ -55,13 +69,7 @@ export async function editDocText(input: EditDocTextInput): Promise<unknown> {
       all: input.all ?? false,
     };
     const targets = await pickTargets(context, context.document.body, spec.oldText, { matchCase: spec.matchCase, occurrence: spec.occurrence, all: spec.all, what: "old_text" });
-    let turnedOn = false;
-    if (track) {
-      context.document.load("changeTrackingMode");
-      await context.sync();
-      if (context.document.changeTrackingMode === "Off") turnedOn = true;
-      context.document.changeTrackingMode = "TrackAll";
-    }
+    const turnedOn = await startTracking(context, track);
     replaceRanges(targets, spec.newText);
     await context.sync();
     const replaced = targets.ranges.length;
@@ -169,6 +177,140 @@ export async function editDocList(input: EditDocListInput): Promise<unknown> {
       ...common,
       method: "html",
       note: "Inserted as HTML because WordApi 1.3 is not available; an empty paragraph may remain before the list.",
+    };
+  });
+}
+
+/* -------------------------------------------------------------------------- */
+/* edit_doc_paragraphs                                                         */
+/* -------------------------------------------------------------------------- */
+
+interface NewParagraph { text: string; style?: string }
+
+/** The paragraphs to write, one per line: a \n inside a text starts another paragraph with the same style. */
+export function expandParagraphs(items: EditDocParagraphsInput["paragraphs"]): NewParagraph[] {
+  return (items ?? []).flatMap((item) => {
+    const { text, style } = typeof item === "string" ? { text: item, style: undefined } : item;
+    return text.replace(/\r\n?|\u000b/g, "\n").split("\n").map((line) => (style ? { text: line, style } : { text: line }));
+  });
+}
+
+/** Styles a new paragraph should not inherit when no style was asked for: the next line after a heading is body text. */
+const NOT_INHERITED = /^(?:Heading\d|Title|Subtitle|TocHeading)$/;
+
+/** Load what the edit needs to know about these paragraphs (WordApi 1.3), and refuse paragraphs in tables. */
+async function inspect(context: Word.RequestContext, items: Word.Paragraph[], firstIndex: number): Promise<Array<{ heading: boolean; list: boolean }>> {
+  if (!isSupported(WORD_API_1_3)) return items.map(() => ({ heading: false, list: false }));
+  for (const p of items) p.load("styleBuiltIn,isListItem,tableNestingLevel");
+  await context.sync();
+  const inTable = items.findIndex((p) => p.tableNestingLevel > 0);
+  if (inTable !== -1) throw new ToolFailure("invalid_arguments", `paragraph ${firstIndex + inTable} is inside a table; change table cells with edit_table`);
+  return items.map((p) => ({ heading: NOT_INHERITED.test(String(p.styleBuiltIn ?? "")), list: p.isListItem }));
+}
+
+/** Give a new paragraph its style: the one asked for, or plain Normal when it would otherwise copy a heading or a list item. */
+function styleNew(paragraph: Word.Paragraph, wanted: NewParagraph, plain: { heading: boolean; list: boolean }): void {
+  if (wanted.style) { setStyle(paragraph, wanted.style); return; }
+  if (!isSupported(WORD_API_1_3)) return;
+  if (plain.list) paragraph.detachFromList();
+  if (plain.heading || plain.list) paragraph.styleBuiltIn = "Normal";
+}
+
+function setText(paragraph: Word.Paragraph, text: string): void {
+  if (text === "") paragraph.clear();
+  else paragraph.insertText(text, "Replace");
+}
+
+export async function editDocParagraphs(input: EditDocParagraphsInput): Promise<unknown> {
+  const track = input.track === true;
+  requireTracking(track);
+  const fresh = expandParagraphs(input.paragraphs);
+  return wordRun(async (context) => {
+    const body = context.document.body;
+    const paragraphs = body.paragraphs;
+    paragraphs.load("items");
+    await context.sync();
+    const items = paragraphs.items;
+    const total = items.length;
+    const tracked = track ? { tracked: true } : {};
+
+    if (input.operation === "insert") {
+      const at = input.paragraph_index;
+      if (at !== undefined) assertParagraphIndex(at, total);
+      const before = at !== undefined && input.position === "before";
+      // At the end the new text follows the last paragraph, so that is the one whose look it would take.
+      const neighbour = items[at ?? total - 1]!;
+      const [plain] = await inspect(context, [neighbour], at ?? total - 1);
+      const turnedOn = await startTracking(context, track);
+      let previous: Word.Paragraph | undefined;
+      fresh.forEach((wanted, i) => {
+        const created = i === 0
+          ? (at === undefined ? body.insertParagraph(wanted.text, "End") : neighbour.insertParagraph(wanted.text, before ? "Before" : "After"))
+          : previous!.insertParagraph(wanted.text, "After");
+        styleNew(created, wanted, plain!);
+        previous = created;
+      });
+      await context.sync();
+      const first = at === undefined ? total : before ? at : at + 1;
+      const where = at === undefined ? "at the end" : `${before ? "before" : "after"} paragraph ${at}`;
+      return {
+        summary: `Inserted ${fresh.length} paragraph${fresh.length === 1 ? "" : "s"} ${where}: “${preview(fresh[0]!.text, 40)}”`,
+        first_paragraph_index: first,
+        last_paragraph_index: first + fresh.length - 1,
+        inserted: fresh.length,
+        ...tracked,
+        ...(turnedOn ? { track_changes_left_on: true } : {}),
+        note: "Indexes of the paragraphs after these have shifted.",
+      };
+    }
+
+    const start = input.paragraph_index!;
+    const count = input.count ?? 1;
+    assertParagraphIndex(start, total);
+    if (start + count > total) {
+      throw new ToolFailure("invalid_arguments", `count ${count} from paragraph ${start} runs past the end of the document, which has ${total} paragraphs (0..${total - 1})`);
+    }
+    const targets = items.slice(start, start + count);
+    await inspect(context, targets, start);
+    const turnedOn = await startTracking(context, track);
+    const leftOn = turnedOn ? { track_changes_left_on: true } : {};
+    const deletesTracked = track || (input.operation === "delete" || fresh.length < count ? await isTracking(context) : false);
+
+    if (input.operation === "delete") {
+      for (const paragraph of [...targets].reverse()) deleteParagraph(paragraph);
+      await context.sync();
+      return {
+        summary: `Deleted ${count} paragraph${count === 1 ? "" : "s"} from paragraph ${start}`,
+        deleted: count,
+        ...(deletesTracked ? { tracked: true } : {}),
+        ...leftOn,
+        note: deletesTracked ? TRACKED_DELETE_NOTE : "Indexes after these have shifted. The last paragraph of a document cannot be removed, only emptied.",
+      };
+    }
+
+    // replace: new text into the paragraphs that stay, then grow or shrink the passage.
+    const kept = Math.min(count, fresh.length);
+    for (let i = 0; i < kept; i++) {
+      setText(targets[i]!, fresh[i]!.text);
+      if (fresh[i]!.style) setStyle(targets[i]!, fresh[i]!.style!);
+    }
+    let previous = targets[kept - 1]!;
+    for (const wanted of fresh.slice(kept)) {
+      previous = previous.insertParagraph(wanted.text, "After");
+      if (wanted.style) setStyle(previous, wanted.style);
+    }
+    for (const extra of targets.slice(kept).reverse()) deleteParagraph(extra);
+    await context.sync();
+    return {
+      summary: `Replaced ${count} paragraph${count === 1 ? "" : "s"} from paragraph ${start} with ${fresh.length}: “${preview(fresh[0]!.text, 40)}”`,
+      first_paragraph_index: start,
+      last_paragraph_index: start + fresh.length - 1,
+      replaced: kept,
+      ...(fresh.length > count ? { inserted: fresh.length - count } : {}),
+      ...(fresh.length < count ? { deleted: count - fresh.length } : {}),
+      ...tracked,
+      ...leftOn,
+      ...(fresh.length < count && deletesTracked ? { note: TRACKED_DELETE_NOTE } : fresh.length !== count ? { note: "Indexes after these have shifted." } : {}),
     };
   });
 }
