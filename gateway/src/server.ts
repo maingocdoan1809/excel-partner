@@ -33,7 +33,6 @@ export class GatewayServer {
   private stopping = false;
   private ready = false;
   private maintenance = false;
-  private readonly probes = new Map<string, { message: ApiMessage; expires: number }>();
   private readonly probing = new Map<string, Promise<ApiMessage>>();
   private catalog?: { value: Awaited<ReturnType<GatewayServer["computeModels"]>>; expires: number };
   private catalogLoading?: Promise<Awaited<ReturnType<GatewayServer["computeModels"]>>>;
@@ -173,17 +172,15 @@ export class GatewayServer {
     res.setHeader("x-agent-gateway-model", target.model ?? "default");
     res.setHeader("x-agent-gateway-usage", "reported-at-cli-turn-completion");
     this.options.log?.({ event: "route", requestId, provider: target.provider, model: target.model, apiModel: request.model });
-    // The official client checks each model using this exact one-token 'x'
-    // request with a five-second timeout. Reuse only a recent REAL inference
-    // for that exact probe, never fabricated text or cached user conversations.
-    const cached = this.probes.get(stable(target));
-    if (isProbe && cached && cached.expires > Date.now()) {
-      res.setHeader("x-agent-gateway-cache", "verification-probe");
-      return this.json(res, 200, { ...cached.message, id: `msg_agw_cached_${randomUUID().replaceAll("-", "")}`, model: request.model,
-        usage: { input_tokens: 0, output_tokens: 0 } });
+    // The official client checks each model with this exact one-token 'x' request and gives up after five seconds,
+    // while a CLI turn takes longer than that. The check is answered at once, without running the CLI: the model is
+    // accepted when it routes to an enabled provider, and a CLI that cannot answer shows its error on the first real message.
+    if (isProbe) {
+      res.setHeader("x-agent-gateway-check", "answered-without-cli");
+      return this.json(res, 200, { id: `msg_agw_check_${randomUUID().replaceAll("-", "")}`, type: "message", role: "assistant", model: request.model,
+        content: [{ type: "text", text: "" }], stop_reason: "end_turn", stop_sequence: null, usage: { input_tokens: 0, output_tokens: 0 } } satisfies ApiMessage);
     }
     const owner = createHash("sha256").update(this.options.token).digest("hex");
-    if (isProbe) return this.json(res, 200, { ...await this.probe(target, request, owner), model: request.model });
     const running = this.engine.open(request, target, owner);
     res.once("close", () => { if (!res.writableFinished) running.cancel(); });
     if (!request.stream) return this.json(res, 200, await running.segment.result);
@@ -245,22 +242,12 @@ export class GatewayServer {
       .map(([id, display_name]) => ({ id: publicModelId(id, config), type: "model", display_name: config.modelNames[id] ?? display_name, created_at: "1970-01-01T00:00:00Z" }));
     return { data, has_more: false, first_id: data[0]?.id ?? null, last_id: data.at(-1)?.id ?? null };
   }
-  private cacheProbe(target: Route, message: ApiMessage) {
-    if (this.probes.size >= 64) this.probes.delete(this.probes.keys().next().value!);
-    this.probes.set(stable(target), { message, expires: Date.now() + this.options.config.probeCacheTtlMs });
-  }
-  /**
-   * Runs one verification probe per route. It is deliberately not tied to the
-   * HTTP request: Office abandons the check after five seconds, and a cold CLI
-   * start can take longer. Letting it finish fills the cache so Office's retry
-   * succeeds, and concurrent probes for the same route share a single turn.
-   */
+  /** Runs one real one-token turn per route (warm-up); concurrent runs for the same route share it. */
   private probe(target: Route, request: MessagesRequest, owner: string) {
     const key = stable(target);
     let pending = this.probing.get(key);
     if (!pending) {
-      pending = this.engine.open(request, target, owner).segment.result.then(message => { this.cacheProbe(target, message); return message; })
-        .finally(() => this.probing.delete(key));
+      pending = this.engine.open(request, target, owner).segment.result.finally(() => this.probing.delete(key));
       this.probing.set(key, pending);
       void pending.catch(() => {});
     }

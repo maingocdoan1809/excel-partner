@@ -198,56 +198,53 @@ describe("Anthropic-compatible CLI gateway", () => {
     expect(response.headers.get("x-agent-gateway-provider")).toBe("copilot");
     expect(response.headers.get("x-agent-gateway-model")).toBe("default");
   });
-  it("uses a real backend result for cached login probes, never caches user messages", async () => {
-    class ProbeAdapter extends MockAdapter {
-      calls = 0;
-      override async *sendTurn(input: SendTurnInput): AsyncIterable<ProviderEvent> {
-        this.calls++;
-        yield { type: "message_delta", requestId: input.requestId, text: "REAL_BACKEND_RESPONSE" };
-        yield { type: "turn_finished", requestId: input.requestId, reason: "completed" };
-      }
-    }
-    const adapter = new ProbeAdapter({ id: "copilot" });
-    const config = { ...ConfigSchema.parse({ warmupOnStart: true }), port: 0 };
-    const server = new GatewayServer({ config, token, tls: null, registry: new ProviderRegistry().register(adapter) });
-    servers.push(server); const url = await server.listen();
-    expect(adapter.calls).toBe(1);
-    const probe = { model: "claude-opus-4-7", max_tokens: 1, messages: [{ role: "user", content: "x" }] };
-    const post = (body: object) => fetch(`${url}/v1/messages`, { method: "POST", headers: { "x-api-key": token, "content-type": "application/json" }, body: JSON.stringify(body) });
-    const cached = await post(probe);
-    expect(cached.headers.get("x-agent-gateway-cache")).toBe("verification-probe");
-    expect((await cached.json()).content[0].text).toBe("REAL_BACKEND_RESPONSE");
-    expect(adapter.calls).toBe(1);
-    const fresh = await post({ ...probe, model: "copilot/default", messages: [{ role: "user", content: "different" }] });
-    expect(fresh.headers.get("x-agent-gateway-cache")).toBeNull();
-    expect(adapter.calls).toBe(2);
-    expect((await post({ ...probe, messages: [{ role: "user", content: "different" }] })).status).toBe(400);
-    expect(adapter.calls).toBe(2);
-  });
-  it("lets a slow login probe finish after the client gives up so the retry hits the cache", async () => {
-    class SlowAdapter extends MockAdapter {
+  it("answers the client's one-token model check at once without running the CLI, and only for that exact check", async () => {
+    class CountingAdapter extends MockAdapter {
       calls = 0;
       override async *sendTurn(input: SendTurnInput): AsyncIterable<ProviderEvent> {
         this.calls++;
         await new Promise(resolve => setTimeout(resolve, 300));
-        yield { type: "message_delta", requestId: input.requestId, text: "SLOW_BACKEND_RESPONSE" };
+        yield { type: "message_delta", requestId: input.requestId, text: "REAL_BACKEND_RESPONSE" };
         yield { type: "turn_finished", requestId: input.requestId, reason: "completed" };
       }
     }
-    const adapter = new SlowAdapter({ id: "copilot" });
+    const adapter = new CountingAdapter({ id: "copilot" });
     const config = { ...ConfigSchema.parse({ warmupOnStart: false }), port: 0 };
     const server = new GatewayServer({ config, token, tls: null, registry: new ProviderRegistry().register(adapter) });
     servers.push(server); const url = await server.listen();
-    const body = JSON.stringify({ model: "copilot/some-model", max_tokens: 1, messages: [{ role: "user", content: "x" }] });
-    const post = (signal?: AbortSignal) => fetch(`${url}/v1/messages`, { method: "POST", signal, headers: { "x-api-key": token, "content-type": "application/json" }, body });
-    const controller = new AbortController();
-    const abandoned = post(controller.signal).catch(() => null);
-    await new Promise(resolve => setTimeout(resolve, 50));
-    controller.abort(); await abandoned;
-    const joined = await post(); // Retry while the first probe is still running: shares its turn.
-    expect((await joined.json()).content[0].text).toBe("SLOW_BACKEND_RESPONSE");
-    const cached = await post();
-    expect(cached.headers.get("x-agent-gateway-cache")).toBe("verification-probe");
+    const probe = { model: "claude-opus-4-7", max_tokens: 1, messages: [{ role: "user", content: "x" }] };
+    const post = (body: object) => fetch(`${url}/v1/messages`, { method: "POST", headers: { "x-api-key": token, "content-type": "application/json" }, body: JSON.stringify(body) });
+    for (const model of ["claude-opus-4-7", "copilot/default", "copilot/some-model [Claude API]"]) {
+      const started = Date.now();
+      const check = await post({ ...probe, model });
+      expect(check.status).toBe(200);
+      expect(check.headers.get("x-agent-gateway-check")).toBe("answered-without-cli");
+      expect(await check.json()).toMatchObject({ type: "message", role: "assistant", model, stop_reason: "end_turn" });
+      expect(Date.now() - started).toBeLessThan(250);
+    }
+    expect(adapter.calls).toBe(0);
+    // A model that does not route to an enabled provider is still refused.
+    expect((await post({ ...probe, model: "codex/default" })).status).toBe(403);
+    expect((await post({ ...probe, model: "not-a-model" })).status).toBe(400);
+    // Anything else than that exact check is a real turn.
+    const real = await post({ ...probe, model: "copilot/default", messages: [{ role: "user", content: "different" }] });
+    expect(real.headers.get("x-agent-gateway-check")).toBeNull();
+    expect((await real.json()).content[0].text).toBe("REAL_BACKEND_RESPONSE");
+    expect(adapter.calls).toBe(1);
+  });
+  it("still warms the default route with one real turn on start when asked", async () => {
+    class WarmAdapter extends MockAdapter {
+      calls = 0;
+      override async *sendTurn(input: SendTurnInput): AsyncIterable<ProviderEvent> {
+        this.calls++;
+        yield { type: "message_delta", requestId: input.requestId, text: "warm" };
+        yield { type: "turn_finished", requestId: input.requestId, reason: "completed" };
+      }
+    }
+    const adapter = new WarmAdapter({ id: "copilot" });
+    const config = { ...ConfigSchema.parse({ warmupOnStart: true }), port: 0 };
+    const server = new GatewayServer({ config, token, tls: null, registry: new ProviderRegistry().register(adapter) });
+    servers.push(server); await server.listen();
     expect(adapter.calls).toBe(1);
   });
   it("round-trips client tools through one runtime and reports final usage once", async () => {

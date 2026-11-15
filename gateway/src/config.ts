@@ -25,7 +25,6 @@ export const ConfigSchema = z.object({
   maxBodyBytes: z.number().int().min(1024).max(64 * 1024 * 1024).default(32 * 1024 * 1024),
   maxPromptChars: z.number().int().min(1024).max(4 * 1024 * 1024).default(200_000),
   warmupOnStart: z.boolean().default(false),
-  probeCacheTtlMs: z.number().int().min(1000).max(60 * 60_000).default(600_000),
   /**
    * Model IDs published and accepted as they are, routed to their alias or to `defaultRoute`. The official Claude
    * add-ins accept only IDs from a list fixed in each of their releases, so the list lives in configuration.

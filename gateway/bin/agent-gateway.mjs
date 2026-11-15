@@ -125,9 +125,6 @@ async function setup() {
   await start();
   autostart(true);
   info(true);
-  // One real minimal inference now, so the first Office login is not limited by a cold CLI.
-  try { await request("POST", "/gateway/warmup", true); console.log("Model verification cache warmed."); }
-  catch (error) { console.log(`Warmup skipped (${error.message}). Run "agent-gateway warmup" before signing in from Office.`); }
 }
 const runKey = "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run", runName = "Agent Gateway";
 function autostart(enable) {
@@ -230,7 +227,7 @@ async function main() {
   }
   else if (command === "autostart" && ["on", "off"].includes(a)) autostart(a === "on");
   else if (command === "models") { const result = await request("GET", "/v1/models", true); for (const model of result.data) console.log(`${model.id}\t${model.display_name}`); }
-  else if (command === "warmup") { await request("POST", "/gateway/warmup", true); console.log("Model verification cache warmed using a real CLI inference."); }
+  else if (command === "warmup") { await request("POST", "/gateway/warmup", true); console.log("The default provider answered a real one-token request."); }
   else if (command === "config" && a === "show") console.log(JSON.stringify(loadConfig(dir), null, 2));
   else if (command === "config" && a === "set" && b && c !== undefined) {
     const config = loadConfig(dir); let value; try { value = JSON.parse(c); } catch { value = c; }

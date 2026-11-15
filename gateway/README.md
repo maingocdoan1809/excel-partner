@@ -95,17 +95,16 @@ ignores `display_name`, so named aliases are used as public model IDs. A short
 previous protocol aliases continue to route as before but are not duplicated in
 discovery. Names must be unique. Reconnect the Office client to reload its menu.
 
-The current Office client also gives model verification requests only five
-seconds. The gateway preloads model discovery and runs one real, minimal default
-provider inference when you run `agent-gateway setup` or `agent-gateway warmup`,
-then caches that exact one-token `x` probe for ten minutes. Only this precise probe
-shape is cached; user conversation responses are not.
-`x-agent-gateway-cache: verification-probe` identifies hits, which report zero new
-inference usage. This is not a fabricated readiness response. Warmup consumes a
-little provider quota, so it does not run at every start by default; set
-`warmupOnStart` to true to run it at each start. Run `agent-gateway warmup` before
-a later login if the verification cache expired and the provider starts too slowly. The server and API remain
-available if warmup fails, but model verification can still fail legitimately.
+The current Office client checks each model with a one-token `x` request and gives
+up after five seconds, while starting a provider CLI takes longer. The gateway
+answers that exact request at once, without running the CLI, so the client always
+connects: a model is accepted when it routes to an enabled provider, and a provider
+that cannot answer (not installed, signed out, unknown model) shows its error on the
+first real message instead. These answers carry `x-agent-gateway-check:
+answered-without-cli` and report zero usage. Any other request, including a user
+message that happens to be short, is a real turn. `warmupOnStart` (off by default)
+runs one real one-token turn of the default route at start; `agent-gateway warmup`
+runs it on demand.
 
 Data lives in `%LOCALAPPDATA%\Agent Gateway`, separate from Excel Partner:
 `config.json`, `token.txt`, `localhost.crt`, `localhost.key`, `server.json`,
@@ -138,7 +137,7 @@ destination. A failed provider is never silently replaced with another provider.
 
 `agent-gateway config show` displays all settings. Additional configurable values:
 `port`, `maxBodyBytes`, `allowedOrigins`, `defaultRoute.model`, and
-`enabledProviders`, `warmupOnStart`, `probeCacheTtlMs`, and
+`enabledProviders`, `warmupOnStart`, and
 `compatibilityModels`. Changes apply immediately. Remove an alias by
 editing `config.json`; there are no credentials in this file.
 
