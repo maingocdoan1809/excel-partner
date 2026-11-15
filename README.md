@@ -43,7 +43,7 @@ office-partner status
 ## What it can do
 
 - **Read:** selections, ranges, formulas, formatting, tables, charts, pivots, shapes, and a rendered image of a range. `analyze_range` answers totals, counts, rankings and data checks over thousands of rows (profile the columns, or filter, group and aggregate) without reading the rows into the chat.
-- **Write:** values and formulas (with a check for `#REF!`/`#NAME?` errors), formatting, sort, filter, merge, validation, conditional formatting, named ranges, print layout, sheets.
+- **Write:** values and formulas (with a check for `#REF!`/`#NAME?` errors), formatting, sort, filter, merge, validation, conditional formatting, named ranges, print layout, sheets. `batch` runs up to 20 of these steps in one go (each checked first; it stops at the first failure and nothing is rolled back), so a known sequence costs one round trip instead of many.
 - **Build:** tables, charts, pivot tables, flowcharts with attached connectors.
 - **Audit:** `find_errors` scans for formula errors; writes refuse to overwrite existing data unless overwrite is approved.
 - **Look across open files:** the button at the top left lists every file open with Office Partner, in any of the three apps. The assistant can read another one when you ask, for example to compare a workbook with a report or put a figure from Excel on a slide, or ask that file's assistant to make a change there. See *Connected files* below.

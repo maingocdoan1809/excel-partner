@@ -41,6 +41,7 @@ import {
   ListSkillsInputSchema,
   GetToolDefinitionInputSchema,
   AnalyzeRangeInputSchema,
+  BatchInputSchema,
   SaveSkillInputSchema,
   UpdateSkillInputSchema,
   ReadWorkbookFileInputSchema,
@@ -83,6 +84,7 @@ export const ExcelToolInputSchemas = {
   get_cell_ranges: GetCellRangesInputSchema,
   search_data: SearchDataInputSchema,
   analyze_range: AnalyzeRangeInputSchema,
+  batch: BatchInputSchema,
   find_errors: FindErrorsInputSchema,
   check_formula_consistency: CheckFormulaConsistencyInputSchema,
   read_range_image: ReadRangeImageInputSchema,
@@ -166,7 +168,7 @@ export type ToolName = keyof typeof ToolInputSchemas;
 export const ALL_TOOL_NAMES = Object.keys(ToolInputSchemas) as ToolName[];
 
 /** Tools the bridge answers itself instead of forwarding to the task pane. */
-export const SERVER_TOOLS: readonly ExcelToolName[] = ["playwright_browser", "get_tool_definition", "list_skills", "read_skill", "save_skill", "update_skill", "run_skill_script", "run_python", "list_reference_files", "read_workbook_file", "read_attached_image", "read_attached_file", "read_document_file", "list_connected_files", "read_connected_file", "send_to_connected_file", "list_test_sessions", "open_test_browser", "read_site_knowledge", "save_site_knowledge", "delete_site_knowledge", "save_test_script", "finish_test_run"];
+export const SERVER_TOOLS: readonly ExcelToolName[] = ["playwright_browser", "get_tool_definition", "batch", "list_skills", "read_skill", "save_skill", "update_skill", "run_skill_script", "run_python", "list_reference_files", "read_workbook_file", "read_attached_image", "read_attached_file", "read_document_file", "list_connected_files", "read_connected_file", "send_to_connected_file", "list_test_sessions", "open_test_browser", "read_site_knowledge", "save_site_knowledge", "delete_site_knowledge", "save_test_script", "finish_test_run"];
 
 /** Tools that need the user to have switched on the browser (Playwright) in Tools. */
 export const BROWSER_TOOLS: readonly ExcelToolName[] = ["playwright_browser", "list_test_sessions", "open_test_browser", "save_test_script", "finish_test_run"];

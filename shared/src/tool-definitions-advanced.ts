@@ -54,6 +54,14 @@ const META: Partial<Record<ExcelToolName, Meta>> = {
       "identical formatting. Large reads are paged through `cellLimit` / `nextRanges`. Use read_range with format csv " +
       "when you only need values.",
   },
+  batch: {
+    title: "Run several steps",
+    annotations: WRITE,
+    description:
+      "WRITE. Run up to 20 of the tools listed in `operations[].tool`, in order, in one call; each `input` is exactly what that tool takes alone. " +
+      "Every operation is checked before any runs. It stops at the first failure (stopOnError) and does NOT roll back: the result says how many ran. " +
+      "Use it for known steps (write, format, validate) instead of one call each; read back what matters afterwards.",
+  },
   analyze_range: {
     title: "Analyze range",
     annotations: READ,

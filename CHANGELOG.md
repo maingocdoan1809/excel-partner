@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **`batch` (Excel):** run up to 20 cell and structure tools in order in one call. Every operation is validated before the first runs; each one then goes through the same path as a single call (limits, the pane's approval and overwrite guards, the Changes list). It stops at the first failure (or continues with `stopOnError: false`) and reports how far it got. Nothing is rolled back.
 - **`analyze_range` (Excel):** profile a table's columns, or filter, group and aggregate its rows (count, sum, avg, min, max, distinct) over up to 500,000 cells, and get back a few lines instead of the rows. Dates are filtered as YYYY-MM-DD. Another open workbook can be asked to run it too.
 - **Lighter tool list (`toolSchemas: "lazy"`, off by default).** Tools are offered by name and one line; `get_tool_definition` returns the full definition, matches a name that is slightly wrong and lists every tool when nothing matches. Wrong calls are answered with the closest names or the tool's schema.
 - **The usage ledger records, per turn, the calls, failures and result size of each tool and the size of the tool definitions offered.** `node scripts/usage-tools.mjs` summarises them. Names and sizes only.

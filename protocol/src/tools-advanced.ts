@@ -760,6 +760,33 @@ export const AnalyzeRangeInputSchema = z.object({
 });
 export type AnalyzeRangeInput = z.infer<typeof AnalyzeRangeInputSchema>;
 
+/* -------------------------------------------------------------------------- */
+/* Several steps in one call                                                   */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Tools a `batch` may run: the ones that read or change cells and their structure. Left out on purpose: anything that has its own
+ * way of asking the person (pictures from the web, files, the browser, Python, other files' assistants), anything that
+ * returns a picture, and the free-form Office.js tool.
+ */
+export const BATCHABLE_TOOLS = [
+  "get_sheets", "read_range", "get_cell_ranges", "search_data", "analyze_range", "find_errors", "check_formula_consistency", "get_objects",
+  "write_range", "set_cells", "set_formula", "format_range", "clear_range", "copy_to", "find_replace", "resize_range", "merge_range", "sort_range", "filter_range",
+  "insert_rows", "modify_structure", "manage_sheet", "manage_names", "conditional_format", "data_validation", "page_layout", "sheet_view",
+  "modify_table", "modify_chart", "modify_pivot_table",
+] as const;
+export type BatchableTool = (typeof BATCHABLE_TOOLS)[number];
+export const MAX_BATCH_OPERATIONS = 20;
+
+export const BatchInputSchema = z.object({
+  operations: z.array(z.object({
+    tool: z.enum(BATCHABLE_TOOLS),
+    input: z.record(z.unknown()).default({}).describe("Exactly the arguments that tool takes on its own."),
+  })).min(1).max(MAX_BATCH_OPERATIONS),
+  stopOnError: z.boolean().default(true).describe("Stop at the first operation that fails (default). Nothing is rolled back."),
+});
+export type BatchInput = z.infer<typeof BatchInputSchema>;
+
 /** Reading tools that may be pointed at another connected workbook. Writing is never allowed across files. */
 export const CONNECTED_READ_TOOLS = ["get_sheets", "read_range", "get_cell_ranges", "search_data", "analyze_range", "find_errors", "check_formula_consistency", "get_objects"] as const;
 

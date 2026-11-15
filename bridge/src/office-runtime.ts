@@ -14,7 +14,9 @@ import {
   rangeCellCount,
   SelectionSnapshotSchema,
   UNNAMED_FILE,
+  type BatchInput,
   type HostId,
+  type ToolError,
   type ToolResult,
 } from "../../protocol/src/index.js";
 import { ReferenceError_, type ReferenceFiles } from "./reference-files.js";
@@ -158,6 +160,7 @@ export class OfficeRuntime {
       return error("invalid_arguments", String(err));
     }
 
+    if (request.tool === "batch") return this.runBatch(session, request, parsed as BatchInput);
     if (request.tool === GET_TOOL_DEFINITION) return { ok: true, data: lookupTools(requestedToolNames(parsed), describableTools(session.host, this.allowOptInTools, session.capabilities)) };
     if (request.tool === "list_connected_files") return this.listConnectedFiles(session);
     if (request.tool === "read_connected_file") return this.readConnectedFile(session, parsed as ReadConnectedFileInput, request.signal);
@@ -260,6 +263,43 @@ export class OfficeRuntime {
     if (request.tool === "record_test_results" && result.ok) this.trackRecorded(session, parsed as RecordTestResultsInput, result.data);
     this.logOutcome(request.tool, parsed, result, Date.now() - started);
     return withRangeLink(result);
+  }
+
+  /**
+   * `batch`: run the listed tools one after another through the same path a single call takes (policy, limits, the pane's own
+   * approval and overwrite guards, the Changes list), so a batch can do nothing separate calls could not. Every operation is
+   * checked before the first runs, so a typo in the last cannot leave the first ones applied. Nothing is rolled back.
+   */
+  private async runBatch(session: WorkbookSession, request: InternalToolRequest, input: BatchInput): Promise<ToolResult> {
+    const exposed = new Set(exposedToolNamesForHost(session.host, this.allowOptInTools, session.capabilities));
+    const invalid: Array<{ operation: number; tool: string; message: string }> = [];
+    input.operations.forEach((operation, index) => {
+      const problem = (message: string) => invalid.push({ operation: index + 1, tool: operation.tool, message });
+      const refusal = policyRefusal(this.policy, operation.tool, false);
+      if (refusal) return problem(refusal);
+      if (!exposed.has(operation.tool)) return problem(`tool '${operation.tool}' is not available here`);
+      try { parseToolInputForHost(session.host, operation.tool, operation.input); }
+      catch (err) { problem(err instanceof ZodError ? err.issues.map((issue) => `${issue.path.join(".") || "input"}: ${issue.message}`).join("; ") : String(err)); }
+    });
+    if (invalid.length) return error("invalid_arguments", `batch not run: ${invalid.length} of ${input.operations.length} operations are invalid. Nothing was changed.`, invalid);
+
+    const total = input.operations.length;
+    const results: Array<{ tool: string; ok: true; data: unknown } | { tool: string; ok: false; error: ToolError }> = [];
+    for (const operation of input.operations) {
+      if (request.signal?.aborted || session.turnController?.signal.aborted) break;
+      const result = await this.invokeTool({ sessionId: request.sessionId, tool: operation.tool, args: operation.input, signal: request.signal });
+      if (session.activeRequestId) session.recordToolUse(session.activeRequestId, operation.tool, toolResultChars(result), result.ok);
+      results.push(result.ok ? { tool: operation.tool, ok: true, data: result.data } : { tool: operation.tool, ok: false, error: result.error });
+      if (!result.ok && input.stopOnError) break;
+    }
+    const completed = results.filter((entry) => entry.ok).length;
+    const failedIndex = results.findIndex((entry) => !entry.ok);
+    if (failedIndex < 0 && results.length === total) return { ok: true, data: { total, completed, results } };
+    const notRun = total - results.length;
+    const first = failedIndex >= 0 ? results[failedIndex]! : null;
+    const detail = { total, completed, notRun, results };
+    if (!first || first.ok) return error("cancelled", `The request ended after ${completed} of ${total} operations. They are not rolled back.`, detail);
+    return error(first.error.code, `Operation ${failedIndex + 1} of ${total} (${first.tool}) failed: ${first.error.message} ${completed} operation(s) were applied and are not rolled back; ${notRun} were not run.`, detail);
   }
 
   /** The workbooks open with this add-in, the current one first, so the assistant can point at another one by id. */

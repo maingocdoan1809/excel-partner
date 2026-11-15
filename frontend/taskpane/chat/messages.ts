@@ -18,7 +18,7 @@ import { submit } from "./turn.js";
 
 // Tools the bridge answers by itself reach the pane only as provider events, never as a tool request, so they must keep
 // their own card: the person sees which other file was read or sent a request.
-export const bridgeAnsweredTools: ReadonlySet<string> = new Set(["list_connected_files", "read_connected_file", "send_to_connected_file"]);
+export const bridgeAnsweredTools: ReadonlySet<string> = new Set(["list_connected_files", "read_connected_file", "send_to_connected_file", "batch"]);
 let workbookToolNamesCache: Set<string> | null = null;
 /** Tools of the open file's application that reach the pane as tool requests (their card comes from the executed result). */
 export const isDocumentTool = (name: string): boolean => (workbookToolNamesCache ??= new Set<string>(exposedToolNamesForHost(activeHost().id, true, { playwright: true, webSearch: true }).filter((tool) => !bridgeAnsweredTools.has(tool)))).has(name);
