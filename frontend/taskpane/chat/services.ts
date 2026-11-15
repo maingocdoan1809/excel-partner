@@ -1,3 +1,4 @@
+import { knownDocumentUrl } from "../ui/document-url.js";
 import { DurableHistory } from "../ui/durable-history.js";
 import { activeHost } from "../host/index.js";
 import { BrowserView } from "../ui/browser-view.js";
@@ -76,6 +77,8 @@ export const thoughts = new ThoughtView(els.messages, () => thinking.element, ()
 export const preview = setupArtifactPreview(() => showPanel("preview"));
 export const historyScheduler = createHistoryScheduler(() => {
   app.session.updatedAt = Date.now();
+  const documentKey = knownDocumentUrl();
+  if (documentKey && !app.session.documentKey) app.session.documentKey = documentKey;
   store.save(app.session);
   try { sessionStorage.setItem("excelPartner.activeChatId", app.session.id); } catch {}
 });

@@ -116,7 +116,7 @@ export class HistoryStore {
   private listSnapshot(host: SessionHost, offset = 0, limit = 40) {
     const items = (this.db.prepare("SELECT * FROM history_chats WHERE host=? AND deleted=0 ORDER BY updated DESC,id LIMIT ? OFFSET ?").all(host, Math.min(100, Math.max(1, limit)), Math.max(0, offset)) as Row[]).map(row => {
       const s = JSON.parse(row.metadata) as StoredSession;
-      return { id: s.id, host, title: s.title, provider: s.provider, providerSessionId: s.providerSessionId, startedAt: s.startedAt, updatedAt: s.updatedAt, revision: row.revision,
+      return { id: s.id, host, title: s.title, provider: s.provider, providerSessionId: s.providerSessionId, documentKey: s.documentKey, startedAt: s.startedAt, updatedAt: s.updatedAt, revision: row.revision,
         messageCount: (this.db.prepare("SELECT count(*) n FROM history_entries WHERE host=? AND chat=? AND kind='message' AND json_extract(data,'$.kind') IN ('user','assistant')").get(host, s.id) as { n: number }).n,
         changeCount: (this.db.prepare("SELECT count(*) n FROM history_entries WHERE host=? AND chat=? AND kind='change' AND json_extract(data,'$.ok')=1").get(host, s.id) as { n: number }).n } satisfies HistorySummary;
     });

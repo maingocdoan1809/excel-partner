@@ -4,7 +4,8 @@
  * When does the pane bring back the last chat?
  *
  * Only when the pane reloaded itself (a new build arrived, or an update finished) in the middle of a conversation.
- * Closing the pane and opening it again starts a new chat; the old one stays in the history list.
+ * Closing the pane and opening it again does not use this mark: it brings back the last chat of the same file once the
+ * history store is connected (see restoreDocumentChat), and starts a new chat for a file without one.
  *
  * The reload is marked in sessionStorage, which belongs to this one pane window and is gone once it is closed.
  * The mark is removed the moment it is read, so it can only ever apply to the very next start.

@@ -56,6 +56,8 @@ export interface StoredSession {
   provider: string;
   /** The application the chat was held in. History shows a chat only in the same app; chats saved before this existed have none (see `inferHost`). */
   host?: SessionHost;
+  /** The open file the chat belongs to (its url), so the same file brings its last chat back. Absent for chats of an unsaved file or saved before this existed. */
+  documentKey?: string;
   startedAt: number;
   updatedAt: number;
   messages: StoredMessage[];
@@ -72,6 +74,7 @@ export interface SessionSummary {
   title: string;
   provider: string;
   providerSessionId?: string;
+  documentKey?: string;
   startedAt: number;
   updatedAt: number;
   messageCount: number;
@@ -88,7 +91,7 @@ export interface HistoryStats { count: number; bytes: number; generation: number
 const tool = z.object({ name: z.string(), args: z.string(), input: z.string().optional(), result: z.string().optional(), state: z.enum(["running", "ok", "error"]), error: z.string().nullable() }).passthrough();
 export const StoredSessionSchema = z.object({
   id: z.string().min(1).max(256), title: z.string().max(1000), provider: ProviderIdSchema,
-  host: z.enum(["excel", "word", "powerpoint"]).optional(), providerSessionId: z.string().max(512).optional(), providerTitle: z.string().optional(), identityVersion: z.literal(1).optional(),
+  host: z.enum(["excel", "word", "powerpoint"]).optional(), providerSessionId: z.string().max(512).optional(), providerTitle: z.string().optional(), documentKey: z.string().max(2048).optional(), identityVersion: z.literal(1).optional(),
   startedAt: z.number().finite(), updatedAt: z.number().finite(),
   messages: z.array(z.object({ kind: z.enum(["user", "assistant", "error", "note", "tool", "tool_group", "artifact"]), text: z.string(), tool: tool.optional(), tools: z.array(tool).optional(), artifact: z.object({ name: z.string(), content: z.string() }).optional() }).passthrough()),
   changes: z.array(z.object({ at: z.number().finite(), tool: z.string(), ok: z.boolean(), summary: z.string(), target: z.object({ sheet: z.string(), address: z.string() }).nullable() }).passthrough()),

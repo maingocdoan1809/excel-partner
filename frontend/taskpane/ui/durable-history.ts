@@ -14,6 +14,8 @@ export interface ChatHistoryStore {
  list(): SessionSummary[]; get(id: string): StoredSession | null; save(session: StoredSession): void;
  delete(id: string): void | Promise<void>; clear(): void | Promise<void>;
  latest(maxAgeMs: number): StoredSession | null;
+ /** The newest chat with messages that was held in this file (by its url), or null. */
+ latestForDocument(documentKey: string): SessionSummary | null;
  loadPage?(id: string, offset?: number, limit?: number): Promise<HistoryTranscript>;
  refresh?(more?: boolean): Promise<void>; load?(id: string): Promise<StoredSession | null>; flush?(keepalive?: boolean): Promise<void>;
  total?: number;
@@ -142,7 +144,7 @@ export class DurableHistory implements ChatHistoryStore {
    if (this.listed) return this.summaries;
    return [...this.records.values()].filter(s => s.host === this.host() && s.messages.some(m => m.kind === "user")).sort((a,b) => b.updatedAt-a.updatedAt).map(s => this.summary(s));
  }
- private summary(s: StoredSession): SessionSummary { return { id: s.id, title: s.title, provider: s.provider, providerSessionId: s.providerSessionId, startedAt: s.startedAt, updatedAt: s.updatedAt, messageCount: s.messages.filter(m => m.kind === "user" || m.kind === "assistant").length, changeCount: s.changes.filter(c => c.ok).length }; }
+ private summary(s: StoredSession): SessionSummary { return { id: s.id, title: s.title, provider: s.provider, providerSessionId: s.providerSessionId, documentKey: s.documentKey, startedAt: s.startedAt, updatedAt: s.updatedAt, messageCount: s.messages.filter(m => m.kind === "user" || m.kind === "assistant").length, changeCount: s.changes.filter(c => c.ok).length }; }
  private storageId(id: string) {
    const seen = new Set<string>();
    while (this.aliases.has(`${this.host()}:${id}`) && !seen.has(id)) { seen.add(id); id = this.aliases.get(`${this.host()}:${id}`)!; }
@@ -153,6 +155,7 @@ export class DurableHistory implements ChatHistoryStore {
  getActive(id: string) { return this.get(this.storageId(id)); }
  loadActive(id: string) { return this.load(this.storageId(id)); }
  private saveAliases() { try { if (this.aliases.size) this.storage.setItem(this.aliasKey, JSON.stringify(Object.fromEntries(this.aliases))); else this.storage.removeItem(this.aliasKey); } catch { /* Pending snapshots retain their resolved IDs. */ } }
+ latestForDocument(documentKey: string) { return this.list().filter(s => s.documentKey === documentKey && s.messageCount > 0).sort((a, b) => b.updatedAt - a.updatedAt)[0] ?? null; }
  latest(maxAgeMs: number) { const s = [...this.records.values()].filter(s => s.host === this.host()).sort((a,b) => b.updatedAt-a.updatedAt)[0]; return s && Date.now()-s.updatedAt<=maxAgeMs ? structuredClone(s) : null; }
  async refresh(more = false) {
    const page = await this.api.historyList(more ? this.summaries.length : 0, 40);

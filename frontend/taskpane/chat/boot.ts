@@ -66,8 +66,9 @@ export function boot(host: string): void {
   observer.observe(document.body);
   bindListeners();
 
-  // Bring the last chat back only after the pane reloaded itself (a new build or a finished update). A pane that was
-  // closed and opened again starts a new chat; the old one is in the history list.
+  // After the pane reloaded itself (a new build or a finished update) the chat that was open comes back at once. A pane
+  // that was closed and opened again shows the last chat of the same file once the history store is connected
+  // (restoreDocumentChat); a file with no earlier chat starts a new one.
   const restoring = takeChatRestore();
   try { app.restoreChatId = restoring ? sessionStorage.getItem("excelPartner.activeChatId") : null; } catch {}
   const previous = restoring ? (app.restoreChatId ? store.getActive(app.restoreChatId) : store.latest(RESTORE_WITHIN_MS)) : null;

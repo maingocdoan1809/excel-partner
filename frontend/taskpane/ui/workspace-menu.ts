@@ -1,3 +1,4 @@
+import { currentDocumentUrl } from "./document-url.js";
 import type { BridgeClient, SavedReference, UploadedAttachment, WorkspaceEntry, WorkspaceRoot } from "../bridge-client.js";
 import { activeHost } from "../host/index.js";
 import { activeFileMention } from "./file-mentions.js";
@@ -55,7 +56,7 @@ export function setupWorkspaceMenu(deps: WorkspaceMenuDeps) {
     workspaceError = null;
     renderWorkspaceMenu();
     try {
-      const [documentUrl, workbookName] = await Promise.all([currentWorkbookUrl(), activeHost().hasSheets ? deps.getWorkbookName() : Promise.resolve("")]);
+      const [documentUrl, workbookName] = await Promise.all([currentDocumentUrl(), activeHost().hasSheets ? deps.getWorkbookName() : Promise.resolve("")]);
       const result = await deps.getClient().listWorkspaces(documentUrl, workbookName);
       workspaceRoots = result.roots;
       workspaceDefaultError = result.defaultError;
@@ -65,20 +66,6 @@ export function setupWorkspaceMenu(deps: WorkspaceMenuDeps) {
       workspaceLoading = false;
       renderWorkspaceMenu();
     }
-  }
-
-  async function currentWorkbookUrl(): Promise<string> {
-    const direct = Office.context.document.url;
-    if (direct) return direct;
-    return new Promise((resolve) => {
-      const timer = window.setTimeout(() => resolve(""), 2500);
-      try {
-        Office.context.document.getFilePropertiesAsync((result) => {
-          window.clearTimeout(timer);
-          resolve(result.status === Office.AsyncResultStatus.Succeeded ? result.value.url ?? "" : "");
-        });
-      } catch { window.clearTimeout(timer); resolve(""); }
-    });
   }
 
   async function openWorkspaceFolder(path: string, name: string): Promise<void> {

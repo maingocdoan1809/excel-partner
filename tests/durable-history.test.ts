@@ -177,3 +177,19 @@ describe("durable pane outbox", () => {
    await w.store.connect(); expect(w.store.legacyUnmigrated()).toBeNull();
  });
 });
+describe("the last chat of an open file", () => {
+ const chat = (id: string, documentKey: string | undefined, updatedAt: number, withMessages = true): StoredSession =>
+   ({ ...session(), id, updatedAt, ...(documentKey ? { documentKey } : {}), messages: withMessages ? [{ kind: "user", text: id }] : [] });
+ it("D01 finds the newest chat of the same file and never one of another file or of no file", async () => {
+   const w = fixture();
+   w.rows.set("a-old", { session: chat("a-old", "C:\books\a.xlsx", 10), revision: 1 });
+   w.rows.set("a-new", { session: chat("a-new", "C:\books\a.xlsx", 30), revision: 1 });
+   w.rows.set("a-empty", { session: chat("a-empty", "C:\books\a.xlsx", 40, false), revision: 1 });
+   w.rows.set("b", { session: chat("b", "C:\books\b.xlsx", 50), revision: 1 });
+   w.rows.set("legacy", { session: chat("legacy", undefined, 60), revision: 1 });
+   await w.store.connect();
+   expect(w.store.latestForDocument("C:\books\a.xlsx")?.id).toBe("a-new");
+   expect(w.store.latestForDocument("C:\books\b.xlsx")?.id).toBe("b");
+   expect(w.store.latestForDocument("C:\books\c.xlsx")).toBeNull();
+ });
+});

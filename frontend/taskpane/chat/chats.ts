@@ -1,6 +1,7 @@
 import { newSession, type StoredSession } from "../ui/sessions.js";
 import { ProviderIdSchema } from "../../../protocol/src/index.js";
 import { PROVIDER_KEY } from "../ui/provider-picker.js";
+import { currentDocumentUrl } from "../ui/document-url.js";
 import { browserView, historyScheduler, providerOptions, refreshModelCatalog, refreshUsage, renderAuthNotice, renderChanges, renderModelPicker, renderProviderMenu, showPanel, slash, thinking } from "./services.js";
 import { abandonRequest } from "./turn.js";
 import { clearAttachment } from "./composer.js";
@@ -8,6 +9,7 @@ import { prepareRuntime } from "./prepare.js";
 import { app, liveTools } from "./state.js";
 import { els } from "../ui/elements.js";
 import { renderMessage, renderWelcome, scrollToEnd } from "./messages.js";
+import { store } from "./services.js";
 
 export function schedulePersist(): void { historyScheduler.schedule(); }
 export function persistNow(): void { historyScheduler.flush(); }
@@ -64,4 +66,18 @@ export function loadSession(stored: StoredSession): void {
   renderChanges();
   void refreshUsage();
   prepareRuntime();
+}
+
+let documentChatTried = false;
+
+/** Once per pane: show the last chat held in the open file, if the pane is still empty. Another file's chats are never taken. */
+export async function restoreDocumentChat(): Promise<void> {
+  if (documentChatTried) return;
+  documentChatTried = true;
+  if (app.currentRequestId || app.session.messages.length) return;
+  const documentKey = await currentDocumentUrl();
+  const found = documentKey ? store.latestForDocument(documentKey) : null;
+  if (!found) return;
+  const stored = await store.loadActive(found.id);
+  if (stored && !app.currentRequestId && !app.session.messages.length) loadSession(stored);
 }

@@ -7,7 +7,7 @@ import { BridgeClient } from "../bridge-client.js";
 import { browserView, connectedFiles, ensureWorkspaces, historyNotice, mcpSettings, navigation, providerPicker, recordChange, refreshModelCatalog, refreshUsage, resetWorkspaces, slash, store, thinking, updatePanel, updater } from "./services.js";
 import { append, appendTurnTool, cellLinkOptions, redrawMessages, scrollToEnd, summarize } from "./messages.js";
 import { handleEvent, renderState } from "./events.js";
-import { loadSession } from "./chats.js";
+import { loadSession, restoreDocumentChat } from "./chats.js";
 import { publishWorkbookName, readWorkbookName, refreshSheetNames } from "./workbook.js";
 import { submit } from "./turn.js";
 import { prepareRuntime } from "./prepare.js";
@@ -47,6 +47,7 @@ export function createBridgeClient(): BridgeClient {
           const id = app.restoreChatId; app.restoreChatId = null;
           const restored = await store.loadActive(id); if (restored && !app.currentRequestId) loadSession(restored);
         }
+        await restoreDocumentChat();
       }).catch(error => historyNotice(`History is unavailable: ${error.message}. Trying again automatically.`));
       void mcpSettings.restore();
       void publishWorkbookName();

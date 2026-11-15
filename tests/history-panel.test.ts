@@ -6,7 +6,7 @@ import type { StoredSession } from "../protocol/src/history.js";
 function failureFixture() {
  document.body.innerHTML = '<button id="clear"></button><button id="import"></button><div id="import-list" hidden></div><div id="list"></div><div id="title"></div><div id="meta"></div><div id="transcript"></div><button id="continue"></button><textarea id="input"></textarea>';
  const session: StoredSession = { id: "saved", title: "Saved chat", provider: "copilot", startedAt: 1, updatedAt: 2, messages: [{ kind: "user", text: "keep this" }], changes: [] };
- const store = { list: () => [{ ...session, messageCount: 1, changeCount: 0 }], get: () => session, save() {}, latest: () => null,
+ const store = { list: () => [{ ...session, messageCount: 1, changeCount: 0 }], get: () => session, save() {}, latest: () => null, latestForDocument: () => null,
   refresh: vi.fn(async () => {}), delete: vi.fn(async (_id: string) => {}), clear: vi.fn(async () => {}),
   loadPage: vi.fn(async (_id: string) => ({ session, revision: 1, generation: 0, totalMessages: 1, totalChanges: 0 })) };
  const element = (id: string) => document.getElementById(id)!;
@@ -51,7 +51,7 @@ describe("history errors and acknowledgements", () => {
 it("H04 loads only the latest transcript page for browsing and the full chat only for Continue", async () => {
  document.body.innerHTML = '<button id="clear"></button><button id="import"></button><div id="import-list" hidden></div><div id="list"></div><div id="title"></div><div id="meta"></div><div id="transcript"></div><button id="continue"></button><textarea id="input"></textarea>';
  const session: StoredSession = { id: "saved", title: "saved", provider: "copilot", startedAt: 1, updatedAt: 2, messages: Array.from({ length: 250 }, (_, i) => ({ kind: "user", text: String(i) })), changes: [] };
- const store = { list: () => [{ ...session, messageCount: 250, changeCount: 0 }], get: () => null, save() {}, delete() {}, clear() {}, latest: () => null,
+ const store = { list: () => [{ ...session, messageCount: 250, changeCount: 0 }], get: () => null, save() {}, delete() {}, clear() {}, latest: () => null, latestForDocument: () => null,
  load: vi.fn(async () => session), loadPage: vi.fn(async (_id: string, offset = 0, limit = 100) => ({ session: { ...session, messages: session.messages.slice(offset, offset + limit) }, revision: 1, generation: 0, totalMessages: 250, totalChanges: 0 })) };
  const el = (id: string) => document.getElementById(id)!;
  const loadSession = vi.fn();
