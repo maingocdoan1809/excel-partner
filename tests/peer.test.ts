@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
@@ -112,7 +113,14 @@ describe("a terminal agent asking the assistant of an open file", () => {
   });
 
   it("explains itself when the bridge is not running", async () => {
-    const agent = await terminalAgent(`http://127.0.0.1:${await getFreePort()}`, (() => { const file = path.join(fs.mkdtempSync(path.join(process.env.TEMP ?? ".", "peer-")), "token"); fs.writeFileSync(file, "x"); return file; })());
-    expect(await call(agent, "list_office_files")).toMatchObject({ isError: true, body: { code: "disconnected", message: expect.stringContaining("not reachable") } });
+    const folder = fs.mkdtempSync(path.join(os.tmpdir(), "peer-"));
+    try {
+      const file = path.join(folder, "token");
+      fs.writeFileSync(file, "x");
+      const agent = await terminalAgent(`http://127.0.0.1:${await getFreePort()}`, file);
+      expect(await call(agent, "list_office_files")).toMatchObject({ isError: true, body: { code: "disconnected", message: expect.stringContaining("not reachable") } });
+    } finally {
+      fs.rmSync(folder, { recursive: true, force: true });
+    }
   });
 });
