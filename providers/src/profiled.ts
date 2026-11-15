@@ -4,6 +4,7 @@ import { createRequire } from "node:module";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import type { ProviderCapabilities, ProviderEvent, ProviderId } from "../../protocol/src/index.js";
 import type { LoginAccount, LoginChoice } from "../../protocol/src/provider-login.js";
+import type { TerminalAgentSpec } from "./terminal-agent.js";
 import type { McpEndpoint, ProviderAdapter, ProviderLoginAttempt, ProviderRuntime, SendTurnInput, StartSessionContext } from "./types.js";
 
 export function providerPackageRoot(): string {
@@ -32,7 +33,9 @@ export async function uninstallProvider(provider: ProviderId, env: NodeJS.Proces
 }
 
 /** An adapter class together with what it can do, known before any CLI is looked at. */
-export interface AdapterClass { new (runtime: ProviderRuntime): ProviderAdapter; readonly capabilities: ProviderCapabilities; readonly clientToolNotes?: string }
+export interface AdapterClass { new (runtime: ProviderRuntime): ProviderAdapter; readonly capabilities: ProviderCapabilities; readonly clientToolNotes?: string;
+  /** How the provider's own terminal CLI registers an MCP server; absent when that CLI has no way to do it from here. */
+  readonly terminal?: TerminalAgentSpec }
 
 /**
  * Runs a provider's adapter against the CLI the product installed for it, or the system CLI when it installed none.

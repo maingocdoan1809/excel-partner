@@ -7,6 +7,7 @@ import { crashSummary, CRASH_EXIT_CODE } from "../../shared/src/crash-exit.js";
 import { maintainHistory } from "./history-store.js";
 import { Logger } from "./logger.js";
 import { Bridge } from "./server.js";
+import { registerTerminalAgents } from "./terminal-agents.js";
 import { stopWorkspaceHelper, warmWorkspaceHelper } from "./windows-workspace.js";
 
 const SHUTDOWN_GRACE_MS = 8000;
@@ -48,6 +49,7 @@ async function main(): Promise<void> {
   const { url } = await bridge.listen();
   logger.info("ready", { url, health: `${url}/health` });
   warmWorkspaceHelper();
+  registerTerminalAgents(config, logger);
 
   // History housekeeping (retention policy, daily backup) now and once a day. A failure only skips this run.
   const historyFile = path.join(path.dirname(config.configFile), "history.db");

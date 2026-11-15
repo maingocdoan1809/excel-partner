@@ -297,6 +297,7 @@ const HELP = `Usage: office-partner <command> [addin|gateway|all]
   login      Sign in once for the QA assistant: login <name> <url> [--origin <url>]. Also: sessions, logout <name>.
   knowledge  What the assistant has learned about each system: knowledge [<url>] | show <url> <note> | delete <url> <note> | path.
   scripts    Playwright regression scripts saved per test case: scripts [<url>] | show <url> <case id> | delete <url> <case id> | path.
+  mcp-peer   MCP server for a terminal agent to ask the assistant of an open Office file. Register once: claude mcp add office-partner -- office-partner mcp-peer
   allow-host Let the bridge answer to another hostname/IP (e.g. a WSL IP): allow-host <name> [--remove]; no name lists them.
   update     Install the latest release and refresh both (always the whole package). --from <spec|.tgz> installs that instead.
   uninstall  Stop and remove registration and startup entries.
@@ -360,6 +361,8 @@ async function main() {
   if (command === "login" || command === "sessions" || command === "logout") { await testSessions(command, args.slice(1)); return; }
   if (command === "knowledge") { await siteKnowledge(args.slice(1)); return; }
   if (command === "scripts") { await testScripts(args.slice(1)); return; }
+  // stdout belongs to the MCP protocol: nothing else may print here.
+  if (command === "mcp-peer") { await import(pathToFileURL(path.join(root, "dist", "excel_mcp", "src", "peer-cli.js")).href); return; }
   if (command === "allow-host") { allowHost(args.slice(1).filter(arg => !arg.startsWith("--")), args.includes("--remove")); return; }
   const flags = args.filter(arg => arg.startsWith("--"));
   const positional = args.filter(arg => !arg.startsWith("--"));

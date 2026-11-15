@@ -26,6 +26,7 @@ import { TestingRoutes } from "./routes/testing.js";
 import { WorkspaceRoutes } from "./routes/workspaces.js";
 import { HistoryRoutes } from "./routes/history.js";
 import { SystemRoutes } from "./routes/system.js";
+import { PeerRoutes } from "./routes/peer.js";
 import { SavedReferences } from "./saved-references.js";
 import { loadAdminPolicy, type LoadedPolicy } from "./policy.js";
 import { WorkbookSessions } from "./workbook-sessions.js";
@@ -101,7 +102,7 @@ export class Bridge {
   private readonly updater: UpdateService | null;
   private readonly panes: PaneSockets;
   private readonly routes: {
-    files: FileRoutes; mcp: McpRoutes; providers: ProviderRoutes; skills: SkillRoutes; testing: TestingRoutes; workspaces: WorkspaceRoutes; system: SystemRoutes;
+    files: FileRoutes; mcp: McpRoutes; providers: ProviderRoutes; skills: SkillRoutes; testing: TestingRoutes; workspaces: WorkspaceRoutes; system: SystemRoutes; peer: PeerRoutes;
   };
 
   constructor(config: BridgeConfig, options: BridgeOptions = {}) {
@@ -202,7 +203,8 @@ export class Bridge {
       isTrustedRequest: req => this.isTrustedRequest(req), addinBuildId: () => this.addinBuildId(),
     });
     this.routes = {
-      system: new SystemRoutes(this.sessions, this.providers, this.updater, () => this.logins.isBusy),
+      peer: new PeerRoutes({ sessions: this.sessions, delegations, tokenFile: path.join(dataDir, "peer-token.txt") }),
+      system:new SystemRoutes(this.sessions, this.providers, this.updater, () => this.logins.isBusy),
       files: new FileRoutes({ sessions: this.sessions, logger: this.logger, activateWorkbook: options.activateWorkbook ?? activateWorkbook }),
       mcp: new McpRoutes({ sessions: this.sessions, mcpServers: this.mcpServers, discover: discoverMcp }),
       providers: new ProviderRoutes({ sessions: this.sessions, providers: this.providers, logins: this.logins, usage, logger: this.logger, disabled: policy.disabledProviders }),
@@ -293,6 +295,7 @@ export class Bridge {
     if (this.maintenance && url.pathname.startsWith("/session/") && method !== "GET") return sendJson(res, 503, { error: "Office Partner is switching releases. Retry after it reconnects." });
     if (url.pathname === "/session/history") return this.history.handle(req, res, url);
     if (url.pathname === "/session/system") return this.routes.system.handle(req, res, url);
+    if (url.pathname.startsWith("/peer/")) return this.routes.peer.handle(req, res, url);
 
     if (method === "POST" && ["/admin/maintenance", "/admin/resume", "/admin/shutdown"].includes(url.pathname)) {
       const configured = this.controlToken, supplied = req.headers["x-office-partner-control"];

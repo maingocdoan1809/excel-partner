@@ -9,6 +9,7 @@ import {
 import { AsyncQueue } from "../async-queue.js";
 import { BaseCliAdapter, cliEnvironment, execCli, type CliProbe } from "../base.js";
 import type { CliLoginSpec } from "../login.js";
+import { mcpAddRemove, type TerminalAgentSpec } from "../terminal-agent.js";
 import { JsonRpcPeer } from "../jsonrpc.js";
 import { buildTurnPrompt, SYSTEM_PROMPT } from "../prompt.js";
 import { MCP_SERVER_NAME, type ProviderModelCatalog, type SendTurnInput, type StartSessionContext } from "../types.js";
@@ -88,6 +89,8 @@ export class CodexAdapter extends BaseCliAdapter {
   };
 
   static readonly logoutArgs = ["logout"];
+
+  static readonly terminal: TerminalAgentSpec = mcpAddRemove("codex");
 
   static readonly capabilities: ProviderCapabilities = {
     streaming: true,

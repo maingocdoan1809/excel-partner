@@ -51,7 +51,7 @@ export interface TestingOverview {
 }
 export interface ModelCatalog { models: Array<{ id: string; name: string }>; defaultModelId: string | null }
 
-interface ConnectedFileApproval { fileId?: string; name?: string; host?: string; action?: "message"; text?: string }
+interface ConnectedFileApproval { fileId?: string; name?: string; host?: string; action?: "message"; text?: string; /** Set when a program on this computer, not another file's assistant, sends the request to this file. */ from?: string }
 
 /** What a file open in each Office application is called, for the permission questions. */
 const FILE_KINDS: Record<string, string> = { excel: "workbook", word: "document", powerpoint: "presentation" };
@@ -581,6 +581,11 @@ export class BridgeClient {
       // The person must see every character that is sent: show all of it, and refuse what cannot be shown whole.
       const text = String(args.text ?? "");
       if (text.length > MAX_DELEGATED_TEXT) return Promise.resolve(false);
+      if (args.from) {
+        return this.askPermission("Let a terminal assistant work in this file?",
+          `${String(args.from).slice(0, 80)} wants this ${kind}'s assistant to do the request below. It works here with this ${kind}'s own tools and permission setting, and what it does can include changing this ${kind}.`,
+          "Allow request", timeoutMs, `${name}\n\n${text}`);
+      }
       return this.askPermission("Send a request to another file?",
         `The assistant wants the assistant of another open ${kind} to do this. It works in that file with that file's own tools and permission setting, so changes may be approved in that window. What it does can include changing that file.`,
         "Send request", timeoutMs, `${name}\n\n${text}`);

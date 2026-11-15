@@ -28,6 +28,7 @@ excel-partner.config.json
 /mcp-servers.json.tmp
 
 # Durable local history and its recovery copies
+/peer-token.txt
 /history.db
 /history.db-*
 

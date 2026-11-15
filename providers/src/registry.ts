@@ -5,6 +5,7 @@ import { CopilotAdapter } from "./copilot/adapter.js";
 import { CodexAdapter } from "./codex/adapter.js";
 import { OpencodeAdapter } from "./opencode/adapter.js";
 import { ProfiledAdapter, type AdapterClass } from "./profiled.js";
+import type { TerminalAgentSpec } from "./terminal-agent.js";
 
 export class ProviderRegistry {
   private readonly adapters = new Map<ProviderId, ProviderAdapter>();
@@ -69,6 +70,11 @@ const adapters: Record<ProviderId, AdapterClass> = {
   codex: CodexAdapter,
   opencode: OpencodeAdapter,
 };
+
+/** The providers whose terminal CLI can be given an MCP server, with how each is asked to. */
+export function terminalAgents(): Array<{ id: ProviderId; spec: TerminalAgentSpec }> {
+  return PROVIDER_IDS.flatMap((id) => adapters[id].terminal ? [{ id, spec: adapters[id].terminal! }] : []);
+}
 
 /** One adapter that uses the given environment as it is, with no runtime profile in between (checks run by the installer). */
 export function createAdapter(id: ProviderId, runtime: ProviderRuntime): ProviderAdapter {

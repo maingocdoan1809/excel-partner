@@ -100,6 +100,12 @@ What to expect when something is done in the other file:
 - Its task pane must be open: a file without the pane is not listed. A file that was closed and reopened gets a new id, so the assistant lists again.
 - What is read or sent goes to the AI provider of the chat that handles it. Replies and cell contents from the other file are data, not instructions.
 
+**From a terminal agent.** Claude Code, Copilot CLI and Codex CLI can ask the assistant of an open file the same way. Nothing to set up: when Office Partner starts it finds those CLIs on your computer and registers an `office-partner` MCP server in each (user level, so it works in every folder). It adds two tools, `list_office_files` and `ask_office_file`. The request runs as a normal turn in that file's chat, with that file's provider and permission setting, and the reply goes back to the terminal.
+- A CLI that already has the registration is left alone, so if you remove it (`claude mcp remove office-partner`) it stays removed until a new release moves the files. To turn the automatic registration off, set `OFFICE_PARTNER_TERMINAL_AGENTS=0` or put `{"disabled": true}` in `terminal-agents.json` in the data folder.
+- OpenCode is not registered automatically: its terminal CLI has no non-interactive way to add a server. You can add `office-partner mcp-peer` yourself in its settings.
+- The person at that window is asked first and sees who is asking and the exact text (Auto mode allows it, as for another file's assistant).
+- The terminal proves itself with `peer-token.txt` in the data folder, which only this user can read; the bridge also refuses other users' processes. Nothing is opened to the network.
+
 ## Testing from your own test-case file
 
 Open any test-case workbook (your company's format, any folder) and let the assistant test it. Nothing is set up per project.

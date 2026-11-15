@@ -18,6 +18,7 @@ import { acpPermissionOutcome, contentText, toolNameOf } from "../acp.js";
 import { AsyncQueue } from "../async-queue.js";
 import { BaseCliAdapter, cliEnvironment, execCli, type CliProbe } from "../base.js";
 import { ProviderLoginError, type CliLoginSpec } from "../login.js";
+import { mcpAddRemove, type TerminalAgentSpec } from "../terminal-agent.js";
 import { JsonRpcPeer } from "../jsonrpc.js";
 import { buildTurnPrompt, SYSTEM_PROMPT } from "../prompt.js";
 import { MCP_SERVER_NAME, type ProviderModelCatalog, type SendTurnInput, type StartSessionContext } from "../types.js";
@@ -101,6 +102,8 @@ export class CopilotAdapter extends BaseCliAdapter {
     },
     instructions: "Enter the code on GitHub. Office Partner will update when you finish signing in.",
   };
+
+  static readonly terminal: TerminalAgentSpec = mcpAddRemove("copilot");
 
   static readonly capabilities: ProviderCapabilities = {
     streaming: true,

@@ -12,6 +12,7 @@ import type {
 } from "../../../protocol/src/index.js";
 import { BaseCliAdapter, cliEnvironment, execCli, type CliProbe } from "../base.js";
 import type { CliLoginSpec } from "../login.js";
+import type { TerminalAgentSpec } from "../terminal-agent.js";
 import { buildTurnPrompt, SYSTEM_PROMPT } from "../prompt.js";
 import { MCP_SERVER_NAME, type McpEndpoint, type ProviderModelCatalog, type SendTurnInput, type StartSessionContext } from "../types.js";
 import { ensureWorkspaceDir } from "../workspace.js";
@@ -165,6 +166,13 @@ export class ClaudeAdapter extends BaseCliAdapter {
   };
 
   static readonly logoutArgs = ["auth", "logout"];
+
+  /** `claude mcp add --scope user`: available in every folder the person works in. */
+  static readonly terminal: TerminalAgentSpec = {
+    command: "claude",
+    add: server => ["mcp", "add", "--scope", "user", server.name, ...Object.entries(server.env).flatMap(([key, value]) => ["-e", `${key}=${value}`]), "--", server.command, ...server.args],
+    remove: name => ["mcp", "remove", "--scope", "user", name],
+  };
 
   static readonly capabilities: ProviderCapabilities = {
     streaming: true,
