@@ -13,11 +13,11 @@ const BUDGET: Record<HostId, { standard: number; everything: number }> = {
   powerpoint: { standard: 35_000, everything: 42_000 },
 };
 const EVERYTHING = { webSearch: true, playwright: true, connectedFiles: true };
-/** The same, when the bridge offers most tools by summary (`toolSchemas: "lazy"`). Measured: excel 19.8k / 23.0k, word 14.9k / 16.1k, powerpoint 11.9k / 13.4k. */
+/** The same, when the bridge offers every tool by summary (`toolSchemas: "lazy"`). Measured: excel 14.4k / 18.6k, word 11.1k / 12.5k, powerpoint 10.8k / 12.5k. */
 const LAZY_BUDGET: Record<HostId, { standard: number; everything: number }> = {
-  excel: { standard: 20_000, everything: 23_500 },
-  word: { standard: 15_500, everything: 17_000 },
-  powerpoint: { standard: 12_500, everything: 14_000 },
+  excel: { standard: 15_000, everything: 19_500 },
+  word: { standard: 11_500, everything: 13_000 },
+  powerpoint: { standard: 11_200, everything: 13_000 },
 };
 
 describe("tool catalog budget", () => {

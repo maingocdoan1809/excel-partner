@@ -85,7 +85,15 @@ ${otherFiles(connectedFiles)}
  * Without a user prompt a Word or PowerPoint session gets a self-contained prompt, since some providers replace their own
  * prompt with this one; with a user prompt the host rules are appended to it.
  */
-export function hostSystemPrompt(host: Host, userPrompt: string, options: { connectedFiles?: boolean; officeJs?: boolean } = {}): string {
+export function hostSystemPrompt(host: Host, userPrompt: string, options: { connectedFiles?: boolean; officeJs?: boolean; lazySchemas?: boolean } = {}): string {
+  const prompt = hostPrompt(host, userPrompt, options);
+  return options.lazySchemas === true ? `${prompt.trimEnd()}${prompt.trim() ? "\n\n" : ""}${LAZY_TOOLS_RULE}` : prompt;
+}
+
+/** With lazy tool schemas the model is told how the tool list works: the one step that keeps every call as exact as with full definitions. */
+export const LAZY_TOOLS_RULE = "# Tools\n- Most tools are listed by name and a one-line summary only. Before you use a tool for the first time in this conversation, call get_tool_definition once with the names of every tool you expect to need. A call made without its definition is not run (the answer carries the definition), and an argument the tool does not have is refused.";
+
+function hostPrompt(host: Host, userPrompt: string, options: { connectedFiles?: boolean; officeJs?: boolean }): string {
   if (host === "excel") return userPrompt;
   const intro = host === "word" ? WORD_INTRO : PPT_INTRO;
   const rules = (host === "word" ? WORD_RULES : PPT_RULES)(options.connectedFiles === true, options.officeJs !== false);

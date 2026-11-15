@@ -165,8 +165,8 @@ Chạy lại Bước 0 đến Bước 10 ở trên: kết quả phải giống t
 Chạy sau khi bật `BRIDGE_TOOL_SCHEMAS=lazy` (hoặc `"toolSchemas": "lazy"` trong config.json) và khởi động lại bridge. Lặp lại với TỪNG provider (Claude, Copilot, Codex, OpenCode): cách mỗi CLI xử lý tool có schema mở là điều test tự động không kiểm chứng được.
 
 1. Mở một chat mới ở Excel và nhờ: "Tô nền đỏ các ô lớn hơn 100 ở cột C bằng conditional formatting". Quan sát: assistant gọi get_tool_definition trước (xem thẻ tool), rồi conditional_format đúng tham số ngay lần đầu. Ghi lại số lượt gọi tool.
-2. Nhờ một việc chỉ dùng tool đã có sẵn schema (đọc A1:C10 rồi ghi tổng vào D1): không được gọi get_tool_definition.
-3. Nhờ việc dùng nhiều tool lạ cùng lúc (định dạng + data validation + page layout): phải lấy nhiều tên trong MỘT lần get_tool_definition.
+2. Nhờ một việc chỉ dùng tool không có tham số (ví dụ "liệt kê các sheet" → get_sheets): không được gọi get_tool_definition. Rồi nhờ đọc A1:C10: assistant phải lấy định nghĩa read_range (trong một lần cùng các tool khác nó dự định dùng) trước khi gọi.
+3. Nhờ việc dùng nhiều tool cùng lúc (định dạng + data validation + page layout): phải lấy nhiều tên trong MỘT lần get_tool_definition. Nếu nó gọi thẳng mà chưa lấy: lần gọi đầu bị từ chối kèm định nghĩa ("Not run: ..."), lần thứ hai chạy đúng. Ghi lại cả hai trường hợp.
 4. Bảo assistant gọi get_tool_definition với một tên sai (ví dụ "conditionalformat" hoặc "sort_rnge"): phải trả đúng tool hoặc gợi ý tên gần nhất; với tên vô nghĩa: trả toàn bộ danh sách tool.
-5. Cố ý để assistant gọi một tool lạ với tham số sai: lỗi phải kèm schema của tool đó, và lần thử lại phải đúng.
+5. Cố ý bảo assistant gọi một tool với một tham số không tồn tại (ví dụ format_range với backgroundColour): phải bị từ chối, nêu tên tham số thừa và các tham số hợp lệ, và không tool nào chạy với tham số bị bỏ lặng lẽ.
 6. So sánh với chế độ full (cùng yêu cầu 1): số lượt gọi tool, tổng token (Usage) và `node scripts/usage-tools.mjs`. Chỉ đổi mặc định sang lazy khi lượt gọi và token thực sự giảm.

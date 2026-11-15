@@ -9,10 +9,10 @@ import { Bridge } from "../bridge/src/server.js";
 import { loadConfig } from "../bridge/src/config.js";
 import { MockAdapter } from "../providers/src/mock.js";
 import { ProviderRegistry } from "../providers/src/registry.js";
-import { HOST_IDS, parseToolInputForHost, toolGroupsFromEnv, type HostId, type ToolGroups } from "../protocol/src/index.js";
+import { HOST_IDS, parseToolInputForHost, toolGroupsFromEnv, type HostId, type ToolGroups, type ToolResult } from "../protocol/src/index.js";
 import { describableTools, officeToolCatalog, toolCatalogChars } from "../shared/src/catalog.js";
 import {
-  GET_TOOL_DEFINITION, HOT_TOOLS, MAX_DEFINITIONS, MAX_SUMMARY_CHARS, TOOL_SUMMARIES, firstSentence, lookupTools, normalizeToolName, suggestToolNames, summaryOf,
+  DefinitionGate, GET_TOOL_DEFINITION, givenToolNames, MAX_DEFINITIONS, MAX_SUMMARY_CHARS, TOOL_SUMMARIES, firstSentence, hasParameters, lookupTools, needsLookup, normalizeToolName, suggestToolNames, summaryOf,
 } from "../shared/src/lazy-tools.js";
 import { PaneClient, getFreePort } from "./helpers.js";
 
@@ -41,19 +41,25 @@ describe("one-line summaries", () => {
     for (const name of Object.keys(TOOL_SUMMARIES)) expect(names.has(name), `stale summary: ${name}`).toBe(true);
   });
 
-  it("lists only tools that exist among the hot tools", () => {
-    for (const host of HOST_IDS) for (const name of HOT_TOOLS[host]) expect(full(host).some(tool => tool.name === name), `${host}: ${name}`).toBe(true);
+  it("leaves a tool that takes no arguments with its whole definition: there is nothing to look up", () => {
+    for (const host of HOST_IDS) {
+      const lazy = officeToolCatalog(host, true, LAZY);
+      for (const tool of full(host).filter(candidate => !hasParameters(candidate))) {
+        expect(lazy.find(candidate => candidate.name === tool.name), `${host}: ${tool.name}`).toMatchObject({ description: tool.description, inputSchema: tool.inputSchema });
+      }
+    }
+    expect(full("excel").filter(tool => !hasParameters(tool)).map(tool => tool.name)).toContain("get_sheets");
   });
 });
 
 describe("lazy catalog", () => {
-  it.each(HOST_IDS)("%s: stubs everything but the hot tools, keeps annotations, and offers get_tool_definition", host => {
+  it.each(HOST_IDS)("%s: offers every tool that takes arguments by summary only, keeps annotations, and adds get_tool_definition", host => {
     const lazy = officeToolCatalog(host, true, LAZY);
     const fullCatalog = full(host);
     expect(lazy.map(tool => tool.name).sort()).toEqual([...fullCatalog.map(tool => tool.name), GET_TOOL_DEFINITION].sort());
     for (const tool of lazy) {
       const real = describableTools(host, true, EVERYTHING).find(candidate => candidate.name === tool.name)!;
-      if (tool.name === GET_TOOL_DEFINITION || HOT_TOOLS[host].includes(tool.name)) {
+      if (!needsLookup(real)) {
         expect(tool.inputSchema, tool.name).toEqual(real.inputSchema);
         expect(tool.description, tool.name).toBe(real.description);
       } else {
@@ -62,6 +68,7 @@ describe("lazy catalog", () => {
         expect(tool.annotations, tool.name).toEqual(real.annotations);
       }
     }
+    expect(lazy.find(tool => tool.name === GET_TOOL_DEFINITION)!.inputSchema).toMatchObject({ properties: { names: expect.any(Object) } });
   });
 
   it("is unchanged, and has no get_tool_definition, when schemas are full", () => {
@@ -140,7 +147,7 @@ describe("finding a tool by a name that is nearly right", () => {
 });
 
 async function connect(capabilities: ToolGroups) {
-  const forward = vi.fn(async () => ({ ok: true as const, data: { forwarded: true } }));
+  const forward = vi.fn(async (_tool: string, _args?: unknown): Promise<ToolResult> => ({ ok: true, data: { forwarded: true } }));
   const server = createExcelMcpServer({ call: forward }, { allowOptInTools: true, capabilities });
   const client = new Client({ name: "test", version: "1" });
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
@@ -149,28 +156,129 @@ async function connect(capabilities: ToolGroups) {
   return { client, forward, close: async () => { await client.close(); await server.close(); } };
 }
 const textOf = (result: unknown) => ((result as { content: Array<{ text: string }> }).content[0]!.text);
+/** The error message itself: the text of a result is JSON, which escapes the quotes inside it. */
+const messageOf = (result: unknown) => (JSON.parse(textOf(result)) as { error: { message: string } }).error.message;
+
+describe("DefinitionGate", () => {
+  const tools = describableTools("excel", true, LAZY);
+  const rangeArgs = { address: "A1" };
+
+  it("does not run a tool whose definition was not read, and gives the definition instead", () => {
+    const gate = new DefinitionGate(tools);
+    const refusal = gate.refuse("read_range", rangeArgs)!;
+    expect(refusal).toContain("Not run: read_range was offered by name only");
+    expect(refusal).toContain("Definition of read_range: {");
+    expect(refusal).toContain(GET_TOOL_DEFINITION);
+    expect(gate.refuse("read_range", rangeArgs)).toBeNull(); // the refusal carried the definition: it counts as read
+  });
+
+  it("lets a tool through once get_tool_definition has given it, and never gates tools that need no lookup", () => {
+    const gate = new DefinitionGate(tools);
+    gate.noteGiven(["write_range"]);
+    expect(gate.refuse("write_range", {})).toBeNull();
+    expect(gate.refuse("get_sheets", {})).toBeNull();
+    expect(gate.refuse(GET_TOOL_DEFINITION, {})).toBeNull();
+    expect(gate.refuse("ext_server__tool", {})).toBeNull();
+  });
+
+  it("asks for the definitions of every tool inside a batch, in one answer", () => {
+    const gate = new DefinitionGate(tools);
+    gate.noteGiven(["batch", "write_range"]);
+    const refusal = gate.refuse("batch", { operations: [{ tool: "write_range", input: {} }, { tool: "format_range", input: {} }, { tool: "sort_range", input: {} }] })!;
+    expect(refusal).toContain("format_range, sort_range were offered by name only");
+    expect(refusal).not.toContain("Definition of write_range");
+    expect(gate.refuse("batch", { operations: [{ tool: "sort_range", input: {} }] })).toBeNull();
+  });
+
+  it("refuses an argument the tool does not have, naming what it takes, also inside a batch", () => {
+    const gate = new DefinitionGate(tools);
+    gate.noteGiven(["format_range", "batch", "read_range"]);
+    expect(gate.unknownArguments("read_range", { address: "A1", adress: "B2" })).toMatch(/read_range has no argument 'adress'. It takes: .*address/);
+    expect(gate.unknownArguments("read_range", rangeArgs)).toBeNull();
+    expect(gate.unknownArguments("batch", { operations: [{ tool: "read_range", input: rangeArgs }, { tool: "read_range", input: { addres: "A1" } }] })).toContain("Operation 2: read_range has no argument 'addres'");
+    expect(gate.unknownArguments("get_sheets", { anything: 1 })).toBeNull();
+  });
+
+  it("knows which definitions an answer gave", () => {
+    expect(givenToolNames({ definitions: [{ name: "a" }, { name: "b" }, {}], unmatched: [] })).toEqual(["a", "b"]);
+    expect(givenToolNames(null)).toEqual([]);
+    expect(givenToolNames({ tools: [] })).toEqual([]);
+  });
+});
 
 describe("MCP server with lazy schemas", () => {
-  it("lists stubs, and a call with bad arguments gets the schema back", async () => {
+  it("lists every tool by summary, and does not run a call made before its definition was read", async () => {
     const { client, forward, close } = await connect(LAZY);
     try {
       const tools = (await client.listTools()).tools;
-      expect(tools.find(tool => tool.name === "read_range")!.inputSchema).toMatchObject({ properties: expect.any(Object) });
-      expect(tools.find(tool => tool.name === "set_cells")!.inputSchema).toEqual({ type: "object", additionalProperties: true });
-      const bad = await client.callTool({ name: "set_cells", arguments: {} });
-      expect(bad.isError).toBe(true);
-      expect(textOf(bad)).toContain("Input schema of set_cells");
-      expect(textOf(bad)).toContain("\"cells\"");
+      expect(tools.find(tool => tool.name === "read_range")!.inputSchema).toEqual({ type: "object", additionalProperties: true });
+      expect(tools.find(tool => tool.name === GET_TOOL_DEFINITION)!.inputSchema).toMatchObject({ properties: { names: expect.any(Object) } });
+      const first = await client.callTool({ name: "set_cells", arguments: { cells: { A1: { value: 1 } } } });
+      expect(first.isError).toBe(true);
+      expect(messageOf(first)).toContain("Not run: set_cells");
+      expect(messageOf(first)).toContain("Definition of set_cells");
+      expect(messageOf(first)).toContain('"cells"');
+      expect(forward).not.toHaveBeenCalled();
+      // The refusal gave the definition: the same call now runs.
+      expect((await client.callTool({ name: "set_cells", arguments: { cells: { A1: { value: 1 } } } })).isError ?? false).toBe(false);
+      expect(forward).toHaveBeenCalledTimes(1);
+    } finally { await close(); }
+  });
+
+  it("counts a get_tool_definition answer as reading the definitions, and does not repeat the schema on a later mistake", async () => {
+    const { client, forward, close } = await connect(LAZY);
+    try {
+      forward.mockImplementation(async (tool: string) => tool === GET_TOOL_DEFINITION ? { ok: true as const, data: { definitions: [{ name: "set_cells" }], unmatched: [] } } : { ok: true as const, data: { forwarded: true } });
+      await client.callTool({ name: GET_TOOL_DEFINITION, arguments: { names: ["set_cells"] } });
+      const mistake = await client.callTool({ name: "set_cells", arguments: {} });
+      expect(mistake.isError).toBe(true);
+      expect(messageOf(mistake)).toContain("invalid arguments for set_cells");
+      expect(messageOf(mistake)).not.toContain("Definition of");
+      expect(forward).toHaveBeenCalledTimes(1);
+      expect((await client.callTool({ name: "set_cells", arguments: { cells: { A1: { value: 1 } } } })).isError ?? false).toBe(false);
+    } finally { await close(); }
+  });
+
+  it("refuses a misspelt argument instead of running the call without it", async () => {
+    const { client, forward, close } = await connect(LAZY);
+    try {
+      await client.callTool({ name: "format_range", arguments: {} }); // reads the definition
+      forward.mockClear();
+      const result = await client.callTool({ name: "format_range", arguments: { address: "A1", format: { bold: true }, backgroundColour: "#FF0000" } });
+      expect(result.isError).toBe(true);
+      expect(messageOf(result)).toContain("format_range has no argument 'backgroundColour'. It takes: sheet, address, format.");
       expect(forward).not.toHaveBeenCalled();
     } finally { await close(); }
   });
 
-  it("does not repeat a schema the model already has, in full mode or for a hot tool", async () => {
-    for (const [capabilities, tool] of [[LAZY, "read_range"], [EVERYTHING, "set_cells"]] as const) {
-      const { client, close } = await connect(capabilities);
-      try { expect(textOf(await client.callTool({ name: tool, arguments: { bogus: 1 } }))).not.toContain("Input schema of"); }
-      finally { await close(); }
-    }
+  it("runs a tool that takes no arguments at once", async () => {
+    const { client, forward, close } = await connect(LAZY);
+    try {
+      expect((await client.callTool({ name: "get_sheets", arguments: {} })).isError ?? false).toBe(false);
+      expect(forward).toHaveBeenCalledWith("get_sheets", expect.anything());
+    } finally { await close(); }
+  });
+
+  it("needs the definitions of the tools inside a batch too", async () => {
+    const { client, forward, close } = await connect(LAZY);
+    try {
+      await client.callTool({ name: "batch", arguments: { operations: [{ tool: "write_range", input: { address: "A1", values: [[1]] } }] } });
+      const result = await client.callTool({ name: "batch", arguments: { operations: [{ tool: "write_range", input: { address: "A1", values: [[1]] } }] } });
+      expect(result.isError ?? false).toBe(false);
+      expect(forward).toHaveBeenCalledTimes(1);
+    } finally { await close(); }
+  });
+
+  it("does nothing different when definitions are full: no gate, and no extra argument check", async () => {
+    const { client, forward, close } = await connect(EVERYTHING);
+    try {
+      const result = await client.callTool({ name: "set_cells", arguments: {} });
+      expect(result.isError).toBe(true);
+      expect(textOf(result)).not.toContain("Not run");
+      expect(forward).not.toHaveBeenCalled();
+      await client.callTool({ name: "read_range", arguments: { address: "A1", extra: 1 } });
+      expect(forward).toHaveBeenCalledTimes(1);
+    } finally { await close(); }
   });
 
   it("suggests the right name when a tool does not exist", async () => {

@@ -1,5 +1,6 @@
 import { toolResultToMcp } from "../../shared/src/results.js";
-import { officeToolCatalog, schemaHintFor, unknownToolHint } from "../../shared/src/catalog.js";
+import { describableTools, officeToolCatalog, unknownToolHint } from "../../shared/src/catalog.js";
+import { DefinitionGate, GET_TOOL_DEFINITION, givenToolNames } from "../../shared/src/lazy-tools.js";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import {
   CallToolRequestSchema,
@@ -33,6 +34,8 @@ export function createExcelMcpServer(forwarder: ToolForwarder, options: ExcelMcp
   const allowOptIn = options.allowOptInTools ?? false;
   const groups = options.capabilities ?? {};
   const exposed = new Set<string>(exposedToolNamesForHost(host, allowOptIn, groups));
+  // With lazy schemas, what the model has been told about each tool in this conversation (see DefinitionGate).
+  const gate = groups.lazySchemas === true ? new DefinitionGate(describableTools(host, allowOptIn, groups)) : null;
   const server = new Server(SERVER_INFO, { capabilities: { tools: {} } });
 
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
@@ -49,6 +52,9 @@ export function createExcelMcpServer(forwarder: ToolForwarder, options: ExcelMcp
       return fail({ code: "unknown_tool", message: `unknown tool '${name}'.${unknownToolHint(host, allowOptIn, groups, name)}` });
     }
 
+    const refusal = gate?.refuse(name, request.params.arguments) ?? gate?.unknownArguments(name, request.params.arguments);
+    if (refusal) return fail({ code: "invalid_arguments", message: refusal });
+
     let parsed: unknown;
     try {
       parsed = parseToolInputForHost(host, name, request.params.arguments);
@@ -56,7 +62,7 @@ export function createExcelMcpServer(forwarder: ToolForwarder, options: ExcelMcp
       if (error instanceof ZodError) {
         return fail({
           code: "invalid_arguments",
-          message: `invalid arguments for ${name}.${schemaHintFor(host, allowOptIn, groups, name)}`,
+          message: `invalid arguments for ${name}`,
           detail: error.issues,
         });
       }
@@ -64,6 +70,7 @@ export function createExcelMcpServer(forwarder: ToolForwarder, options: ExcelMcp
     }
 
     const result = await forwarder.call(name, parsed);
+    if (gate && name === GET_TOOL_DEFINITION && result.ok) gate.noteGiven(givenToolNames(result.data));
     return toolResultToMcp(result);
   });
 

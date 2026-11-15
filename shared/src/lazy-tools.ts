@@ -3,19 +3,13 @@ import type { JsonSchema, ToolDefinition } from "./tool-definitions.js";
 
 /**
  * Lazy tool schemas. Every tool is still registered with the provider (so it can be called by its own name, shows its own
- * approval card and keeps its read/write annotations), but all except a few carry only a one-line summary and an open input
- * schema. The model asks `get_tool_definition` for the real schema before first use; a wrong call gets the schema back in
- * its error, so skipping that step costs one retry, not a failure.
+ * approval card and keeps its read/write annotations), but each carries only a one-line summary and an open input schema.
+ * The model asks `get_tool_definition` for the real schema before first use. A tool that takes no arguments has nothing
+ * to look up, so it keeps its whole definition. Quality is protected by `DefinitionGate`: a tool whose definition was not
+ * read is not run, and an argument the schema does not have is refused, never silently dropped.
  */
 
 export const GET_TOOL_DEFINITION = "get_tool_definition";
-
-/** Tools that keep their full schema in lazy mode: what nearly every request on that host starts with. */
-export const HOT_TOOLS: Readonly<Record<HostId, readonly string[]>> = {
-  excel: ["get_selection", "get_sheets", "read_range", "write_range", "search_data", "set_formula", "format_range"],
-  word: ["get_selection", "get_doc_outline", "read_doc_section", "edit_doc_text", "edit_doc_paragraphs"],
-  powerpoint: ["get_selection", "get_presentation_metadata", "list_slide_shapes", "read_slide_text", "edit_slide_text"],
-};
 
 /** The open input schema of a stub: anything is accepted by the provider and checked by the real schema on our side. */
 const OPEN_SCHEMA: JsonSchema = { type: "object", additionalProperties: true };
@@ -90,11 +84,18 @@ export function summaryOf(tool: Pick<Described, "name" | "description">): string
 
 /** The definition a lazy catalog offers in place of the real one. Annotations stay: providers use them for approval. */
 export function stubOf(tool: ToolDefinition): ToolDefinition {
+  if (!needsLookup(tool)) return tool;
   return { ...tool, description: `${summaryOf(tool)} Call ${GET_TOOL_DEFINITION} before first use.`, inputSchema: OPEN_SCHEMA };
 }
 
-export function isHotTool(host: HostId, name: string): boolean {
-  return name === GET_TOOL_DEFINITION || HOT_TOOLS[host].includes(name);
+/** Whether the tool takes any arguments: one that does not has nothing to look up. */
+export function hasParameters(tool: Pick<ToolDefinition, "inputSchema">): boolean {
+  return Object.keys(tool.inputSchema.properties ?? {}).length > 0;
+}
+
+/** Whether a lazy catalog offers this tool by summary only, so its definition must be read before it is used. */
+export function needsLookup(tool: Pick<ToolDefinition, "name" | "inputSchema">): boolean {
+  return tool.name !== GET_TOOL_DEFINITION && hasParameters(tool);
 }
 
 // --- Finding a tool from a name the model may have got slightly wrong -----------------------------------------------------
@@ -187,4 +188,71 @@ export function lookupTools(requested: readonly string[], full: readonly Describ
   } else if (unmatched.length) result.note = `Not found: ${unmatched.map(item => item.input).join(", ")}. See suggestions for the closest tools.`;
   if (leftOut) result.note = `${result.note ? result.note + " " : ""}${leftOut} more tool(s) were left out to keep this short: ask for them in another call.`;
   return result;
+}
+
+// --- Keeping quality: a tool is not run on arguments the model could only have guessed -----------------------------------
+
+/** The names in a `get_tool_definition` answer: the tools whose definitions the model now has. */
+export function givenToolNames(data: unknown): string[] {
+  const definitions = data && typeof data === "object" ? (data as { definitions?: unknown }).definitions : undefined;
+  return Array.isArray(definitions) ? definitions.map((definition) => (definition as { name?: unknown } | null)?.name).filter((name): name is string => typeof name === "string") : [];
+}
+
+const asRecord = (value: unknown): Record<string, unknown> => (value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {});
+
+/**
+ * One conversation's side of lazy schemas. A tool offered by summary is not run until its definition has been given to the
+ * model (by `get_tool_definition`, or by the refusal itself, which carries it), so the arguments are never a guess from a
+ * one-line summary; and an argument the tool does not have is refused rather than dropped, which the schema validation
+ * would otherwise do without a word. With full definitions in the catalog (the default) none of this applies.
+ */
+export class DefinitionGate {
+  private readonly given = new Set<string>();
+  private readonly byName: Map<string, Described>;
+
+  constructor(tools: readonly Described[]) {
+    this.byName = new Map(tools.map((tool) => [tool.name, tool] as const));
+  }
+
+  /** The model now has these definitions. */
+  noteGiven(names: Iterable<string>): void {
+    for (const name of names) this.given.add(name);
+  }
+
+  /** The tools a call uses: the one called, and the ones inside a `batch`. */
+  private used(name: string, args: unknown): string[] {
+    const inside = name === "batch" && Array.isArray(asRecord(args).operations) ? (asRecord(args).operations as unknown[]).map((operation) => asRecord(operation).tool) : [];
+    return [...new Set([name, ...inside.filter((tool): tool is string => typeof tool === "string")])];
+  }
+
+  /** The text to answer with instead of running a call made without the definitions it needs, or null when it may run. The definitions are in it, and count as given. */
+  refuse(name: string, args: unknown): string | null {
+    const unread = this.used(name, args).map((tool) => this.byName.get(tool)).filter((tool): tool is Described => tool !== undefined && needsLookup(tool) && !this.given.has(tool.name));
+    if (!unread.length) return null;
+    this.noteGiven(unread.map((tool) => tool.name));
+    const names = unread.map((tool) => tool.name).join(", ");
+    return `Not run: ${names} ${unread.length > 1 ? "were" : "was"} offered by name only and you have not read ${unread.length > 1 ? "their definitions" : "its definition"} yet. `
+      + `${unread.map((tool) => `Definition of ${tool.name}: ${JSON.stringify(tool.inputSchema)}`).join(" ")} Check your arguments against ${unread.length > 1 ? "them" : "it"} and call again. `
+      + `Next time ask ${GET_TOOL_DEFINITION} for every tool you will need in one call.`;
+  }
+
+  /** An argument the tool does not take (also inside a batch): refused, so that a misspelt option is not silently ignored. */
+  unknownArguments(name: string, args: unknown): string | null {
+    const check = (tool: string, given: unknown, where: string): string | null => {
+      const definition = this.byName.get(tool);
+      if (!definition || !needsLookup(definition) || given === undefined) return null;
+      const taken = Object.keys(definition.inputSchema.properties ?? {});
+      const extra = Object.keys(asRecord(given)).filter((key) => !taken.includes(key));
+      return extra.length ? `${where}${tool} has no argument ${extra.map((key) => `'${key}'`).join(", ")}. It takes: ${taken.join(", ")}.` : null;
+    };
+    const own = check(name, args, "");
+    if (own || name !== "batch") return own;
+    const operations = Array.isArray(asRecord(args).operations) ? asRecord(args).operations as unknown[] : [];
+    for (const [index, operation] of operations.entries()) {
+      const tool = asRecord(operation).tool;
+      const found = typeof tool === "string" ? check(tool, asRecord(operation).input, `Operation ${index + 1}: `) : null;
+      if (found) return found;
+    }
+    return null;
+  }
 }
