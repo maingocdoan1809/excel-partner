@@ -23,7 +23,7 @@ All local data is under `%LOCALAPPDATA%\Excel Partner`, readable only by the use
   - A daily backup is kept beside it.
   - Admins can set a retention period (`historyRetentionDays`).
 - **Logs:** rotated. They record tool names and error codes, not tool argument values.
-- **`usage.jsonl`:** token and request counts, size-capped.
+- **`usage.jsonl`:** token and request counts, size-capped; per turn also the tools called, their error counts and result sizes, and the size of the tool catalog offered (names and sizes only; `node scripts/usage-tools.mjs` summarises them).
 - **Provider sign-ins:** kept by each CLI in its own state folder.
   - Office Partner never stores API keys.
   - When a provider signs in with an API key (OpenCode), the pane passes the key straight to that CLI's own store.

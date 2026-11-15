@@ -19,3 +19,12 @@ export function inferOfficeHost(names: string[]): HostId | undefined {
   }
   return hosts.size === 1 ? [...hosts][0] : undefined;
 }
+
+/**
+ * Characters of tool definitions (name, description, input schema) the model is offered for a host: what every request pays
+ * before the first word. The usage ledger records it per turn and the catalog budget test holds it down.
+ */
+export function toolCatalogChars(host: HostId, allowOfficeJs: boolean, capabilities: ToolGroups): number {
+  return officeToolCatalog(host, allowOfficeJs, capabilities)
+    .reduce((total, tool) => total + JSON.stringify({ name: tool.name, description: tool.description, inputSchema: tool.inputSchema }).length, 0);
+}

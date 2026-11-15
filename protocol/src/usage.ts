@@ -20,6 +20,27 @@ export const TokenUsageSchema = z.object({
 });
 export type TokenUsage = z.infer<typeof TokenUsageSchema>;
 
+/**
+ * What the tools cost one turn, by tool name: calls made, calls that failed, and characters of result handed back to the
+ * model. Names and sizes only, never arguments or contents.
+ */
+export const ToolStatsSchema = z.record(z.object({
+  calls: z.number().int().nonnegative(),
+  errors: z.number().int().nonnegative(),
+  resultChars: z.number().int().nonnegative(),
+}));
+export type ToolStats = z.infer<typeof ToolStatsSchema>;
+
+/** Characters a tool result adds to the model's context. A picture counts for its text only: its bytes are not text tokens. */
+export function toolResultChars(result: { ok: boolean; data?: unknown; error?: unknown }): number {
+  const body = result.ok ? result.data : result.error;
+  if (body && typeof body === "object" && "image" in body) {
+    const { image: _image, ...rest } = body as Record<string, unknown>;
+    return JSON.stringify(rest).length;
+  }
+  return JSON.stringify(body ?? null).length;
+}
+
 /** Provider namespace prevents two CLIs with the same native ID sharing accounting. */
 export function providerSessionKey(provider: string, nativeId: string): string { return `${provider}:${nativeId}`; }
 

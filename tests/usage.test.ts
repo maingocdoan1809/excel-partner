@@ -13,8 +13,8 @@ import { loadConfig } from "../bridge/src/config.js";
 import { MockAdapter } from "../providers/src/mock.js";
 import { ProviderRegistry } from "../providers/src/registry.js";
 import type { SendTurnInput } from "../providers/src/types.js";
-import type { ProviderEvent } from "../protocol/src/index.js";
-import { PaneClient } from "./helpers.js";
+import { toolResultChars, type ProviderEvent } from "../protocol/src/index.js";
+import { PaneClient, getFreePort } from "./helpers.js";
 
 const dirs: string[] = [];
 afterEach(() => { for (const dir of dirs.splice(0)) fs.rmSync(dir, { recursive: true, force: true }); });
@@ -198,6 +198,50 @@ describe("usage accounting", () => {
     } finally {
       await active.pane.close();
       await active.bridge.close();
+    }
+  });
+  it("keeps per-tool calls, errors and result sizes with the turn, and the size of the catalog offered", () => {
+    const file = temporaryFile();
+    const tools = { read_range: { calls: 3, errors: 1, resultChars: 4200 }, get_sheets: { calls: 1, errors: 0, resultChars: 310 } };
+    new UsageStore(file).append({ ...record("a", "1"), tools, catalogChars: 63_000 });
+    const line = fs.readFileSync(file, "utf8").split("\n").filter(Boolean).map(entry => JSON.parse(entry)).find(entry => entry.requestId === "1");
+    expect(line).toMatchObject({ tools, catalogChars: 63_000 });
+    // A ledger written before these fields existed still loads.
+    fs.appendFileSync(file, "\n" + JSON.stringify(record("a", "2")) + "\n");
+    expect(new UsageStore(file).summaries().find(s => s.sessionId === "a")?.turns).toBe(2);
+  });
+
+  it("counts a result by its text, not by a picture's bytes", () => {
+    expect(toolResultChars({ ok: true, data: { rows: 2 } })).toBe(JSON.stringify({ rows: 2 }).length);
+    expect(toolResultChars({ ok: true, data: { rows: 2, image: { mimeType: "image/png", data: "A".repeat(50_000) } } })).toBe(JSON.stringify({ rows: 2 }).length);
+    expect(toolResultChars({ ok: false, error: { code: "x", message: "y" } })).toBe(JSON.stringify({ code: "x", message: "y" }).length);
+  });
+
+  it("records which tools a turn used and how much they returned, without arguments", async () => {
+    const file = temporaryFile();
+    const port = await getFreePort();
+    const config = loadConfig({ host: "127.0.0.1", port, tls: null, publicBaseUrl: `http://127.0.0.1:${port}`, logLevel: "error" });
+    const bridge = new Bridge(config, { usageFile: file, registry: new ProviderRegistry().register(new MockAdapter({ id: "claude", toolCalls: [{ tool: "get_selection", args: {} }, { tool: "get_selection", args: {} }] })) });
+    const { url } = await bridge.listen();
+    const pane = await PaneClient.connect(`${url.replace("http", "ws")}/ws`);
+    try {
+      pane.send({ type: "hello", protocolVersion: 1, workbookConnectionId: "usage-tools-workbook" });
+      await pane.waitFor(m => m.type === "hello_ok");
+      pane.send({ type: "set_provider", provider: "claude" });
+      await pane.waitFor(m => m.type === "provider_status");
+      pane.onMessage = message => {
+        if (message.type === "tool_request") pane.send({ type: "tool_result", callId: message.callId, result: { ok: true, data: { address: "A1", secret: "cell contents" } } });
+      };
+      pane.send({ type: "prompt", requestId: "tools-1", chatSessionId: "chat-tools", prompt: "look", selection: null });
+      await pane.waitFor(m => m.type === "turn_finished" && m.requestId === "tools-1");
+      const text = fs.readFileSync(file, "utf8");
+      const entry = text.split("\n").filter(Boolean).map(line => JSON.parse(line)).find(line => line.requestId === "tools-1");
+      expect(entry.tools.get_selection).toMatchObject({ calls: 2, errors: 0, resultChars: 2 * JSON.stringify({ address: "A1", secret: "cell contents" }).length });
+      expect(entry.catalogChars).toBeGreaterThan(1000);
+      expect(text).not.toContain("cell contents");
+    } finally {
+      await pane.close();
+      await bridge.close();
     }
   });
 });

@@ -1,6 +1,6 @@
 import { invokeRegisteredMcpTool } from "../../shared/src/mcp-catalog.js";
 import type { McpServers } from "../../shared/src/mcp-servers.js";
-import { OPEN_POLICY, type AdminPolicy } from "../../protocol/src/index.js";
+import { OPEN_POLICY, toolResultChars, type AdminPolicy } from "../../protocol/src/index.js";
 import { ZodError } from "zod";
 import {
   exposedToolNamesForHost,
@@ -102,6 +102,7 @@ export class OfficeRuntime {
     const session = this.sessions.get(request.sessionId);
     const requestId = session?.activeRequestId;
     const result = await this.invokeTool(request);
+    if (session && requestId) session.recordToolUse(requestId, request.tool, toolResultChars(result), result.ok);
     if (!session || !requestId || session.activeRequestId !== requestId || session.turnController?.signal.aborted) return result;
     const followups = session.takeFollowups(requestId, "delivered");
     return followups.length ? { ...result, additional_user_messages: followups } : result;

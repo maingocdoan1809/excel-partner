@@ -15,6 +15,7 @@ import {
   type ToolCapabilities,
   type ToolResult,
   type ToolError,
+  type ToolStats,
   UserInputRequestSchema,
   validateUserInputResponse,
   CANCELLED_USER_INPUT,
@@ -166,6 +167,26 @@ export class WorkbookSession implements ProviderSessionState {
       this.finished.delete(oldest);
     }
     return true;
+  }
+
+  /** Tool use of the requests in flight, for the usage ledger. Taken (and so freed) when the turn finishes. */
+  private readonly toolStats = new Map<string, ToolStats>();
+
+  /** Count one tool call of `requestId`: its result size and whether it failed. Names and sizes only. */
+  recordToolUse(requestId: string, tool: string, resultChars: number, ok: boolean): void {
+    const stats = this.toolStats.get(requestId) ?? {};
+    const entry = stats[tool] ?? { calls: 0, errors: 0, resultChars: 0 };
+    entry.calls += 1;
+    if (!ok) entry.errors += 1;
+    entry.resultChars += resultChars;
+    stats[tool] = entry;
+    this.toolStats.set(requestId, stats);
+  }
+
+  takeToolStats(requestId: string): ToolStats | undefined {
+    const stats = this.toolStats.get(requestId);
+    this.toolStats.delete(requestId);
+    return stats;
   }
 
   beginTurn(requestId: string): AbortController {

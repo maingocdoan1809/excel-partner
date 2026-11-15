@@ -1,7 +1,7 @@
 import { appendFileSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { z } from "zod";
-import { TokenUsageSchema, type TokenUsage, type UsageSummary } from "../../protocol/src/index.js";
+import { TokenUsageSchema, ToolStatsSchema, type TokenUsage, type UsageSummary } from "../../protocol/src/index.js";
 
 const RecordSchema = z.object({
   sessionId: z.string(),
@@ -14,6 +14,9 @@ const RecordSchema = z.object({
   durationMs: z.number().nonnegative(),
   reason: z.enum(["completed", "cancelled", "error"]),
   usage: TokenUsageSchema.nullable(),
+  /** Per-tool calls and result sizes of the turn, and the characters of the tool catalog the model was offered. Older records have neither. */
+  tools: ToolStatsSchema.optional(),
+  catalogChars: z.number().int().nonnegative().optional(),
 });
 export type UsageRecord = z.infer<typeof RecordSchema>;
 

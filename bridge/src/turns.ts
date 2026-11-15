@@ -6,6 +6,7 @@ import { providerSessionKey, type AnySelectionSnapshot, type ProviderId, type Se
 import { hostSystemPrompt } from "../../protocol/src/system-prompts.js";
 import type { ProviderRegistry } from "../../providers/src/registry.js";
 import type { ProviderAdapter } from "../../providers/src/types.js";
+import { toolCatalogChars } from "../../shared/src/catalog.js";
 import type { ProviderSessionManager } from "../../shared/src/session-manager.js";
 import type { OfficeRuntime } from "./office-runtime.js";
 import { attachmentPath } from "./attachments.js";
@@ -253,6 +254,7 @@ export class TurnRunner {
       sessionId: resumeSessionId ? providerSessionKey(session.provider, resumeSessionId) : chatSessionId ?? session.id,
       providerSessionId: resumeSessionId, requestId, provider: session.provider,
       model: selectedModel, startedAt: Date.now(), durationMs: 0, reason: "completed", usage: null,
+      catalogChars: toolCatalogChars(session.host, this.deps.config.allowOfficeJs, session.capabilities),
     });
     // `/skill-name request` loads the skill's instructions into this turn.
     const expanded = isCommand ? { prompt, skill: undefined } : expandSkillPrompt(prompt, skills);
@@ -379,8 +381,10 @@ export class TurnRunner {
     this.deps.delegations.finish(session, requestId, reason);
     const key = `${session.id}:${requestId}`;
     const record = this.activeUsage.get(key);
+    const tools = session.takeToolStats(requestId);
     if (record) {
       this.activeUsage.delete(key);
+      if (tools) record.tools = tools;
       record.durationMs = Math.max(0, Date.now() - record.startedAt);
       record.reason = reason;
       try { this.deps.usage.append(record); }
