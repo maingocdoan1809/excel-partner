@@ -1,4 +1,4 @@
-import type { ManageNamesInput, MergeRangeInput, PageLayoutInput } from "../../../protocol/src/index.js";
+import type { ManageNamesInput, MergeRangeInput, PageLayoutInput, SheetViewInput } from "../../../protocol/src/index.js";
 import { ToolFailure, resolveSheet, stripSheet, runExcel } from "./common.js";
 import { findOccupied, loadGeometry, overwriteFailure } from "./write.js";
 
@@ -122,9 +122,65 @@ export async function pageLayout(input: PageLayoutInput): Promise<unknown> {
     if (input.centerVertically !== undefined) did("centerVertically", () => (layout.centerVertically = input.centerVertically!));
     if (input.printGridlines !== undefined) did("printGridlines", () => (layout.printGridlines = input.printGridlines!));
     if (input.printHeadings !== undefined) did("printHeadings", () => (layout.printHeadings = input.printHeadings!));
+    if (input.clearPageBreaks) {
+      did("clearPageBreaks", () => {
+        sheet.horizontalPageBreaks.removePageBreaks();
+        sheet.verticalPageBreaks.removePageBreaks();
+      });
+    }
+    // A break goes before the given cell; column A / row 1 anchors keep each break to one direction.
+    if (input.rowBreaks?.length) did("rowBreaks", () => input.rowBreaks!.forEach((row) => sheet.horizontalPageBreaks.add(sheet.getRange(`A${row}`))));
+    if (input.columnBreaks?.length) did("columnBreaks", () => input.columnBreaks!.forEach((column) => sheet.verticalPageBreaks.add(sheet.getRange(`${column.toUpperCase()}1`))));
 
     await context.sync();
     return { sheet: sheet.name, applied };
   });
 }
 
+
+const VIEWS = { normal: "normalView", pageLayout: "pageLayoutView", pageBreakPreview: "pageBreakPreview" } as const;
+
+export async function sheetView(input: SheetViewInput): Promise<unknown> {
+  const windowLevel = input.view !== undefined || input.zoomPercent !== undefined;
+  if (windowLevel && !Office.context.requirements.isSetSupported("ExcelApiDesktop", "1.1")) {
+    throw new ToolFailure("unsupported", "view mode and zoom need Excel desktop (ExcelApiDesktop 1.1)");
+  }
+  if ((input.showGridlines !== undefined || input.showHeadings !== undefined) && !Office.context.requirements.isSetSupported("ExcelApi", "1.8")) {
+    throw new ToolFailure("unsupported", "this Excel version cannot show or hide gridlines/headings (needs ExcelApi 1.8)");
+  }
+  return runExcel(async (context) => {
+    const sheet = resolveSheet(context, input.sheet);
+    sheet.load("name");
+    if (windowLevel) {
+      // The window shows the active sheet; switching sheets just to change its view would move the user's screen.
+      const active = context.workbook.worksheets.getActiveWorksheet();
+      active.load("name");
+      await context.sync();
+      if (active.name !== sheet.name) {
+        throw new ToolFailure("invalid_arguments", `view and zoomPercent apply to the active sheet ('${active.name}'); activate '${sheet.name}' first with manage_sheet`);
+      }
+    }
+    const applied: string[] = [];
+    if (input.view !== undefined || input.zoomPercent !== undefined) {
+      const window = context.application.activeWindow;
+      if (input.view !== undefined) {
+        window.view = VIEWS[input.view];
+        applied.push("view");
+      }
+      if (input.zoomPercent !== undefined) {
+        window.zoom = input.zoomPercent;
+        applied.push("zoomPercent");
+      }
+    }
+    if (input.showGridlines !== undefined) {
+      sheet.showGridlines = input.showGridlines;
+      applied.push("showGridlines");
+    }
+    if (input.showHeadings !== undefined) {
+      sheet.showHeadings = input.showHeadings;
+      applied.push("showHeadings");
+    }
+    await context.sync();
+    return { sheet: sheet.name, applied };
+  });
+}

@@ -372,8 +372,24 @@ export const PageLayoutInputSchema = z.object({
   centerVertically: z.boolean().optional(),
   printGridlines: z.boolean().optional(),
   printHeadings: z.boolean().optional(),
+  clearPageBreaks: z.boolean().optional().describe("Remove every manual page break first (before rowBreaks / columnBreaks are added)."),
+  rowBreaks: z.array(z.number().int().min(2).max(1048576)).max(200).optional().describe("Manual page break above each of these row numbers."),
+  columnBreaks: z.array(Letters).max(200).optional().describe("Manual page break left of each of these columns, e.g. [\"D\"]."),
 });
 export type PageLayoutInput = z.infer<typeof PageLayoutInputSchema>;
+
+export const SheetViewInputSchema = z
+  .object({
+    sheet: Sheet,
+    view: z.enum(["normal", "pageLayout", "pageBreakPreview"]).optional().describe("Excel desktop only; applies to the active sheet."),
+    zoomPercent: z.number().int().min(10).max(400).optional().describe("Excel desktop only; applies to the active sheet."),
+    showGridlines: z.boolean().optional(),
+    showHeadings: z.boolean().optional(),
+  })
+  .refine((v) => v.view !== undefined || v.zoomPercent !== undefined || v.showGridlines !== undefined || v.showHeadings !== undefined, {
+    message: "give at least one of view, zoomPercent, showGridlines, showHeadings",
+  });
+export type SheetViewInput = z.infer<typeof SheetViewInputSchema>;
 
 /* -------------------------------------------------------------------------- */
 /* Objects: charts, pivot tables, Excel Tables                                 */

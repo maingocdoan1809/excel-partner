@@ -336,3 +336,46 @@ it("copies the full source to a single destination anchor", async () => {
   expect(result.ok).toBe(true);
   expect(book.get("Sheet1", "F2")).toBe(2);
 });
+
+describe("page_layout page breaks / sheet_view", () => {
+  it("adds manual row and column breaks after clearing the old ones", async () => {
+    await call("page_layout", { rowBreaks: [10], columnBreaks: ["C"] });
+    expect(sheet.pageBreaks).toEqual(["h:A10", "v:C1"]);
+    const result = data(await call("page_layout", { clearPageBreaks: true, rowBreaks: [20, 40], columnBreaks: ["d"] }));
+    expect(result.applied).toEqual(["clearPageBreaks", "rowBreaks", "columnBreaks"]);
+    expect(sheet.pageBreaks).toEqual(["h:A20", "h:A40", "v:D1"]);
+    expect(() => parseToolInput("page_layout", { rowBreaks: [1] })).toThrow();
+  });
+
+  it("switches view mode, zoom, gridlines and headings", async () => {
+    const result = data(await call("sheet_view", { view: "pageBreakPreview", zoomPercent: 80, showGridlines: false, showHeadings: false }));
+    expect(result).toMatchObject({ sheet: "Sheet1", applied: ["view", "zoomPercent", "showGridlines", "showHeadings"] });
+    expect(book.window).toEqual({ view: "pageBreakPreview", zoom: 80 });
+    expect(sheet.showGridlines).toBe(false);
+    expect(sheet.showHeadings).toBe(false);
+    await call("sheet_view", { view: "normal" });
+    expect(book.window.view).toBe("normalView");
+    await call("sheet_view", { view: "pageLayout" });
+    expect(book.window.view).toBe("pageLayoutView");
+  });
+
+  it("needs at least one setting", async () => {
+    expect(() => parseToolInput("sheet_view", {})).toThrow(/at least one/);
+  });
+
+  it("changes gridlines on a background sheet but refuses view/zoom there", async () => {
+    book.addSheet("Other");
+    data(await call("sheet_view", { sheet: { name: "Other" }, showGridlines: false }));
+    expect(book.sheet("Other").showGridlines).toBe(false);
+    expect(book.active).toBe(0);
+    expectError(await call("sheet_view", { sheet: { name: "Other" }, view: "pageLayout" }), "invalid_arguments");
+    expect(book.window.view).toBe("normalView");
+  });
+
+  it("reports unsupported view/zoom outside Excel desktop but still toggles gridlines", async () => {
+    book.supportsDesktop = false;
+    expectError(await call("sheet_view", { view: "pageLayout" }), "unsupported");
+    expectError(await call("sheet_view", { zoomPercent: 50 }), "unsupported");
+    expect(data(await call("sheet_view", { showHeadings: false })).applied).toEqual(["showHeadings"]);
+  });
+});

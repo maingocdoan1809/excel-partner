@@ -80,7 +80,7 @@ function raw<T>(value: T): T {
 }
 
 const RANGE_PROPS = ["address", "rowIndex", "columnIndex", "rowCount", "columnCount", "values", "formulas", "numberFormat", "left", "top", "width", "height"] as const;
-const SHEET_PROPS = ["name", "id", "position", "visibility", "tabColor"] as const;
+const SHEET_PROPS = ["name", "id", "position", "visibility", "tabColor", "showGridlines", "showHeadings"] as const;
 const SHAPE_PROPS = ["rotation", "id", "isNullObject", "name", "type", "geometricShapeType", "left", "top", "width", "height"] as const;
 
 function makeRange(sheet: MockSheet, rowIndex: number, columnIndex: number, rowCount: number, columnCount: number, isNullObject = false): MockRange {
@@ -313,6 +313,10 @@ export class MockSheet {
   readonly hiddenCols = new Set<number>();
   frozen: { rows: number; columns: number } = { rows: 0, columns: 0 };
   visibility = "Visible";
+  showGridlines = true;
+  showHeadings = true;
+  /** Manual page breaks as "h:<row cell>" / "v:<column cell>", in the order added. */
+  readonly pageBreaks: string[] = [];
   tables = { items: [] as unknown[], load: () => undefined };
 
   constructor(
@@ -424,6 +428,19 @@ export class MockSheet {
     }
     if (r1 < 0) return makeRange(this, 0, 0, 1, 1, true);
     return makeRange(this, r0, c0, r1 - r0 + 1, c1 - c0 + 1);
+  }
+  private breakCollection(kind: "h" | "v") {
+    return {
+      add: (range: MockRange) => { this.pageBreaks.push(`${kind}:${raw(range).address.split("!")[1]}`); },
+      removePageBreaks: () => { for (let i = this.pageBreaks.length - 1; i >= 0; i--) if (this.pageBreaks[i]!.startsWith(`${kind}:`)) this.pageBreaks.splice(i, 1); },
+    };
+  }
+  get horizontalPageBreaks() { return this.breakCollection("h"); }
+  get verticalPageBreaks() { return this.breakCollection("v"); }
+  /** Print setup is not modelled; the properties page_layout sets are accepted and dropped. */
+  get pageLayout() {
+    const noop = () => undefined;
+    return new Proxy({ headersFooters: { defaultForAllPages: {} }, setPrintArea: noop, setPrintTitleRows: noop, setPrintTitleColumns: noop } as Record<string, unknown>, {});
   }
   get freezePanes() {
     return {
@@ -762,6 +779,10 @@ export class MockWorkbook {
   /** Simulates a shape/chart being selected: getSelectedRange throws like Excel does. */
   invalidSelection = false;
   supportsActiveShape = true;
+  /** ExcelApiDesktop 1.1 (window view and zoom) is Excel desktop only. */
+  supportsDesktop = true;
+  /** The active window: view mode and zoom. */
+  window = { view: "normalView", zoom: 100 };
   activeShape: MockShape | null = null;
   /** A selected chart: Excel also reports it as an active shape of type "Unsupported". */
   activeChart: { name: string; left: number; top: number; width: number; height: number } | null = null;
@@ -799,6 +820,7 @@ export function installOfficeMock(book: MockWorkbook): void {
       remove: (object: object) => { book.trackedObjects.delete(object); },
     },
     application: {
+      get activeWindow() { return book.window; },
       get calculationMode() { return book.calculationMode; },
       set calculationMode(mode: string) { book.calculationMode = mode; book.calculationModes.push(mode); },
       load: () => undefined,
@@ -881,8 +903,8 @@ export function installOfficeMock(book: MockWorkbook): void {
   (globalThis as any).Office = {
     context: {
       document: { url: "C:\\books\\test.xlsx" },
-      requirements: { isSetSupported: (_name: string, version: string) =>
-        version === "1.19" ? current!.supportsActiveShape : version === "1.18" ? current!.supportsNotes : version === "1.9" ? current!.supportsShapes : version === "1.13" ? current!.supportsInsertFromFile : true },
+      requirements: { isSetSupported: (name: string, version: string) =>
+        name === "ExcelApiDesktop" ? current!.supportsDesktop : version === "1.19" ? current!.supportsActiveShape : version === "1.18" ? current!.supportsNotes : version === "1.9" ? current!.supportsShapes : version === "1.13" ? current!.supportsInsertFromFile : true },
     },
   };
 }

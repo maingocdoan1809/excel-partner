@@ -252,7 +252,14 @@ const META: Partial<Record<ExcelToolName, Meta>> = {
   page_layout: {
     title: "Page layout / print",
     annotations: WRITE,
-    description: "WRITE. Print area, orientation, paper size, fit-to-pages or scale, repeating title rows/columns, margins, header/footer and print options.",
+    description: "WRITE. Print area, orientation, paper size, fit-to-pages or scale, repeating title rows/columns, margins, header/footer, print options and manual page breaks (rowBreaks / columnBreaks / clearPageBreaks).",
+  },
+  sheet_view: {
+    title: "Sheet view",
+    annotations: WRITE,
+    description:
+      "WRITE. How the sheet is shown: view mode (normal / pageLayout / pageBreakPreview), zoom, gridlines and headings. " +
+      "view and zoomPercent need Excel desktop and act on the active sheet; gridlines and headings work on any sheet. Use page_layout for page breaks and print setup.",
   },
   modify_chart: {
     title: "Modify chart",

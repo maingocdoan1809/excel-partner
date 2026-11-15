@@ -28,6 +28,7 @@ import type {
   ModifyStructureInput,
   ModifyTableInput,
   PageLayoutInput,
+  SheetViewInput,
   ReadRangeImageInput,
   ReadRangeInput,
   RecordTestResultsInput,
@@ -47,7 +48,7 @@ import { toToolError } from "./common.js";
 import { validateFlowchart } from "./flowchart.js";
 import { filterRange, sortRange } from "./data.js";
 import { formatRange } from "./format.js";
-import { manageNames, mergeRange, pageLayout } from "./layout.js";
+import { manageNames, mergeRange, pageLayout, sheetView } from "./layout.js";
 import { getObjects, modifyChart, modifyPivotTable, modifyTable } from "./objects.js";
 import { executeOfficeJs } from "./office-js.js";
 import { getSelection, getSheets, readRange, searchData } from "./read.js";
@@ -84,6 +85,7 @@ export const WRITE_TOOLS: ReadonlySet<string> = new Set([
   "insert_sheets_from_file",
   "manage_names",
   "page_layout",
+  "sheet_view",
   "modify_chart",
   "modify_pivot_table",
   "modify_table",
@@ -174,6 +176,8 @@ function run(tool: string, args: unknown): Promise<unknown> {
       return manageNames(args as ManageNamesInput);
     case "page_layout":
       return pageLayout(args as PageLayoutInput);
+    case "sheet_view":
+      return sheetView(args as SheetViewInput);
     case "modify_chart":
       return modifyChart(args as ModifyChartInput);
     case "modify_pivot_table":

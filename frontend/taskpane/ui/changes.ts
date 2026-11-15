@@ -90,6 +90,8 @@ export function describeChange(
       return { tool, ok: true, target: null, summary: `${cap(d.operation)} name "${d.name}"` };
     case "page_layout":
       return { tool, ok: true, target: null, summary: `Page layout on ${d.sheet}: ${(d.applied ?? []).join(", ")}` };
+    case "sheet_view":
+      return { tool, ok: true, target: null, summary: `Sheet view on ${d.sheet}: ${(d.applied ?? []).join(", ")}` };
     case "modify_chart":
       return { tool, ok: true, target: null, summary: `${cap(d.operation)}d chart "${d.name}"` };
     case "modify_pivot_table":

@@ -54,6 +54,7 @@ import {
   ModifyPivotTableInputSchema,
   ModifyTableInputSchema,
   PageLayoutInputSchema,
+  SheetViewInputSchema,
   ReadRangeImageInputSchema,
   ResizeRangeInputSchema,
   SetCellsInputSchema,
@@ -104,6 +105,7 @@ export const ExcelToolInputSchemas = {
   manage_sheet: ManageSheetInputSchema,
   manage_names: ManageNamesInputSchema,
   page_layout: PageLayoutInputSchema,
+  sheet_view: SheetViewInputSchema,
   // objects
   modify_chart: ModifyChartInputSchema,
   modify_pivot_table: ModifyPivotTableInputSchema,
