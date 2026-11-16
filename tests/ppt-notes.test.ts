@@ -22,6 +22,17 @@ describe("read_slide_notes", () => {
     expect(await fails("read_slide_notes", { slide_ids: ["999#"] }, "invalid_arguments")).toMatch(/does not exist/);
   });
 
+  it("reads a long deck in order, a few slides per export", async () => {
+    const ids = Array.from({ length: 12 }, (_, i) => {
+      const id = fx().deck.addSlideWith([{ name: "Title 1", placeholder: "Title", text: `S${i}`, top: 20, height: 80 }]);
+      fx().deck.slideById(id).notes = `note ${i}`;
+      return id;
+    });
+    const data = await ok("read_slide_notes", { slide_ids: ids });
+    expect(data.slides.map((x: any) => x.notes)).toEqual(ids.map((_, i) => `note ${i}`));
+    expect(data.slides.map((x: any) => x.slide_id)).toEqual(ids);
+  });
+
   it("needs PowerPointApi 1.8", async () => {
     fx().deck.api = 7;
     expect(await fails("read_slide_notes", {}, "unsupported")).toMatch(/1\.8/);

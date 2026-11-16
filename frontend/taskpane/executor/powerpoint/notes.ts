@@ -15,6 +15,8 @@ const PKG_REL = "http://schemas.openxmlformats.org/package/2006/relationships";
 const CONTENT_TYPES = "http://schemas.openxmlformats.org/package/2006/content-types";
 const NOTES_TYPE = "application/vnd.openxmlformats-officedocument.presentationml.notesSlide+xml";
 const MAX_READ_SLIDES = 60;
+/** Slides exported per round trip; exporting dozens at once (pictures included) can exhaust PowerPoint's memory. */
+const EXPORT_BATCH = 5;
 
 /** `../notesSlides/notesSlide1.xml` seen from `ppt/slides/slide1.xml` -> `ppt/notesSlides/notesSlide1.xml`. */
 export function resolvePart(fromPart: string, target: string): string {
@@ -189,12 +191,15 @@ export async function readSlideNotes(input: ReadSlideNotesInput): Promise<unknow
     const unknown = (input.slide_ids ?? []).filter((id) => !all.includes(id));
     if (unknown.length) throw slideNotFound(unknown[0]!, all);
     const wanted = input.slide_ids ?? all.slice(0, MAX_READ_SLIDES);
-    const exports = wanted.map((id) => ({ id, file: context.presentation.slides.getItem(id).exportAsBase64() }));
-    await context.sync();
-    const slides = exports.map(({ id, file }) => {
-      const notes = readNotes(unpackSlideFile(file.value));
-      return { slide_id: id, position: all.indexOf(id) + 1, notes: notes ?? "", has_notes_page: notes !== null };
-    });
+    const slides: Array<{ slide_id: string; position: number; notes: string; has_notes_page: boolean }> = [];
+    for (let i = 0; i < wanted.length; i += EXPORT_BATCH) {
+      const batch = wanted.slice(i, i + EXPORT_BATCH).map((id) => ({ id, file: context.presentation.slides.getItem(id).exportAsBase64() }));
+      await context.sync();
+      for (const { id, file } of batch) {
+        const notes = readNotes(unpackSlideFile(file.value));
+        slides.push({ slide_id: id, position: all.indexOf(id) + 1, notes: notes ?? "", has_notes_page: notes !== null });
+      }
+    }
     return {
       slides,
       ...(!input.slide_ids && all.length > MAX_READ_SLIDES ? { note: `Only the first ${MAX_READ_SLIDES} of ${all.length} slides were read; pass slide_ids for the others.` } : {}),

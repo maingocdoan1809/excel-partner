@@ -256,13 +256,24 @@ describe("z-order, grouping, alignment", () => {
 
   it("groups and ungroups", async () => {
     const { agenda } = fx();
-    const grouped = await ok("group_shapes", { slide_id: agenda, shape_ids: ["2", "3"], name: "Header" });
-    expect(grouped).toMatchObject({ name: "Header", grouped: ["2", "3"] });
-    expect(fx().deck.slideById(agenda).shapes.map((s) => s.type)).toEqual(["Image", "Group"]);
+    const a = await ok("insert_slide_element", { slide_id: agenda, element: { type: "textbox", text: "A", left: 10, top: 10, width: 50, height: 20 } });
+    const b = await ok("insert_slide_element", { slide_id: agenda, element: { type: "textbox", text: "B", left: 70, top: 10, width: 50, height: 20 } });
+    const grouped = await ok("group_shapes", { slide_id: agenda, shape_ids: [a.shape_id, b.shape_id], name: "Header" });
+    expect(grouped).toMatchObject({ name: "Header", grouped: [a.shape_id, b.shape_id] });
+    expect(fx().deck.slideById(agenda).shapes.map((s) => s.type).pop()).toBe("Group");
     const released = await ok("ungroup_shapes", { ref: grouped.ref });
-    expect(released.released.map((s: any) => s.id)).toEqual(["2", "3"]);
+    expect(released.released.map((s: any) => s.id)).toEqual([a.shape_id, b.shape_id]);
     expect(await fails("ungroup_shapes", { ref: `${agenda}:2` }, "invalid_arguments")).toMatch(/not a group/);
     expect(await fails("group_shapes", { slide_id: agenda, shape_ids: ["2", "99"] }, "invalid_arguments")).toMatch(/99/);
+  });
+
+  it("refuses to group placeholders, tables and oversized sets before touching PowerPoint", async () => {
+    const { agenda, data } = fx();
+    expect(await fails("group_shapes", { slide_id: agenda, shape_ids: ["2", "3"] }, "invalid_arguments")).toMatch(/cannot be grouped.*Content Placeholder 2/);
+    expect(await fails("group_shapes", { slide_id: data, shape_ids: ["2", "3"] }, "invalid_arguments")).toMatch(/cannot be grouped/);
+    const many = Array.from({ length: 21 }, (_, i) => String(i + 2));
+    expect(await fails("group_shapes", { slide_id: agenda, shape_ids: many }, "invalid_arguments")).toMatch(/too many/);
+    expect(fx().deck.slideById(agenda).shapes.some((s) => s.type === "Group")).toBe(false);
   });
 
   it("gates z-order and grouping at 1.8", async () => {

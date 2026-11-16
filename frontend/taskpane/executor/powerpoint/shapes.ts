@@ -185,24 +185,45 @@ export async function setShapeZOrder(input: SetShapeZOrderInput): Promise<unknow
   });
 }
 
+/** Shape kinds PowerPoint can group safely; placeholders, tables, charts, media and the like are refused up front. */
+const GROUPABLE_TYPES = new Set(["GeometricShape", "TextBox", "Image", "Line", "Freeform", "Group", "Callout", "Graphic"]);
+/** Grouping a very large set in one call has taken PowerPoint down; bigger sets go in nested groups. */
+const MAX_GROUP_SHAPES = 20;
+
 export async function groupShapes(input: GroupShapesInput): Promise<unknown> {
   requireSupport("group_shapes", PPT_ZORDER, "Grouping needs PowerPointApi 1.8.");
   return PowerPoint.run(async (context) => {
     const slide = await requireSlide(context, input.slide_id);
     const ids = [...new Set(input.shape_ids)];
+    if (ids.length > MAX_GROUP_SHAPES) {
+      throw new ToolFailure("invalid_arguments", `${ids.length} shapes is too many for one group (limit ${MAX_GROUP_SHAPES}). Group them in batches of up to ${MAX_GROUP_SHAPES}, then group the resulting groups together.`);
+    }
     const probes = ids.map((id) => {
       const shape = slide.shapes.getItemOrNullObject(id);
-      shape.load("isNullObject");
+      shape.load("isNullObject,name,type");
       return { id, shape };
     });
     await context.sync();
     const missing = probes.filter((p) => p.shape.isNullObject).map((p) => p.id);
     if (missing.length) throw new ToolFailure("invalid_arguments", `shapes ${missing.join(", ")} do not exist on slide ${input.slide_id}; list them with list_slide_shapes`);
     if (ids.length < 2) throw new ToolFailure("invalid_arguments", "a group needs at least two different shapes");
-    const group = slide.shapes.addGroup(ids);
-    if (input.name) group.name = input.name;
-    group.load("id,name");
-    await context.sync();
+    const blocked = probes.filter((p) => !GROUPABLE_TYPES.has(String(p.shape.type)));
+    if (blocked.length) {
+      throw new ToolFailure(
+        "invalid_arguments",
+        `these shapes cannot be grouped: ${blocked.map((p) => `${p.id} "${p.shape.name}" (${String(p.shape.type)})`).join(", ")}. Placeholders, tables, charts and media stay out of groups; leave them out of shape_ids and group the rest.`,
+      );
+    }
+    let group: PowerPoint.Shape;
+    try {
+      group = slide.shapes.addGroup(ids);
+      if (input.name) group.name = input.name;
+      group.load("id,name");
+      await context.sync();
+    } catch (error) {
+      if (error instanceof ToolFailure) throw error;
+      throw new ToolFailure("office_error", `PowerPoint could not group these shapes: ${(error as Error)?.message ?? String(error)}. Try fewer shapes, or arrange them with align_shapes instead of grouping.`);
+    }
     return {
       summary: `Grouped ${ids.length} shapes on slide ${input.slide_id} as "${group.name}"`,
       slide_id: input.slide_id,
@@ -226,8 +247,12 @@ export async function ungroupShapes(input: UngroupShapesInput): Promise<unknown>
     slide.shapes.load("items/id");
     await context.sync();
     const before = new Set(slide.shapes.items.map((s) => s.id));
-    shape.group.ungroup();
-    await context.sync();
+    try {
+      shape.group.ungroup();
+      await context.sync();
+    } catch (error) {
+      throw new ToolFailure("office_error", `PowerPoint could not ungroup ${input.ref}: ${(error as Error)?.message ?? String(error)}`);
+    }
     slide.shapes.load("items/id,items/name");
     await context.sync();
     const released = slide.shapes.items.filter((s) => !before.has(s.id));
