@@ -71,7 +71,7 @@ export const ToolCapabilitiesSchema = z.object({
   playwright: z.boolean().default(false),
   /** Set by the bridge, never by the pane: another file is open, so the tools for work across files are offered. */
   connectedFiles: z.boolean().optional(),
-  /** Set by the bridge, never by the pane: most tools are offered by summary and `get_tool_definition` gives their schema. */
+  /** Most tools are offered by summary and `get_tool_definition` gives their schema. Chosen in the pane's Settings; when absent the bridge's `toolSchemas` setting decides. */
   lazySchemas: z.boolean().optional(),
 });
 export type ToolCapabilities = z.infer<typeof ToolCapabilitiesSchema>;
@@ -171,6 +171,8 @@ export const HelloOkMessageSchema = z.object({
   addinBuildId: z.string().optional(),
   /** The admin policy in force: the pane hides what it switches off (the bridge refuses it either way). */
   policy: AdminPolicySchema.optional(),
+  /** How the bridge offers tools unless the pane chooses (its `toolSchemas` setting): the pane shows this until the person picks. */
+  toolSchemas: z.enum(["full", "lazy"]).optional(),
 });
 
 

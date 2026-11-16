@@ -134,7 +134,7 @@ const META: Partial<Record<ExcelToolName, Meta>> = {
     title: "Get tool definition",
     annotations: READ,
     description:
-      "READ. Full input schema of tools offered by summary only. Call it with the names you are about to use, before the first use of each. " +
+      "READ. Full input schema of tools offered by summary only. Call it ONCE per request with every tool you plan to use (up to 12 names), before the first use of each; never one tool at a time, and never again for a tool you already received. " +
       "A name that is not exact is matched to the closest tools; if nothing matches (or no name is given) every tool is listed.",
   },
   list_skills: {

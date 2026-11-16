@@ -84,7 +84,8 @@ export class ProviderSessionManager<S extends ProviderSessionState = ProviderSes
       || session.systemPromptRevision !== settings.systemPromptRevision
       || session.capabilities.webSearch !== settings.capabilities.webSearch
       || session.capabilities.playwright !== settings.capabilities.playwright
-      || Boolean(session.capabilities.connectedFiles) !== Boolean(settings.capabilities.connectedFiles);
+      || Boolean(session.capabilities.connectedFiles) !== Boolean(settings.capabilities.connectedFiles)
+      || Boolean(session.capabilities.lazySchemas) !== Boolean(settings.capabilities.lazySchemas);
     const runtimeClosed = this.lifetimes.get(session)?.closed === true;
     if (session.providerSessionId && (changed || runtimeClosed)) {
       await this.close(session, runtimeClosed ? "runtime_closed" : sameChat ? "configuration_change" : "chat_change", sameChat);

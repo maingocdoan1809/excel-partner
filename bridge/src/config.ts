@@ -88,7 +88,7 @@ export interface BridgeConfig {
   skillDirs: string[];
   /** Expose execute_office_js (arbitrary Office.js). On by default; can be disabled explicitly. */
   allowOfficeJs: boolean;
-  /** How the tool catalog is offered: every schema (`full`, the default) or summaries plus `get_tool_definition` (`lazy`). */
+  /** How the tool catalog is offered: summaries plus `get_tool_definition` (`lazy`, the default) or every schema (`full`). */
   toolSchemas: "full" | "lazy";
   logLevel: "debug" | "info" | "warn" | "error";
   /** Local settings file (config.json), re-read on every use. */
@@ -141,7 +141,7 @@ export function loadConfig(overrides: Partial<BridgeConfig> = {}): BridgeConfig 
     skillDirs: defaultSkillDirs([...(local.skillDirs ?? []), ...splitPaths(process.env.BRIDGE_SKILL_DIRS)]),
     referenceDirs: [...(local.referenceDirs ?? []), ...splitPaths(process.env.BRIDGE_REFERENCE_DIRS)],
     allowOfficeJs: envBool("BRIDGE_ALLOW_OFFICE_JS", local.allowOfficeJs ?? true),
-    toolSchemas: (process.env.BRIDGE_TOOL_SCHEMAS ?? local.toolSchemas) === "lazy" ? "lazy" : "full",
+    toolSchemas: (process.env.BRIDGE_TOOL_SCHEMAS ?? local.toolSchemas) === "full" ? "full" : "lazy",
     logLevel: (process.env.BRIDGE_LOG_LEVEL as BridgeConfig["logLevel"]) ?? "info",
     configFile: process.env.BRIDGE_CONFIG ?? path.join(PROJECT_ROOT, "excel-partner.config.json"),
     mcp: {

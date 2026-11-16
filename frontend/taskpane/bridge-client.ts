@@ -59,7 +59,7 @@ const FILE_KINDS: Record<string, string> = { excel: "workbook", word: "document"
 export interface BridgeClientHandlers {
   onUserInput?(request: UserInputRequest, signal: AbortSignal, requestId: string): Promise<UserInputResponse>;
   onState(state: BridgeState, detail?: string): void;
-  onHello(info: { sessionToken: string; serverTime: string; addinBuildId?: string; autoApproveAllowed: boolean }): void;
+  onHello(info: { sessionToken: string; serverTime: string; addinBuildId?: string; autoApproveAllowed: boolean; toolSchemas?: "full" | "lazy" }): void;
   onProviderStatus(message: ProviderStatusMessage): void;
   onProviderEvent(event: ProviderEvent): void;
   /** A picture of the assistant's browser; shown to the person only. */
@@ -441,6 +441,7 @@ export class BridgeClient {
           serverTime: message.serverTime,
           addinBuildId: message.addinBuildId,
           autoApproveAllowed: this.autoApproveAllowed,
+          toolSchemas: message.toolSchemas,
         });
         return;
       case "hello_error":

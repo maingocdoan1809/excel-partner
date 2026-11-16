@@ -4,7 +4,7 @@ import { renderMarkdown } from "../ui/markdown.js";
 import { showToast } from "../ui/toast.js";
 import { formatToolValue } from "../ui/tool-view.js";
 import { BridgeClient } from "../bridge-client.js";
-import { browserView, connectedFiles, ensureWorkspaces, historyNotice, mcpSettings, navigation, providerPicker, recordChange, refreshModelCatalog, refreshUsage, resetWorkspaces, slash, store, thinking, updatePanel, updater } from "./services.js";
+import { browserView, connectedFiles, ensureWorkspaces, historyNotice, mcpSettings, navigation, providerPicker, recordChange, refreshModelCatalog, refreshUsage, resetWorkspaces, slash, store, thinking, toolSettings, updatePanel, updater } from "./services.js";
 import { append, appendTurnTool, cellLinkOptions, redrawMessages, scrollToEnd, summarize } from "./messages.js";
 import { handleEvent, renderState } from "./events.js";
 import { loadSession, restoreDocumentChat } from "./chats.js";
@@ -40,8 +40,9 @@ export function createBridgeClient(): BridgeClient {
       return response;
     },
     onState: renderState,
-    onHello: ({ addinBuildId, autoApproveAllowed }) => {
+    onHello: ({ addinBuildId, autoApproveAllowed, toolSchemas }) => {
       applyAutoApprovePolicy(autoApproveAllowed);
+      toolSettings.setBridgeDefault(toolSchemas === "lazy");
       void store.connect().then(async () => {
         if (app.restoreChatId && !app.currentRequestId) {
           const id = app.restoreChatId; app.restoreChatId = null;

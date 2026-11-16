@@ -37,6 +37,8 @@ export interface PaneSocketDeps {
   skills: SkillStore;
   references: ReferenceFiles;
   policy: AdminPolicy;
+  /** The bridge's own choice of how tools are offered; a pane that chooses for itself overrides it. */
+  toolSchemas: "full" | "lazy";
   /** Same rule as for HTTP requests: a foreign Origin or Host never gets a socket. */
   isTrustedRequest: (req: http.IncomingMessage) => boolean;
   addinBuildId: () => string;
@@ -245,6 +247,7 @@ export class PaneSockets {
       serverTime: new Date().toISOString(),
       addinBuildId: this.deps.addinBuildId(),
       policy: this.deps.policy,
+      toolSchemas: this.deps.toolSchemas,
     });
     this.broadcastConnectedFiles();
   }

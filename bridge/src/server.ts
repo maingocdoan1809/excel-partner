@@ -200,7 +200,7 @@ export class Bridge {
     });
     this.panes = new PaneSockets({
       sessions: this.sessions, logger: this.logger, turns, delegations, logins: this.logins, mcpServers: this.mcpServers,
-      externalTools: this.gateway.externalTools, skills: this.skills, references, policy,
+      externalTools: this.gateway.externalTools, skills: this.skills, references, policy, toolSchemas: config.toolSchemas,
       isTrustedRequest: req => this.isTrustedRequest(req), addinBuildId: () => this.addinBuildId(),
     });
     this.routes = {

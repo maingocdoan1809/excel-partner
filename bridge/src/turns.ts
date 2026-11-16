@@ -118,7 +118,7 @@ export class TurnRunner {
     try {
       const detection = await adapter.detect();
       if (entry.controller.signal.aborted || session.isBusy || !detection.installed || detection.status !== "ready") return;
-      await this.openRuntime(session, adapter, input, this.promptSettings(session), entry.controller.signal);
+      await this.openRuntime(session, adapter, input, this.promptSettings(session, this.lazy(input.capabilities)), entry.controller.signal);
     } catch (error) {
       if (!entry.controller.signal.aborted) this.deps.logger.debug("runtime warm-up failed", { error: String(error) });
     } finally {
@@ -126,11 +126,17 @@ export class TurnRunner {
     }
   }
 
-  private promptSettings(session: WorkbookSession) {
+  /** Whether tools are offered by summary: the pane's own choice, else the bridge's `toolSchemas` setting. */
+  private lazy(capabilities?: ToolCapabilities): boolean {
+    return capabilities?.lazySchemas ?? this.deps.config.toolSchemas === "lazy";
+  }
+
+  private promptSettings(session: WorkbookSession, lazySchemas: boolean) {
     const stored = this.deps.systemPrompt.forHost(session.host).read();
     // Excel keeps the user's prompt as it is; Word and PowerPoint add their own rules (and a new revision, so a running session restarts with them).
-    if (session.host === "excel") return stored;
-    const content = hostSystemPrompt(session.host, stored.content, { connectedFiles: this.deps.hasOtherFiles(session), officeJs: this.deps.config.allowOfficeJs, lazySchemas: this.deps.config.toolSchemas === "lazy" });
+    // The rule for compact tools goes after the person's own prompt; with no prompt there is nothing to add it to (some providers would take it as their whole prompt).
+    if (session.host === "excel" && (!lazySchemas || !stored.content.trim())) return stored;
+    const content = hostSystemPrompt(session.host, stored.content, { connectedFiles: this.deps.hasOtherFiles(session), officeJs: this.deps.config.allowOfficeJs, lazySchemas });
     return { ...stored, content, revision: createHash("sha256").update(`${stored.revision}:${session.host}:${content}`).digest("hex") };
   }
 
@@ -145,7 +151,7 @@ export class TurnRunner {
     await this.deps.providerSessions.ensure(session, {
       model, effort, chatSessionId, resumeSessionId,
       capabilities: { ...input.capabilities, webSearch: input.capabilities.webSearch && adapter.capabilities.nativeWebSearch,
-        connectedFiles: this.deps.hasOtherFiles(session), lazySchemas: this.deps.config.toolSchemas === "lazy" },
+        connectedFiles: this.deps.hasOtherFiles(session), lazySchemas: this.lazy(input.capabilities) },
       systemPromptRevision: `${promptSettings.revision}:${catalogRevision}`,
     }, () => ({
       requestUserInput: (request, requestSignal) => session.requestUserInput(request, requestSignal),
@@ -242,7 +248,7 @@ export class TurnRunner {
 
     const adapter = this.deps.providers.require(session.provider);
     const selectedModel = model ?? null;
-    const promptSettings = this.promptSettings(session);
+    const promptSettings = this.promptSettings(session, this.lazy(capabilities));
     if (delegationId && !delegations.accept(session, delegationId, requestId)) {
       // Nobody waits for this any more (it timed out, the asker stopped, or it was never asked): do not change the file for no one.
       session.send({ type: "error", requestId, code: "cancelled", message: "The other file's request is no longer waiting for an answer, so it was not run." });
@@ -254,7 +260,7 @@ export class TurnRunner {
       sessionId: resumeSessionId ? providerSessionKey(session.provider, resumeSessionId) : chatSessionId ?? session.id,
       providerSessionId: resumeSessionId, requestId, provider: session.provider,
       model: selectedModel, startedAt: Date.now(), durationMs: 0, reason: "completed", usage: null,
-      catalogChars: toolCatalogChars(session.host, this.deps.config.allowOfficeJs, { ...session.capabilities, lazySchemas: this.deps.config.toolSchemas === "lazy" }),
+      catalogChars: toolCatalogChars(session.host, this.deps.config.allowOfficeJs, { ...session.capabilities, lazySchemas: this.lazy(capabilities) }),
     });
     // `/skill-name request` loads the skill's instructions into this turn.
     const expanded = isCommand ? { prompt, skill: undefined } : expandSkillPrompt(prompt, skills);

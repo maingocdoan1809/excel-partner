@@ -10,6 +10,7 @@ import { MockAdapter } from "../providers/src/mock.js";
 import { ProviderRegistry } from "../providers/src/registry.js";
 import type { SendTurnInput, StartSessionContext } from "../providers/src/types.js";
 import type { ProviderEvent, ToolResult } from "../protocol/src/index.js";
+import { LAZY_TOOLS_RULE } from "../protocol/src/system-prompts.js";
 import { PaneClient, getFreePort } from "./helpers.js";
 
 class BoundaryAdapter extends MockAdapter {
@@ -261,8 +262,23 @@ describe("editable settings and pending user prompts", () => {
     pane.send({ type: "prompt", requestId: "second", prompt: "Next", selection: null, resumeSessionId: "native-session" });
     await pane.waitFor(message => message.type === "turn_finished" && message.requestId === "second");
     expect(adapter.contexts).toHaveLength(2);
-    expect(adapter.contexts[1]).toMatchObject({ systemPrompt: content, resumeSessionId: "native-session" });
-    expect(adapter.inputs[1]?.systemPrompt).toBe(content);
+    // Tools are offered by summary unless the pane says otherwise, so the person's prompt is followed by the rule for that.
+    const expected = `${content}\n\n${LAZY_TOOLS_RULE}`;
+    expect(adapter.contexts[1]).toMatchObject({ systemPrompt: expected, resumeSessionId: "native-session" });
+    expect(adapter.inputs[1]?.systemPrompt).toBe(expected);
+  });
+
+  it("leaves the person's prompt as it is when the pane turns the compact tool list off", async () => {
+    const { adapter, pane, url, headers } = await setup();
+    adapter.useTool = false;
+    const initial = await (await fetch(url + "/session/system-prompt", { headers })).json() as { revision: string };
+    const content = "Use the Excel tools and answer in Vietnamese.";
+    expect((await fetch(url + "/session/system-prompt", { method: "PUT", headers, body: JSON.stringify({ revision: initial.revision, content }) })).status).toBe(200);
+    pane.send({ type: "prompt", requestId: "full", prompt: "Hello", selection: null, capabilities: { webSearch: false, playwright: false, lazySchemas: false } });
+    await pane.waitFor(message => message.type === "turn_started");
+    expect(adapter.inputs[0]?.systemPrompt).toBe(content);
+    adapter.release();
+    await pane.waitFor(message => message.type === "turn_finished");
   });
 
   it("does not deliver queued messages after Stop or cancel a new request for a stale cancel ID", async () => {

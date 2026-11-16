@@ -133,7 +133,7 @@ export function bindListeners(): void {
   els.permissionMode.addEventListener("change", () => selectPermissionMode(els.permissionMode.value as PermissionMode));
   els.modelSelect.addEventListener("change", () => { saveModelChoice(); prepareRuntime(); });
   els.effortSelect.addEventListener("change", prepareRuntime);
-  for (const id of ["tool-web-search", "tool-playwright"]) byId(id).addEventListener("change", prepareRuntime);
+  for (const id of ["tool-web-search", "tool-playwright", "tool-lazy-schemas"]) byId(id).addEventListener("change", prepareRuntime);
   els.send.addEventListener("click", () => {
     if (app.currentRequestId && !els.input.value.trim() && !pendingAttachments.length) stopCurrentTurn();
     else void submit();

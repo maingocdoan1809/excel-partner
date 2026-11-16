@@ -91,7 +91,13 @@ export function hostSystemPrompt(host: Host, userPrompt: string, options: { conn
 }
 
 /** With lazy tool schemas the model is told how the tool list works: the one step that keeps every call as exact as with full definitions. */
-export const LAZY_TOOLS_RULE = "# Tools\n- Most tools are listed by name and a one-line summary only. Before you use a tool for the first time in this conversation, call get_tool_definition once with the names of every tool you expect to need. A call made without its definition is not run (the answer carries the definition), and an argument the tool does not have is refused.";
+export const LAZY_TOOLS_RULE = [
+  "# Tools",
+  "- Most tools are listed by name and a one-line summary only; a tool that lists its parameters needs no lookup.",
+  "- Plan the request first, then call get_tool_definition ONCE with every tool you expect to use, e.g. names: [\"format_range\", \"data_validation\", \"batch\"] (up to 12). Do not look tools up one at a time.",
+  "- A definition you already received in this conversation is still valid: never ask for it again.",
+  "- A call made without its definition is not run (the answer carries the definition: repeat the call), and an argument the tool does not have is refused.",
+].join("\n");
 
 function hostPrompt(host: Host, userPrompt: string, options: { connectedFiles?: boolean; officeJs?: boolean }): string {
   if (host === "excel") return userPrompt;
