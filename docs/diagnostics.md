@@ -66,7 +66,6 @@ The `doctor.mjs`, `doctor-checks.mjs` and `doctor-probes.mjs` files must be pres
 together. MCP probes additionally need the installed MCP SDK and compiled MCP
 entrypoint; Windows command shims in provider probes need cross-spawn. If these
 are missing, diagnostics reports a failed check rather than loading the bridge.
-Setup also copies a separate recovery launcher under application data; see below.
 
 The core reads the product name from package.json and also supports the
 `excel-partner` package on main without importing Office host implementations.
@@ -75,7 +74,7 @@ Neither command requires a pane to be open.
 ## Services that do not start after Windows restarts
 
 The bridge and the gateway start when you sign in to Windows (Run entries that
-call the recovery launcher with `start --at-logon`). The pane itself is served by
+call `office-partner start --at-logon`). The pane itself is served by
 the bridge, so while the bridge is down the pane cannot show a button; use one of
 these instead:
 
@@ -160,13 +159,6 @@ A release that ships the same CLI version reuses the install instead of download
 integrity or policy failure leaves the CLI that was running in place and is recorded for `doctor`; it never
 stops the update of the product itself. Updating the system CLI does not change a provider that runs a
 private one.
-
-For the first migration from an older package, install this Office Partner build
-and run `office-partner setup` while responses are finished. This establishes the
-baseline snapshot and recovery startup entry. Older services without maintenance
-controls cannot participate in a transactional switch; an update refuses that
-switch and keeps the running copy. Run setup from the existing installation to
-migrate it, then use the managed update flow for later releases.
 
 Every chat, new or saved, runs the CLI the provider is using now. A running session keeps the process it
 started with until it ends. Removing a release on its own still requires reinstallation. Use `office-partner uninstall all`

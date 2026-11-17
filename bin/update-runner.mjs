@@ -1,15 +1,16 @@
 #!/usr/bin/env node
-// Detached release management, copied with the dependency-free bin tools before services stop.
+// Runs an update that the bridge started from Settings. The bridge copies this file and update.mjs to a temporary
+// folder first: the installed package is replaced while this runs, and the bridge itself is stopped on the way.
 //
 // Environment: EP_ROOT (installed package), EP_DATA (data folder), EP_SPEC (npm spec), EP_FROM (version before),
 // EP_GATEWAY ("1" when the gateway is set up and must be started again).
+import { spawnSync } from "node:child_process";
 import { rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { setTimeout as sleep } from "node:timers/promises";
-import { packageNameOf, writeUpdateStatus } from "./update.mjs";
-import { managementMain } from "./manage.mjs";
+import { installedVersion, packageNameOf, stopPackageProcesses, updatePackage, writeUpdateStatus } from "./update.mjs";
 
 const root = process.env.EP_ROOT;
 const dataDir = process.env.EP_DATA;
@@ -25,22 +26,52 @@ const status = (patch) => writeUpdateStatus(dataDir, { from, spec, startedAt, ..
 const STEP_TEXT = {
   stopping: "Stopping the bridge",
   installing: "Installing the new version",
+  recovering: "The install failed; restarting the old version",
   starting: "Starting the new version",
 };
+
+function startGateway(installedRoot) {
+  const result = spawnSync(process.execPath, [path.join(installedRoot, "bin", "office-partner.mjs"), "gateway", "start"], { cwd: dataDir, stdio: "inherit", windowsHide: true });
+  if (result.error || result.status !== 0) {
+    throw new Error(`Could not restart Agent Gateway (${result.error?.message ?? `exit ${result.status ?? "unknown"}`}). Run office-partner gateway start.`);
+  }
+}
+
+let gatewayAttempted = false;
 
 try {
   status({ state: "running", step: "preparing", message: "Getting ready", pid: process.pid, error: null, to: null, finishedAt: null });
   // Give the bridge time to answer the request that started this, and the pane time to show "Updating".
   await sleep(1500);
-  const action = process.env.EP_ACTION === "repair" ? "repair" : "update";
-  const argv = action === "update" ? ["update", "--from", spec] : ["repair"];
-  const result = await managementMain(argv, { root, dataDir,
-    report: step => status({ state: "running", step, message: STEP_TEXT[step] ?? step }) });
-  status({ state: "done", step: "done", message: action === "update" ? "Updated" : "Repaired", to: result?.version ?? null, finishedAt: new Date().toISOString() });
+  const result = await updatePackage({
+    root,
+    dataDir,
+    nodePath: process.execPath,
+    wasRunning: true,
+    spec,
+    report: (step) => status({ state: "running", step, message: STEP_TEXT[step] ?? step }),
+    stop: async () => {
+      // The bridge launched this runner, so it is one of the ancestors the process sweep deliberately spares.
+      // Stop that known service explicitly before sweeping the remaining package processes.
+      const stopped = spawnSync(process.execPath, [path.join(root, "bin", "office-partner.mjs"), "stop"], { cwd: dataDir, stdio: "inherit", windowsHide: true });
+      if (stopped.error || stopped.status !== 0) throw new Error("Could not stop the bridge. Run office-partner stop, then retry the update.");
+      stopPackageProcesses({ root });
+    },
+  });
+  if (process.env.EP_GATEWAY === "1") {
+    gatewayAttempted = true;
+    startGateway(result.installedRoot);
+  }
+  status({ state: "done", step: "done", message: "Updated", to: result.version ?? installedVersion(result.installedRoot), finishedAt: new Date().toISOString() });
   removeOwnFolder();
 } catch (error) {
-  console.error(error instanceof Error ? error.message : String(error));
-  status({ state: "failed", step: "failed", message: "The update did not finish", error: error instanceof Error ? error.message : String(error), finishedAt: new Date().toISOString() });
+  let message = error instanceof Error ? error.message : String(error);
+  if (process.env.EP_GATEWAY === "1" && !gatewayAttempted) {
+    try { startGateway(root); }
+    catch (recoveryError) { message += ` ${recoveryError instanceof Error ? recoveryError.message : String(recoveryError)}`; }
+  }
+  console.error(message);
+  status({ state: "failed", step: "failed", message: "The update did not finish", error: message, finishedAt: new Date().toISOString() });
   process.exitCode = 1;
   removeOwnFolder();
 }

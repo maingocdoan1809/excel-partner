@@ -26,7 +26,7 @@ describe("Settings system and recovery controls", () => {
     expect(el("system-providers").textContent).toContain("last installation did not finish");
   });
   it("prevents management actions while the current turn is active", async () => {
-    const w = fixture(true); await w.panel.refresh(); el("system-repair").click(); await flush();
+    const w = fixture(true); await w.panel.refresh(); el("system-debug").click(); await flush();
     expect(w.client.systemAction).not.toHaveBeenCalled(); expect(el("system-status").textContent).toContain("current response");
   });
   it("checks the actual host MCP catalog and displays stable diagnostic codes", async () => {
@@ -63,19 +63,5 @@ describe("Settings system and recovery controls", () => {
     await w.panel.refresh(); (el("system-providers").querySelectorAll("button")[1] as HTMLButtonElement).click(); await flush();
     expect(w.client.systemAction).toHaveBeenCalledWith("install", "codex");
     expect(el("system-status").textContent).toContain("needs sign-in"); expect(w.client.systemInfo).toHaveBeenCalledTimes(2);
-  });
-  it("asks before repairing, repairs without native dialogs and waits for the installation to come back", async () => {
-    vi.useFakeTimers(); const nativeConfirm = vi.spyOn(window, "confirm").mockImplementation(() => { throw Error("Unsupported"); });
-    const w = fixture(); await w.panel.refresh(); el("system-repair").click(); await flush();
-    expect(w.client.systemAction).not.toHaveBeenCalled();
-    document.querySelector<HTMLButtonElement>("[data-confirm-accept]")!.click(); await flush();
-    expect(w.client.systemAction).toHaveBeenCalledWith("repair");
-    await vi.advanceTimersByTimeAsync(2000); expect(el("system-status").textContent).toBe("Recovery completed.");
-    expect(nativeConfirm).not.toHaveBeenCalled();
-  });
-  it("D02 does nothing when the person cancels the repair", async () => {
-    const w = fixture(); await w.panel.refresh(); el("system-repair").click(); await flush();
-    document.querySelector<HTMLButtonElement>("[data-confirm-cancel]")!.click(); await flush();
-    expect(w.client.systemAction).not.toHaveBeenCalled();
   });
 });

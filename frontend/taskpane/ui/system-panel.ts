@@ -44,7 +44,7 @@ export function setupSystemPanel(getClient: () => SystemClient, isBusy: () => bo
         const name = document.createElement("strong");
         name.textContent = PROVIDER_NAMES[provider.provider];
         const text = document.createElement("p"); text.className = "settings-description";
-        text.textContent = provider.disabled ? "Disabled" : provider.managed ? `private CLI ${provider.version}${provider.available === false ? " (repair required)" : ""}` : "Using your installed CLI";
+        text.textContent = provider.disabled ? "Disabled" : provider.managed ? `private CLI ${provider.version}${provider.available === false ? " (missing, install it again)" : ""}` : "Using your installed CLI";
         const button = document.createElement("button"); button.type = "button"; button.className = "secondary";
         button.textContent = provider.selected ? "Disable" : provider.failure ? "Install again" : "Install private CLI";
         button.addEventListener("click", () => void operation(async () => {
@@ -74,21 +74,6 @@ export function setupSystemPanel(getClient: () => SystemClient, isBusy: () => bo
     const link = document.createElement("a"); link.href = url; link.download = "office-partner-diagnostics.json"; link.click();
     window.setTimeout(() => URL.revokeObjectURL(url), 1000); say("Diagnostic metadata exported. No raw logs or document contents were included.");
   }));
-  async function repair() {
-    if (!await confirmAction(section!, "Check the installed files and repair them and the private CLIs? A damaged installation is installed again from npm. Office Partner will reconnect.", "Repair installation")) return;
-    await getClient().systemAction("repair");
-    say("Recovery started. Waiting for Office Partner to reconnect…");
-    for (let i = 0; i < 180; i++) {
-      await new Promise(resolve => window.setTimeout(resolve, 2000));
-      try {
-        const result = await getClient().updateInfo();
-        if (result.status.state === "done") { say("Recovery completed."); await refresh(); return; }
-        if (result.status.state === "failed") { say(result.status.error ?? "Recovery failed. Use the standalone recovery launcher."); return; }
-      } catch { /* service is restarting */ }
-    }
-    say("The service has not reconnected. Use office-partner-doctor or the recovery launcher.");
-  }
-  document.getElementById("system-repair")!.addEventListener("click", () => void operation(repair));
   debugButton.addEventListener("click", () => void operation(async () => {
     const turnOn = !debugOn;
     await getClient().systemAction(turnOn ? "debug-on" : "debug-off");

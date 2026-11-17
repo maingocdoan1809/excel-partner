@@ -5,10 +5,10 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { collectDoctor, PROVIDERS } from "./doctor-checks.mjs";
 
-const USAGE = "Usage: office-partner-doctor [addin|gateway|all] [--provider <id>] [--probe] [--mcp] [--integrity] [--host excel|word|powerpoint] [--json] [--output <new file>]\n";
+const USAGE = "Usage: office-partner-doctor [addin|gateway|all] [--provider <id>] [--probe] [--mcp] [--host excel|word|powerpoint] [--json] [--output <new file>]\n";
 
 export function parseDoctorArgs(args) {
-  const result = { target: "all", probe: false, mcp: false, integrity: false, host: "excel", json: false, help: false };
+  const result = { target: "all", probe: false, mcp: false, host: "excel", json: false, help: false };
   let targetSet = false;
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
@@ -17,7 +17,6 @@ export function parseDoctorArgs(args) {
     else if (arg === "--json") result.json = true;
     else if (arg === "--probe") result.probe = true;
     else if (arg === "--mcp") result.mcp = true;
-    else if (arg === "--integrity") result.integrity = true;
     else if (["--provider", "--host", "--output"].includes(arg)) {
       const value = args[++i];
       if (!value || value.startsWith("--")) throw new Error(`Missing value for ${arg}.`);

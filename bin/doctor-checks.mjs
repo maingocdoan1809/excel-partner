@@ -57,7 +57,7 @@ function expectedProtocol(root) {
 
 // All emitted strings are product-owned. Never include raw process/config/error output.
 export async function collectDoctor(options) {
-  const { root: requestedRoot, target = "all", provider, probe = false, mcp = false, integrity = false, host = "excel",
+  const { root: requestedRoot, target = "all", provider, probe = false, mcp = false, host = "excel",
     env = process.env, platform = process.platform, arch = process.arch, nodeVersion = process.versions.node,
     run = runCommand, health = requestHealth, checkMcp = probeMcp, now = Date.now } = options;
   const checks = [];
@@ -66,32 +66,8 @@ export async function collectDoctor(options) {
   let root = requestedRoot, runtimeStore, runtimeState;
   const dataDir = env.OFFICE_PARTNER_DATA_DIR || path.join(env.LOCALAPPDATA || os.homedir(), "Excel Partner");
   if (file(path.join(root, "bin", "runtime-store.cjs"))) {
-    try {
-      runtimeStore = createRequire(import.meta.url)(path.join(root, "bin", "runtime-store.cjs"));
-      const deployment = runtimeStore.currentDeployment(dataDir), active = deployment.releases[deployment.active];
-      if (active) root = active.root;
-      runtimeState = runtimeStore.readState(dataDir);
-      add("deployment.state", "pass", "DEPLOYMENT_STATE_OK", "Deployment and runtime selection metadata parsed.", undefined,
-        { active: active?.version ?? null });
-    } catch { add("deployment.state", "fail", "DEPLOYMENT_STATE_INVALID", "Saved deployment metadata cannot be read safely.", "Use the recovery launcher to restore a retained release."); }
+    try { runtimeStore = createRequire(import.meta.url)(path.join(root, "bin", "runtime-store.cjs")); runtimeState = runtimeStore.readState(dataDir); } catch { /* reported by the provider checks */ }
   }
-  if (integrity && runtimeStore && runtimeState) {
-    try {
-      const { verifyRelease } = await import("./deployment.mjs");
-      const { verifyRuntime } = await import("./runtime-manager.mjs");
-      const deployment = runtimeStore.currentDeployment(dataDir);
-      for (const release of Object.values(deployment.releases)) {
-        try { verifyRelease(release, true); add(`integrity.release.${release.id.slice(0, 16)}`, "pass", "RELEASE_INTEGRITY_OK", "Retained release file inventory matches.", undefined, { version: version(release.version) }); }
-        catch { add(`integrity.release.${release.id.slice(0, 16)}`, "fail", "RELEASE_INTEGRITY_FAILED", "A retained release has missing or changed files.", "Use recovery repair or restore a verified cached release.", { version: version(release.version) }); }
-      }
-      for (const profile of Object.values(runtimeState.profiles)) {
-        if (provider && provider !== profile.provider) continue;
-        try { verifyRuntime(profile, dataDir); add(`integrity.runtime.${profile.id.slice(0, 16)}`, "pass", "RUNTIME_INTEGRITY_OK", "Managed CLI file inventory matches.", undefined, { provider: profile.provider, version: version(profile.version) }); }
-        catch { add(`integrity.runtime.${profile.id.slice(0, 16)}`, "fail", "RUNTIME_INTEGRITY_FAILED", "A managed CLI has missing or changed files.", "office-partner repair", { provider: profile.provider, version: version(profile.version) }); }
-      }
-      add("integrity.scan", "pass", "INTEGRITY_SCAN_COMPLETE", "Retained app and selected provider inventories were checked. No CLI was launched.");
-    } catch { add("integrity.scan", "fail", "INTEGRITY_TOOLS_UNAVAILABLE", "Integrity checks could not run.", "Use the retained recovery launcher or reinstall the management tools."); }
-  } else if (integrity) add("integrity.scan", runtimeState ? "skip" : "warn", "INTEGRITY_STATE_UNAVAILABLE", "No readable managed inventory is available for integrity checks.");
   let pkg = {};
   try { pkg = readJson(path.join(root, "package.json")); } catch { /* report below */ }
   const command = pkg.name === "excel-partner" ? "excel-partner" : "office-partner";
@@ -285,5 +261,5 @@ export async function collectDoctor(options) {
   const status = checks.some(check => check.status === "fail") ? "fail" : checks.some(check => check.status === "warn") ? "warn" : "pass";
   return { schemaVersion: 1, diagnosticId: randomUUID(), generatedAt: new Date(now()).toISOString(),
     product: { name: packageName, version: version(pkg.version) }, environment: { platform, arch, node: version(nodeVersion) },
-    scope: { target, provider: provider ?? null, probe, mcp, integrity, host }, status, checks };
+    scope: { target, provider: provider ?? null, probe, mcp, host }, status, checks };
 }

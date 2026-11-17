@@ -126,7 +126,7 @@ export class UpdateService {
       platform: process.platform,
       spec: process.env.OFFICE_PARTNER_UPDATE_SPEC || process.env.EXCEL_PARTNER_UPDATE_SPEC || `${packageNameOf(options.packageRoot)}@latest`,
       now: Date.now,
-      staleAfterMs: (fs.existsSync(path.join(options.packageRoot, "bin", "deployment.mjs")) ? 90 : 15) * 60_000,
+      staleAfterMs: 15 * 60_000,
       cacheMs: 10 * 60_000,
       ...options,
     };
@@ -191,8 +191,6 @@ export class UpdateService {
     const policy = loadAdminPolicy().policy;
     if (!policy.autoUpdate) return "Updates are managed by your administrator.";
     if (this.opts.platform !== "win32") return "Updating from the task pane works on Windows with Excel desktop.";
-    // Managed releases are installed alongside the current copy, including source installations.
-    if (fs.existsSync(path.join(this.opts.packageRoot, "bin", "deployment.mjs"))) return null;
     const root = this.globalRoot();
     if (!root) return "npm was not found. Install Node.js, or run office-partner update from a terminal.";
     if (path.resolve(root, this.packageName).toLowerCase() !== path.resolve(this.opts.packageRoot).toLowerCase()) {
@@ -228,7 +226,7 @@ export class UpdateService {
   }
 
   /** Start the update in a separate process; it outlives this bridge, which it stops. */
-  start(options: { busy: boolean; action?: "update" | "repair" }): UpdateStatus {
+  start(options: { busy: boolean }): UpdateStatus {
     const reason = this.unsupportedReason();
     if (reason) throw new UpdateError("unsupported", reason);
     if (this.status().state === "running") throw new UpdateError("running", "An update is already running.");
@@ -248,7 +246,6 @@ export class UpdateService {
       EP_SPEC: this.opts.spec,
       EP_FROM: this.version,
       EP_GATEWAY: gatewaySetUp ? "1" : "0",
-      EP_ACTION: options.action ?? "update",
     };
     const started: UpdateStatus = {
       state: "running", step: "preparing", message: "Getting ready", from: this.version, to: null, error: null,

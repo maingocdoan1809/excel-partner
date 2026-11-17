@@ -23,7 +23,6 @@ export function minimumVersion(provider: ProviderId): string | null {
 export async function installProvider(provider: ProviderId, env: NodeJS.ProcessEnv = process.env): Promise<void> {
   const dataDir = store.home(env), root = providerPackageRoot();
   const tools = (name: string) => import(pathToFileURL(path.join(root, "bin", name)).href);
-  (await tools("manage.mjs")).ensureBaseline(root, dataDir);
   await (await tools("runtime-manager.mjs")).installRuntime(root, provider, { dataDir });
 }
 
@@ -68,7 +67,7 @@ export class ProfiledAdapter implements ProviderAdapter {
     catch (error) {
       const disabled = error instanceof Error && error.message === "PROVIDER_DISABLED";
       return { provider: this.id, installed: !disabled, version: null, status: disabled ? "not_installed" as const : "error" as const,
-        hint: disabled ? `Install this provider with office-partner providers install ${this.id}.` : "The installed provider runtime is unavailable. Run office-partner doctor and office-partner repair.",
+        hint: disabled ? `Install this provider with office-partner providers install ${this.id}.` : `The installed provider runtime is unavailable. Install it again with office-partner providers install ${this.id}.`,
         capabilities: this.capabilities };
     }
   }

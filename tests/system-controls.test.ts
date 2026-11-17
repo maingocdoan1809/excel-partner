@@ -25,8 +25,7 @@ async function fixture(profiled = false) {
     const id = runtimeStore.digest("fixture"), command = path.join(directory!, "runtimes", id, "fake-cli.js");
     fs.mkdirSync(path.dirname(command), { recursive: true }); fs.writeFileSync(command, "fixture");
     runtimeStore.changeState(directory, (state: any) => {
-      state.profiles[id] = { id, provider: "copilot", version: "1", command, stateHome: path.join(directory!, "provider-data", "copilot", "home"),
-        fingerprint: runtimeStore.fileDigest(command), platform: process.platform, arch: process.arch };
+      state.profiles[id] = { id, provider: "copilot", version: "1", command, stateHome: path.join(directory!, "provider-data", "copilot", "home"), platform: process.platform, arch: process.arch };
       state.active.copilot = id;
     });
   }

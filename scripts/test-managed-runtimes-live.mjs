@@ -3,7 +3,6 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import store from '../bin/runtime-store.cjs';
-import { ensureBaseline, installRecovery } from '../bin/manage.mjs';
 import { installRuntime, readManifest, runtimeInventory } from '../bin/runtime-manager.mjs';
 import { runCommand } from '../bin/doctor-probes.mjs';
 
@@ -13,14 +12,9 @@ if (!providers.length || providers.some(id => !store.ids.includes(id))) {
 }
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const output = path.join(root, 'output', 'playwright', 'runtime-live');
-const sources = ['bin', 'dist/providers/src'].flatMap(directory => fs.readdirSync(path.join(root, directory))
-  .filter(file => /\.(?:mjs|cjs|js|json)$/.test(file)).sort().map(file => path.join(directory, file)));
-const revision = store.digest(sources.map(file => file + ':' + store.fileDigest(path.join(root, file))).join('\n')).slice(0, 20);
+const revision = store.digest(fs.readFileSync(path.join(root, 'bin', 'runtime-manifest.json'), 'utf8')).slice(0, 20);
 const dataDir = path.join(output, 'data-' + revision), runtimeData = path.relative(root, dataDir);
 fs.mkdirSync(output, { recursive: true });
-console.log('Preparing isolated app snapshot. Existing provider installations and sign-ins are kept.');
-installRecovery(root, dataDir);
-const baseline = ensureBaseline(root, dataDir);
 let prior = [];
 try { const saved = JSON.parse(fs.readFileSync(path.join(output, 'results.json'), 'utf8')); if (saved.runtimeData === runtimeData) prior = saved.checks ?? []; } catch { /* first check */ }
 const checks = prior.filter(check => !providers.includes(check.provider)), manifest = readManifest(root);

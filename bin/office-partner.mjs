@@ -6,6 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import runtimeStore from "./runtime-store.cjs";
+import { packageNameOf, stopPackageProcesses, updatePackage } from "./update.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const dataDir = runtimeStore.home();
@@ -24,7 +25,7 @@ function requireWindows() {
 function powershell(action, extra = []) {
   const result = spawnSync("powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", windowsScript,
     "-Action", action, "-DataDir", dataDir, "-ManifestPath", manifest,
-    "-NodePath", process.execPath, "-CliPath", existsSync(path.join(dataDir, "recovery", "recovery.mjs")) ? path.join(dataDir, "recovery", "recovery.mjs") : fileURLToPath(import.meta.url), ...extra], { stdio: "inherit" });
+    "-NodePath", process.execPath, "-CliPath", fileURLToPath(import.meta.url), ...extra], { stdio: "inherit" });
   if (result.error) throw result.error;
   if (result.status !== 0) fail(`Windows setup failed (${action}, exit ${result.status ?? "unknown"}).`);
 }
@@ -285,12 +286,10 @@ const HELP = `Usage: office-partner <command> [addin|gateway|all]
   info       Show the gateway URL and token (add --copy to copy the token).
   logs       Show recent log lines.
   doctor     Check installation/services (default: both). --provider <id> --probe checks a CLI; --mcp checks local tool schemas.
-             --integrity hashes retained releases/CLIs. --json prints a report; --output <new-file.json> saves it.
+             --json prints a report; --output <new-file.json> saves it.
              --host excel|word|powerpoint selects MCP host.
   providers  list | install <provider> | remove <provider> | login <provider>. CLI versions are pinned by this release.
-  versions   Show retained releases and managed CLI versions.
-  rollback   rollback <version> installs that older version from npm (only when you run it).
-  repair     Verify the release and repair its managed runtimes while services are stopped.
+  rollback   rollback <version> installs that version of the whole package from npm.
   fix        Start the bridge and gateway again if the pane does not open (Start Menu: Office Partner - Fix connection).
   diagnostics export <new-file.json> saves diagnostic metadata for support.
   debug      on | off (on expires after 15 minutes).
@@ -299,28 +298,12 @@ const HELP = `Usage: office-partner <command> [addin|gateway|all]
   scripts    Playwright regression scripts saved per test case: scripts [<url>] | show <url> <case id> | delete <url> <case id> | path.
   mcp-peer   MCP server for a terminal agent to ask the assistant of an open Office file. Register once: claude mcp add office-partner -- office-partner mcp-peer
   allow-host Let the bridge answer to another hostname/IP (e.g. a WSL IP): allow-host <name> [--remove]; no name lists them.
-  update     Install the latest release and refresh both (always the whole package). --from <spec|.tgz> installs that instead.
+  update     Install the latest release and the CLI versions that go with it (always the whole package). --from <spec|.tgz> installs that instead.
   uninstall  Stop and remove registration and startup entries.
 
 Gateway settings use: office-partner gateway <config|alias|model-name|provider|models|warmup|autostart> ...
 Examples: office-partner setup            office-partner setup gateway
           office-partner start all        office-partner info --copy`;
-
-/**
- * Management commands (update, repair, rollback, doctor...) run the recovery tools in the data folder, not this package's own
- * copy. A managed update installs the new release beside the old one and never touches the global npm package, so this
- * package's copy of those commands would stay as old as the day it was installed. The recovery copy is refreshed by every
- * update and does not depend on any release being intact. Without a recovery launcher (a source checkout, a fresh install
- * before `setup`) the commands run from here as before.
- */
-function runWithRecoveryTools(args) {
-  const entry = path.join(dataDir, "recovery", "recovery.mjs");
-  if (process.env.OFFICE_PARTNER_RECOVERY_ACTIVE === "1" || !existsSync(entry)) return false;
-  const result = spawnSync(process.execPath, [entry, ...args], { stdio: "inherit", env: { ...process.env, OFFICE_PARTNER_RECOVERY_ACTIVE: "1" } });
-  if (result.error) return false;
-  process.exitCode = result.status ?? 1;
-  return true;
-}
 
 async function main() {
   let args = process.argv.slice(2).filter(arg => arg !== "--help");
@@ -339,8 +322,6 @@ async function main() {
   }
   const command = args[0] || "help";
   if (command === "help" || process.argv.includes("--help")) { console.log(HELP); return; }
-  if (command === "doctor" && runWithRecoveryTools(args)) return;
-  if (command === "gateway" && args[1] === "doctor" && runWithRecoveryTools(["doctor", "gateway", ...args.slice(2)])) return;
   if (command === "doctor" || command === "gateway" && args[1] === "doctor") {
     const { doctorMain } = await import("./doctor.mjs");
     process.exitCode = await doctorMain(command === "doctor" ? args.slice(1) : ["gateway", ...args.slice(2)], { root }).catch(() => {
@@ -349,14 +330,11 @@ async function main() {
     });
     return;
   }
-  if (["providers", "versions", "rollback", "repair", "diagnostics", "debug", "update", "fix"].includes(command)) {
-    const managementArgs = command === "update" && updateSpec ? ["update", "--from", updateSpec, ...args.filter(arg => arg === "--allow-downgrade")] : args;
-    if (runWithRecoveryTools(managementArgs)) return;
+  // Provider CLIs, diagnostics and the sign-in start (with its retries) live in manage.mjs; they run from this package.
+  if (["providers", "diagnostics", "debug", "fix"].includes(command) || command === "start" && args.includes("--at-logon")) {
     const { managementMain } = await import("./manage.mjs");
-    await managementMain(managementArgs, { root, dataDir }); return;
+    await managementMain(args, { root, dataDir }); return;
   }
-  const { dispatchActive } = await import("./manage.mjs");
-  if (command !== "setup" && dispatchActive(root, args, dataDir)) return;
   if (command === "gateway") { gateway(args.slice(1)); return; }
   if (command === "login" || command === "sessions" || command === "logout") { await testSessions(command, args.slice(1)); return; }
   if (command === "knowledge") { await siteKnowledge(args.slice(1)); return; }
@@ -366,24 +344,23 @@ async function main() {
   if (command === "allow-host") { allowHost(args.slice(1).filter(arg => !arg.startsWith("--")), args.includes("--remove")); return; }
   const flags = args.filter(arg => arg.startsWith("--"));
   const positional = args.filter(arg => !arg.startsWith("--"));
-  const given = TARGETS[positional[1]];
-  if (positional[1] && !given) fail(`Unknown target: ${positional[1]}. Use addin, gateway or all.`);
-  const everything = ["status", "doctor", "update", "info", "token"].includes(command);
+  const given = command === "rollback" ? undefined : TARGETS[positional[1]];
+  if (positional[1] && !given && command !== "rollback") fail(`Unknown target: ${positional[1]}. Use addin, gateway or all.`);
+  const everything = ["status", "doctor", "update", "rollback", "info", "token"].includes(command);
   const target = given ?? (everything ? "all" : "addin");
   const wantAddin = target !== "gateway", wantGateway = target !== "addin";
   if (command === "setup") {
-    const { installRecovery, ensureBaseline } = await import("./manage.mjs");
     const { installRuntime } = await import("./runtime-manager.mjs");
     let selected = providersSpec;
-    if (!skipProviders && selected === undefined && process.stdin.isTTY && !runtimeStore.readState(dataDir).selected.length) {
+    // A CLI the product installed before is brought to the version of this release (an update runs setup); on a fresh machine the person chooses.
+    if (selected === undefined) selected = runtimeStore.readState(dataDir).selected.join(",") || undefined;
+    if (!skipProviders && selected === undefined && process.stdin.isTTY) {
       const { createInterface } = await import("node:readline/promises");
       const input = createInterface({ input: process.stdin, output: process.stdout });
       try { selected = (await input.question("Providers to install (copilot, claude, codex, opencode; comma separated; Enter keeps existing CLIs): ")).trim() || "none"; }
       finally { input.close(); }
       if (selected !== "none" && !selected.split(",").every(id => runtimeStore.ids.includes(id))) fail("Unknown provider selection.");
     }
-    installRecovery(root, dataDir);
-    const baseline = ensureBaseline(root, dataDir);
     if (!skipProviders && selected && selected !== "none") {
       for (const provider of selected.split(",")) {
         console.log(`Installing the private ${provider} CLI version for this release. Your system CLI is kept.`);
@@ -393,9 +370,6 @@ async function main() {
         }
       }
     }
-    runtimeStore.changeState(dataDir, state => { if (wantAddin) state.owners.addin = true; if (wantGateway) state.owners.gateway = true; });
-    if (path.resolve(root) !== path.resolve(baseline.root) && livePid()) await stop();
-    if (dispatchActive(root, ["setup", target, "--skip-providers", ...flags.filter(flag => flag === "--no-sideload")], dataDir)) return;
   }
   // The add-in needs Word, Excel or PowerPoint desktop on Windows; the gateway does not. Each part
   // runs on its own, so a failure in one never prevents the other from running.
@@ -415,6 +389,28 @@ async function main() {
         console.log("Restart Word, Excel and PowerPoint, then open Home > Office Partner. Use Settings > Sign in to GitHub Copilot for device-code sign-in; other providers use their own CLI login.");
       }));
       if (wantGateway) add("Gateway", gatewayStep(["setup"]));
+      break;
+    case "update":
+    case "rollback":
+      add("Update", addin(async () => {
+        const { updateTarget } = await import("./manage.mjs");
+        const rollback = command === "rollback";
+        if (rollback && !/^\d+\.\d+\.\d+(?:-[\w.-]+)?$/.test(positional[1] ?? "")) fail("Usage: office-partner rollback <version> (installs that version from npm)");
+        const spec = await updateTarget(root, rollback ? `${packageNameOf(root)}@${positional[1]}` : updateSpec, { allowDowngrade: rollback || args.includes("--allow-downgrade") });
+        // The gateway ships in the same package: stop it while files are replaced, then start the new one.
+        const gatewaySetUp = existsSync(path.join(gatewayDir, "token.txt"));
+        if (gatewaySetUp) gateway(["stop"]);
+        try {
+          await updatePackage({
+            root, dataDir, nodePath: process.execPath, wasRunning: Boolean(livePid()), spec: /\.tgz$/i.test(spec) ? path.resolve(spec) : spec,
+            // Also stop what the bridge started (relay, helper scripts): any of them can keep npm from replacing the folder.
+            stop: async () => { await stop(); stopPackageProcesses({ root }); },
+          });
+        }
+        finally {
+          if (gatewaySetUp) spawnSync(process.execPath, [fileURLToPath(import.meta.url), "gateway", "start"], { stdio: "inherit" });
+        }
+      }));
       break;
     case "start":
       if (wantAddin) add("Add-in", addin(() => start()));
@@ -460,10 +456,6 @@ async function main() {
   for (const [name, step] of steps) {
     try { await step(); }
     catch (error) { console.error(`${name}: ${error.message || error}`); process.exitCode = 1; }
-  }
-  if (command === "uninstall" && !process.exitCode) {
-    const { releaseOwners } = await import("./manage.mjs");
-    releaseOwners(dataDir, { addin: wantAddin, gateway: wantGateway, gatewayConfigured: existsSync(path.join(gatewayDir, "token.txt")) });
   }
 }
 main().catch((error) => { console.error(error.message || error); process.exitCode = 1; });

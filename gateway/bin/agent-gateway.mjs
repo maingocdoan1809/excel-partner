@@ -129,9 +129,7 @@ async function setup() {
 const runKey = "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run", runName = "Agent Gateway";
 function autostart(enable) {
   if (process.platform !== "win32") { console.log("Automatic startup is only managed on Windows."); return; }
-  const startup = process.env.OFFICE_PARTNER_RECOVERY_ENTRY
-    ? `"${process.execPath}" "${process.env.OFFICE_PARTNER_RECOVERY_ENTRY}" start gateway --at-logon`
-    : `"${process.execPath}" "${fileURLToPath(import.meta.url)}" start`;
+  const startup = `"${process.execPath}" "${fileURLToPath(import.meta.url)}" start`;
   const args = enable ? ["add", runKey, "/v", runName, "/t", "REG_SZ", "/d", startup, "/f"]
     : ["delete", runKey, "/v", runName, "/f"];
   const result = spawnSync("reg.exe", args, { stdio: "ignore", windowsHide: true });

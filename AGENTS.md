@@ -60,7 +60,7 @@ The architecture test also fails if:
 
 `providers/src/types.ts` (`ProviderAdapter`) is the single contract: detect, list models/commands, start/send/cancel/close session, `capabilities`, `startLogin`/`loginAccounts`, `logout`, `verifyReady`, `install`/`uninstall`. `BaseCliAdapter` (`base.ts`) is the shared implementation; each provider lives in `providers/src/<id>/` (`adapter.ts` plus its own helpers). `registry.ts` creates adapters; `profiled.ts` wraps an adapter with the managed runtime profile from `bin/`. `mock.ts` is the adapter used by tests.
 
-Managed CLIs: `bin/runtime-manifest.json` is the one data file of per-provider install facts; `bin/runtime-store.cjs` / `runtime-manager.mjs` install them into release-independent runtime folders (id depends only on provider/package/version/platform). One CLI per provider; a failed CLI install never blocks a product update. `bin/*.mjs` are copied to a temp folder and run detached by the updater (`bridge/src/updater.ts`), so they must stay self-contained.
+Managed CLIs: `bin/runtime-manifest.json` is the one data file of per-provider install facts; `bin/runtime-store.cjs` / `runtime-manager.mjs` install them into runtime folders under the data folder (id depends only on provider/package/version/platform); nothing is copied or hashed. One CLI per provider; `setup` (which `update` runs after npm replaces the package) brings the selected providers' CLIs to the versions the release names, and a failed CLI install never blocks a product update. `bin/*.mjs` are copied to a temp folder and run detached by the updater (`bridge/src/updater.ts`), so they must stay self-contained.
 
 ### Office tool call flow
 

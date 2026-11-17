@@ -18,10 +18,6 @@ describe("Windows startup registration", () => {
     expect(script).toContain("Remove-Item -LiteralPath $fixShortcut");
   });
 
-  it("D3 registers the gateway sign-in entry in the same mode", () => {
-    expect(read("gateway/bin/agent-gateway.mjs")).toContain('start gateway --at-logon`');
-  });
-
   it("D4 offers the same repair from the command line", () => {
     expect(read("bin/office-partner.mjs")).toMatch(/\n  fix {8}Start the bridge and gateway again/);
   });

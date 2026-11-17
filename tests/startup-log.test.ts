@@ -84,24 +84,6 @@ describe("start from the sign-in entry and from Fix connection", () => {
     expect(launch).toHaveBeenCalledTimes(1);
   });
 
-  it("D5 Fix connection tries to reinstall a damaged release once, then reports what is still wrong", async () => {
-    const dir = folder(); const gatewayHome = folder();
-    vi.stubEnv("AGENT_GATEWAY_HOME", gatewayHome);
-    const log = vi.spyOn(console, "log").mockImplementation(() => {});
-    try {
-      const launch = vi.fn((_root: string, _args: string[]) => ({ status: 1, stderr: "ACTIVE_RELEASE_DAMAGED_USE_RECOVERY" }));
-      await managementMain(["fix"], options(dir, launch));
-      const said = log.mock.calls.flat().join("\n");
-      expect(said).toContain("installed files are damaged");
-      // Nothing is installed in this empty folder, so the repair cannot run; the person is told so and the log keeps the reason.
-      expect(said).toContain("FAILED Office Partner");
-      expect(said).toContain("startup.log");
-      expect(launch).toHaveBeenCalledTimes(1);
-      expect(entries(dir).at(-1)).toMatchObject({ service: "addin", ok: false, source: "fix" });
-      expect(process.exitCode).toBe(1);
-    } finally { vi.unstubAllEnvs(); }
-  });
-
   it("D4 Fix connection restarts the bridge with repair, adds the gateway only when it is set up, and says what happened", async () => {
     const dir = folder(); const gatewayHome = folder();
     vi.stubEnv("AGENT_GATEWAY_HOME", gatewayHome);

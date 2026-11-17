@@ -18,8 +18,7 @@ function fixture() {
   const installs = ["old", "new"].map(name => {
     const id = store.digest(name), command = path.join(dataDir, "runtimes", id, "cli.js");
     fs.mkdirSync(path.dirname(command), { recursive: true }); fs.writeFileSync(command, name);
-    return { id, provider: "copilot", version: name, command, stateHome: path.join(dataDir, "provider-data", "copilot", "home"),
-      fingerprint: store.fileDigest(command), platform: process.platform, arch: process.arch };
+    return { id, provider: "copilot", version: name, command, stateHome: path.join(dataDir, "provider-data", "copilot", "home"), platform: process.platform, arch: process.arch };
   });
   const select = (index: number) => store.changeState(dataDir, (state: any) => {
     for (const install of installs) state.profiles[install.id] = install;
@@ -83,10 +82,10 @@ describe("running a provider against the CLI the product installed", () => {
     expect(w.adapter.runtimeRevision()).toBe(w.installs[1]!.id);
   });
 
-  it("does not use a CLI file that is missing or was changed, and says so instead of failing", async () => {
+  it("does not use a CLI file that is missing, and says so instead of failing", async () => {
     const w = fixture();
-    fs.writeFileSync(w.installs[0]!.command, "changed");
-    expect(await w.adapter.detect()).toMatchObject({ provider: "copilot", status: "error", hint: expect.stringContaining("office-partner repair") });
+    fs.rmSync(w.installs[0]!.command);
+    expect(await w.adapter.detect()).toMatchObject({ provider: "copilot", status: "error", hint: expect.stringContaining("office-partner providers install copilot") });
     await expect(w.adapter.startSession(w.context)).rejects.toThrow("RUNTIME_MISSING");
   });
 

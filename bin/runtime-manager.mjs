@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import crypto from "node:crypto";
 import path from "node:path";
 import { createRequire } from "node:module";
 import store from "./runtime-store.cjs";
@@ -53,32 +54,6 @@ function entrypoint(prefix, item) {
   if (!store.inside(root, command) || !fs.existsSync(command) || !store.inside(prefix, fs.realpathSync(command))) throw new Error("CLI_ENTRYPOINT_INVALID");
   return command;
 }
-function runtimeFiles(directory) {
-  const files = {};
-  function walk(current) {
-    for (const entry of fs.readdirSync(current, { withFileTypes: true })) {
-      if (["profile.json", ".runtime-files.json"].includes(entry.name)) continue;
-      const candidate = path.join(current, entry.name), relative = path.relative(directory, candidate);
-      if (entry.isSymbolicLink()) {
-        const target = fs.realpathSync(candidate);
-        if (!store.inside(directory, target)) throw new Error("RUNTIME_EXTERNAL_LINK");
-        files[relative] = { link: path.relative(directory, target) };
-      } else if (entry.isDirectory()) walk(candidate);
-      else files[relative] = { sha256: store.fileDigest(candidate) };
-    }
-  }
-  walk(directory); return files;
-}
-export function verifyRuntime(profile, dataDir = store.home()) {
-  const directory = path.join(dataDir, "runtimes", profile.id), files = store.readJson(path.join(directory, ".runtime-files.json"), 64 * 1024 * 1024);
-  for (const [relative, expected] of Object.entries(files)) {
-    const candidate = path.resolve(directory, relative);
-    if (!store.inside(directory, candidate) || !fs.existsSync(candidate)) throw new Error("RUNTIME_INTEGRITY_FAILED");
-    if (expected.link ? !store.inside(directory, fs.realpathSync(candidate)) || path.relative(directory, fs.realpathSync(candidate)) !== expected.link
-      : store.fileDigest(candidate) !== expected.sha256) throw new Error("RUNTIME_INTEGRITY_FAILED");
-  }
-  return true;
-}
 async function verifyVersion(command, item, run, env) {
   const result = await run(command, ["--version"], { env: store.childEnvironment(env), timeoutMs: 15000 });
   const version = /\b(\d+\.\d+\.\d+(?:-[\w.-]+)?)\b/.exec(`${result.stdout}\n${result.stderr}`)?.[1];
@@ -102,11 +77,11 @@ function stateHomeFor(dataDir, provider, state) {
 }
 
 /**
- * Installs the CLI the manifest of `root` names for `provider`, checks it and makes it the one the provider runs (`activate: false` only
- * records it). The install folder is named by what is installed, so a release that ships the same CLI reuses it instead of downloading it again.
+ * Installs the CLI the manifest of `root` names for `provider`, checks its version and makes it the one the provider runs.
+ * The install folder is named by what is installed, so a release that ships the same CLI reuses it instead of downloading it again.
  */
 export async function installRuntime(root, provider, options = {}) {
-  const { dataDir = store.home(), env = process.env, run = runCommand, install = installPackage, preflight = nativePreflight, activate = true } = options;
+  const { dataDir = store.home(), env = process.env, run = runCommand, install = installPackage, preflight = nativePreflight } = options;
   if (!store.ids.includes(provider)) throw new Error("PROVIDER_INVALID");
   const item = readManifest(root).providers[provider];
   if (item.sdkVersion) {
@@ -119,11 +94,11 @@ export async function installRuntime(root, provider, options = {}) {
     if (sdkVersion !== item.sdkVersion) throw new Error("SDK_VERSION_MISMATCH");
   }
   const state = store.readState(dataDir);
-  // The CLI the provider already runs is kept when the release names the same package and version: nothing is downloaded or checked
-  // again, whatever else in the manifest changed (a new check, a new variable). Only a different CLI gets a new install folder.
+  // The CLI the provider already runs is kept when the release names the same package and version: nothing is downloaded or checked again.
   const current = state.profiles[state.active[provider]];
   const sameCli = current && current.provider === provider && current.version === item.version && (current.sdkVersion ?? null) === (item.sdkVersion ?? null)
-    && current.platform === process.platform && current.arch === process.arch && fs.existsSync(path.join(dataDir, "runtimes", current.id, "node_modules", item.package, "package.json"));
+    && current.platform === process.platform && current.arch === process.arch && fs.existsSync(current.command);
+  if (sameCli && !state.disabled.includes(provider) && state.selected.includes(provider)) return current;
   // `minVersion` only changes what is checked, so it is not part of what is installed.
   const { minVersion: _checkedOnly, ...installed } = item;
   const id = sameCli ? current.id : store.digest(JSON.stringify([provider, installed, process.platform, process.arch]));
@@ -132,7 +107,7 @@ export async function installRuntime(root, provider, options = {}) {
   const privateEnv = store.childEnvironment(env, { provider, stateHome });
   return store.lock(dataDir, "install-" + provider, async () => {
     fs.mkdirSync(stateHome, { recursive: true, mode: 0o700 });
-    let staging, fresh = false;
+    let staging;
     try {
       if (!fs.existsSync(directory)) {
         fs.mkdirSync(path.dirname(directory), { recursive: true });
@@ -140,18 +115,11 @@ export async function installRuntime(root, provider, options = {}) {
         store.atomic(path.join(staging, "package.json"), { name: "office-partner-runtime", version: "1.0.0", private: true });
         await install(staging, `${item.package}@${item.version}`, { env: store.childEnvironment(env), run });
         await verifyVersion(entrypoint(staging, item), item, run, privateEnv);
-        store.renameFolder(staging, directory); staging = null; fresh = true;
+        store.renameFolder(staging, directory); staging = null;
       }
       const command = entrypoint(directory, item);
-      // The CLI the provider already runs was checked when it was installed (files, version, a session with the add-in's tools), and
-      // `doctor` and `repair` check it again. An update that only changes the add-in's own code does not repeat that: it can take half a minute.
-      const profile = sameCli ? current : { id, provider, version: item.version, sdkVersion: item.sdkVersion ?? null, command, stateHome,
-        fingerprint: store.fileDigest(command), platform: process.platform, arch: process.arch };
+      const profile = sameCli ? current : { id, provider, version: item.version, sdkVersion: item.sdkVersion ?? null, command, stateHome, platform: process.platform, arch: process.arch };
       if (!sameCli) {
-        if (fresh) store.atomic(path.join(directory, ".runtime-files.json"), runtimeFiles(directory));
-        else if (!fs.existsSync(path.join(directory, ".runtime-files.json"))) throw new Error("RUNTIME_INTEGRITY_FAILED");
-        else { verifyRuntime(profile, dataDir); await verifyVersion(command, item, run, privateEnv); }
-        store.atomic(path.join(directory, "profile.json"), profile);
         // Whether a session opens with the add-in's tools needs the person to be signed in. Not being signed in yet is not a reason to refuse the CLI.
         try { await preflight(root, provider, command, { run, env: privateEnv }); }
         catch (error) { if (error.message !== "NATIVE_PREFLIGHT_AUTH_REQUIRED") throw error; }
@@ -159,15 +127,15 @@ export async function installRuntime(root, provider, options = {}) {
       store.changeState(dataDir, state => {
         state.profiles[id] = profile;
         delete state.failures[provider];
-        if (!activate) return;
         state.active[provider] = id;
         state.selected = [...new Set([...state.selected, provider])];
         state.disabled = state.disabled.filter(value => value !== provider);
         dropUnused(state);
       });
+      removeUnusedInstalls(dataDir);
       return profile;
     } catch (error) {
-      const known = /^(?:NATIVE_PREFLIGHT_[A-Z_]+|INSTALL_FAILED|INSTALL_TIMEOUT|CLI_PREFLIGHT_FAILED|INSTALLED_VERSION_MISMATCH|RUNTIME_INTEGRITY_FAILED)$/;
+      const known = /^(?:NATIVE_PREFLIGHT_[A-Z_]+|INSTALL_FAILED|INSTALL_TIMEOUT|CLI_PREFLIGHT_FAILED|INSTALLED_VERSION_MISMATCH)$/;
       const code = known.test(error.message) ? error.message : "RUNTIME_INSTALL_FAILED";
       store.changeState(dataDir, state => { state.failures[provider] = { code, version: item.version, at: new Date().toISOString() }; });
       throw error;
@@ -191,15 +159,23 @@ export function dropUnused(state) {
   const active = new Set(Object.values(state.active));
   for (const id of Object.keys(state.profiles)) if (!active.has(id)) delete state.profiles[id];
 }
-export async function repairRuntime(root, provider, options = {}) {
-  const dataDir = options.dataDir ?? store.home(), state = store.readState(dataDir), old = state.profiles[state.active[provider]];
-  if (!old) throw new Error("NO_MANAGED_RUNTIME");
-  try { verifyRuntime(old, dataDir); return old; } catch { /* install a complete replacement */ }
-  // A damaged immutable installation is quarantined, not overwritten. Call only while services are stopped.
-  const directory = path.join(dataDir, "runtimes", old.id);
-  if (!store.inside(path.join(dataDir, "runtimes"), directory)) throw new Error("RUNTIME_PATH_INVALID");
-  if (fs.existsSync(directory)) store.renameFolder(directory, directory + ".damaged-" + Date.now());
-  return installRuntime(root, provider, { ...options, dataDir });
+/**
+ * Removes the CLI installs no provider runs. Deleting a folder takes a while on Windows (every file is scanned), so each folder is renamed
+ * to `.trash-*` at once and removed in the background; whatever is left is swept by the next call.
+ */
+export function removeUnusedInstalls(dataDir = store.home()) {
+  const runtimes = path.join(dataDir, "runtimes");
+  if (!fs.existsSync(runtimes)) return;
+  const inUse = new Set(Object.values(store.readState(dataDir).active));
+  for (const name of fs.readdirSync(runtimes)) {
+    if (inUse.has(name) || name.startsWith(".install-") && Date.now() - fs.statSync(path.join(runtimes, name)).mtimeMs < 60 * 60_000) continue;
+    let target = path.join(runtimes, name);
+    if (!name.startsWith(".trash-")) {
+      const trash = path.join(runtimes, ".trash-" + crypto.randomUUID());
+      try { fs.renameSync(target, trash); target = trash; } catch { /* held open: delete in place, or sweep next time */ }
+    }
+    fs.promises.rm(target, { recursive: true, force: true, maxRetries: 3, retryDelay: 200 }).catch(() => {});
+  }
 }
 export function runtimeInventory(dataDir = store.home()) {
   const state = store.readState(dataDir);
@@ -207,6 +183,6 @@ export function runtimeInventory(dataDir = store.home()) {
     const profile = state.profiles[state.active[provider]];
     return { provider, selected: state.selected.includes(provider), disabled: state.disabled.includes(provider), managed: Boolean(profile), version: profile?.version ?? null,
       profileId: profile?.id ?? null, failure: state.failures[provider]?.code ?? null,
-      available: profile ? fs.existsSync(profile.command) && store.fileDigest(profile.command) === profile.fingerprint : null };
+      available: profile ? fs.existsSync(profile.command) : null };
   });
 }
