@@ -4,7 +4,7 @@ import { renderMarkdown } from "../ui/markdown.js";
 import { showToast } from "../ui/toast.js";
 import { formatToolValue } from "../ui/tool-view.js";
 import { BridgeClient } from "../bridge-client.js";
-import { browserView, connectedFiles, ensureWorkspaces, historyNotice, mcpSettings, navigation, providerPicker, recordChange, refreshModelCatalog, refreshUsage, resetWorkspaces, slash, store, thinking, toolSettings, updatePanel, updater } from "./services.js";
+import { autotestPanel, browserView, connectedFiles, ensureWorkspaces, historyNotice, mcpSettings, navigation, providerPicker, recordChange, refreshModelCatalog, refreshUsage, resetWorkspaces, slash, store, thinking, toolSettings, updatePanel, updater } from "./services.js";
 import { append, appendTurnTool, cellLinkOptions, redrawMessages, scrollToEnd, summarize } from "./messages.js";
 import { handleEvent, renderState } from "./events.js";
 import { loadSession, restoreDocumentChat } from "./chats.js";
@@ -70,6 +70,7 @@ export function createBridgeClient(): BridgeClient {
       if (id === app.provider && detection.status === "ready") prepareRuntime();
     },
     onProviderEvent: handleEvent,
+    onAutotestEvent: (run, event) => autotestPanel.onEvent(run, event),
     onBrowserFrame: (frame) => { if (frame.requestId === app.currentRequestId) browserView.push(frame); },
     readWorkbookName,
     onConnectedFiles: (files) => {

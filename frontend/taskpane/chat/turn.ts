@@ -9,7 +9,7 @@ import { activeHost } from "../host/index.js";
 import { type PendingPrompt, app, pendingAttachments, pendingPrompts } from "./state.js";
 import { append, renderDelivery, updateDelivery } from "./messages.js";
 import { persistNow, startNewChat } from "./chats.js";
-import { browserView, mcpSettings, providerOptions, openMenu, refreshModelCatalog, renderModelPicker, saveModelChoice, showPanel, slash, thinking, toolSettings, updateMentionMenu, updater, usagePanel } from "./services.js";
+import { autotestPanel, browserView, mcpSettings, providerOptions, openMenu, refreshModelCatalog, renderModelPicker, saveModelChoice, showPanel, slash, thinking, toolSettings, updateMentionMenu, updater, usagePanel } from "./services.js";
 import { els } from "../ui/elements.js";
 import { clearAttachment, renderComposerPreview, selectPermissionMode, updateSendControl } from "./composer.js";
 
@@ -167,6 +167,8 @@ export async function submit(queued?: PendingPrompt, delegated?: { delegationId:
   thinking.show();
   persistNow();
 
+  // After the chat is marked busy, so a second Send during the (slow) export is queued instead of starting another turn.
+  if (!delegated && !nativeCommand) await autotestPanel.syncForPrompt(prompt);
   const result = nativeCommand ? null : await activeHost().execute("get_selection", {});
   if (app.currentRequestId !== requestId || app.requestSession !== app.session) { decline("The chat open in that file changed before the request could start."); return; }
   const selection = result?.ok ? (result.data as never) : null;

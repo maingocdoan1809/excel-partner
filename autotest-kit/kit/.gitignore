@@ -1,0 +1,6 @@
+browser_profile/
+test_execution_output/
+__pycache__/
+*.pyc
+~$*.xlsx
+.venv/

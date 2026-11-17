@@ -1,0 +1,81 @@
+{
+ "_help": "Config of the autotest of ONE project. /autotest-init writes qa.config.json from this file. No secret here: passwords / tokens are read from the environment variables named below. Guide: docs/01_setup_guide.md of the autotest kit.",
+ "project": "my-project",
+ "language": {
+  "_help": "talk = language the agent uses with you; excel = one evidence workbook per language (vi, ja, en); testcase = language of the testcase files (when an Excel language differs, write suites/<suite>/<lang>_text.py)",
+  "talk": "vi",
+  "excel": ["vi"],
+  "testcase": "vi"
+ },
+ "app": {
+  "url": "http://localhost:3000",
+  "home_path": "/",
+  "test_account": "qa@example.com"
+ },
+ "browser": {
+  "_help": "mode launch = the framework starts its own browser with a persistent profile; cdp = attach to a browser you started with --remote-debugging-port (when login needs MFA / SSO by a human). channel: chromium | msedge | chrome",
+  "mode": "launch",
+  "channel": "chromium",
+  "headless": false,
+  "viewport": [1600, 900],
+  "profile_dir": "browser_profile",
+  "cdp_port": 9222
+ },
+ "auth": {
+  "_help": "type none | form | manual. form: the framework logs in with the account below. manual: a human logs in once in the test browser (SSO / MFA); the framework only checks logged_in",
+  "type": "form",
+  "login_url": "/login",
+  "username_env": "QA_USER",
+  "password_env": "QA_PASSWORD",
+  "user_selector": "input[name=email], input[type=email], input[name=username]",
+  "password_selector": "input[type=password]",
+  "submit_selector": "button[type=submit]",
+  "logout_url": "/logout",
+  "logged_in": {"url_not_contains": "/login"}
+ },
+ "matrix": {
+  "_help": "How the role / environment column of the testcases maps to runs. key -> words that identify it in the column (first word = label in captions). A case runs once per (env, role) found; none found -> defaults. Leave envs empty when the app has one environment.",
+  "envs": {},
+  "roles": {
+   "admin": ["Admin", "Administrator", "Quản trị"],
+   "user": ["User", "Người dùng"]
+  },
+  "default_env": "default",
+  "default_role": "admin"
+ },
+ "roles": {
+  "_help": "switch none | accounts | command. accounts: one test account per role (env vars). command: a project script that changes the role of the test account, e.g. \"python tools/set_role.py --role {role}\"",
+  "switch": "accounts",
+  "accounts": {
+   "admin": {"username_env": "QA_USER", "password_env": "QA_PASSWORD"},
+   "user": {"username_env": "QA_USER_PLAIN", "password_env": "QA_PASSWORD_PLAIN"}
+  }
+ },
+ "envs": {
+  "_help": "switch none | command (\"python tools/set_env.py --env {env}\")",
+  "switch": "none"
+ },
+ "data": {
+  "_help": "test_prefix = every object a test creates starts with it (guard + cleanup). snapshot none | hooks | command: how the before/after integrity check reads the data (project/hooks.py snapshot(), or a command printing JSON)",
+  "test_prefix": "ZZ_AUTOTEST_",
+  "snapshot": "hooks",
+  "hooks": "project.hooks",
+  "ignore_fields": ["updated_at", "updatedAt", "last_login"]
+ },
+ "testcases": {
+  "_help": "sources = globs of the testcase workbooks (earlier = primary when an ID is in several files). columns = extra header names of your workbooks, e.g. {\"exp\": [\"Kỳ vọng\"]}",
+  "sources": ["testcases/*.xlsx"],
+  "columns": {},
+  "version_labels": ["Version", "Phiên bản", "バージョン", "版数"]
+ },
+ "report": {
+  "_help": "Excel output: the testcase sheet gets Result / Tester / Date filled (the source file is never written). tester = name written in the tester column (default app.test_account). result_values = your workbook's vocabulary, e.g. {\"PASS\": \"OK\", \"FAIL\": \"NG\"}; empty = taken from the column's drop-down list when it has one, else PASS / FAIL. NOT EXECUTED stays empty.",
+  "tester": "",
+  "result_values": {}
+ },
+ "source": {
+  "_help": "use = false: black-box mode - the agent never opens the app source (expectations from testcases + inputs/autotest_input.xlsx + docs/system_map, selectors from the live DOM); /system-test source and suite impact are refused. true = the agent may read the repos of test_suite/source_map.json.",
+  "use": true
+ },
+ "output": {"dir": "test_execution_output"}
+}

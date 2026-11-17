@@ -27,6 +27,8 @@
     "frontend/taskpane/styles.css",
     "frontend/taskpane/workspace.css",
     "bin/",
+    "autotest-kit/",
+    "!autotest-kit/**/__pycache__/",
     "gateway/bin/",
     "gateway/dist/*.mjs",
     "gateway/README.md",

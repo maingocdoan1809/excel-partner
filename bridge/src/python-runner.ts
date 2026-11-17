@@ -7,6 +7,9 @@ import { runLocalScript } from "./skill-runner.js";
 export const PYTHON_FILE_BYTES = 10 * 1024 * 1024;
 export class PythonError extends Error {}
 
+/** The Python the bridge runs scripts with (`BRIDGE_PYTHON_BIN` overrides it); the test kit uses the same one. */
+export const pythonInterpreter = (): string => process.env.BRIDGE_PYTHON_BIN || (process.platform === "win32" ? "python" : "python3");
+
 /** Runs with the local user's permissions; the temporary folder is a workspace, not an isolation boundary. */
 export async function runPython(
   input: RunPythonInput,
@@ -37,7 +40,7 @@ export async function runPython(
     const file = path.join(root, "main.py");
     fs.writeFileSync(file, input.code, "utf8");
     const result = await runLocalScript({ root, file, python: true,
-      interpreter: process.env.BRIDGE_PYTHON_BIN || (process.platform === "win32" ? "python" : "python3") }, input, signal);
+      interpreter: pythonInterpreter() }, input, signal);
     const outputFiles: Array<{ name: string; base64: string }> = [];
     if (result.exitCode === 0 && !result.timedOut && !result.cancelled && !result.outputTruncated) {
       let total = 0;

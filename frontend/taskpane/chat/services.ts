@@ -17,6 +17,7 @@ import { setupConnectedFiles } from "../ui/connected-files.js";
 import { setupSavedReferences } from "../ui/saved-references.js";
 import { setupUserSkills } from "../ui/user-skills.js";
 import { setupTestingPanel } from "../ui/testing-panel.js";
+import { setupAutotestPanel } from "../ui/autotest-panel.js";
 import { setupUpdatePanel } from "../ui/update-panel.js";
 import { reloadKeepingChat } from "../ui/chat-restore.js";
 import { setupMcp } from "../ui/mcp.js";
@@ -126,6 +127,7 @@ export const connectedFiles = setupConnectedFiles({ onOpen: () => app.client?.re
 export const savedReferences = setupSavedReferences(() => app.client);
 export const userSkills = setupUserSkills(() => app.client, () => slash.reload());
 export const testingPanel = setupTestingPanel(() => app.client);
+export const autotestPanel = setupAutotestPanel(() => app.client, () => readWorkbookName());
 export const updatePanel = setupUpdatePanel({ getClient: () => app.client, reload: () => reloadKeepingChat(), appName: () => activeHost().app, announce: (text) => append({ kind: "note", text }) });
 export const mcpSettings = setupMcp(() => app.client);
 /** The settings the provider's CLI offers for the open session, drawn from what it reports. */
@@ -157,7 +159,7 @@ export const { showPanel, openPanel, backFromPanel, openFloating, closeFloating,
   },
   closePreview: () => preview.close(),
   refreshReferences: () => savedReferences.refresh(), refreshSkills: () => userSkills.refresh(),
-  refreshTesting: () => testingPanel.refresh(), loadTemplateSkills: () => loadTemplateSkills(),
+  refreshTesting: async () => { await Promise.all([testingPanel.refresh(), autotestPanel.refresh()]); }, loadTemplateSkills: () => loadTemplateSkills(),
 });
 
 export const providerPicker = setupProviderPicker({

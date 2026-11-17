@@ -43,3 +43,7 @@ THIRD_PARTY_NOTICES.md
 .claude/hillclimb/**/state.json
 .claude/hillclimb/**/trajectory/
 .claude/hillclimb/**/*.log
+
+# Python bytecode from running the bundled test kit
+__pycache__/
+*.pyc

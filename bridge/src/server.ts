@@ -24,6 +24,9 @@ import { ExternalSessionRoutes } from "./routes/external-sessions.js";
 import { ProviderRoutes } from "./routes/providers.js";
 import { SkillRoutes } from "./routes/skills.js";
 import { TestingRoutes } from "./routes/testing.js";
+import { AutotestRoutes } from "./routes/autotest.js";
+import { AutotestHome } from "./autotest-home.js";
+import { AutotestRuntime } from "./autotest-runtime.js";
 import { WorkspaceRoutes } from "./routes/workspaces.js";
 import { HistoryRoutes } from "./routes/history.js";
 import { SystemRoutes } from "./routes/system.js";
@@ -88,6 +91,9 @@ export class Bridge {
   private server: http.Server | https.Server | null = null;
   private heartbeat: NodeJS.Timeout | null = null;
   private reaper: NodeJS.Timeout | null = null;
+  private readonly autotestHome: AutotestHome;
+  private stopAutotestWatch: (() => void) | null = null;
+  private kitRetry: NodeJS.Timeout | null = null;
   private readonly startedAt = Date.now();
   private maintenance = false;
   private readonly history: HistoryRoutes;
@@ -103,7 +109,7 @@ export class Bridge {
   private readonly updater: UpdateService | null;
   private readonly panes: PaneSockets;
   private readonly routes: {
-    files: FileRoutes; external: ExternalSessionRoutes; mcp: McpRoutes; providers: ProviderRoutes; skills: SkillRoutes; testing: TestingRoutes; workspaces: WorkspaceRoutes; system: SystemRoutes; peer: PeerRoutes;
+    autotest: AutotestRoutes; files: FileRoutes; external: ExternalSessionRoutes; mcp: McpRoutes; providers: ProviderRoutes; skills: SkillRoutes; testing: TestingRoutes; workspaces: WorkspaceRoutes; system: SystemRoutes; peer: PeerRoutes;
   };
 
   constructor(config: BridgeConfig, options: BridgeOptions = {}) {
@@ -141,6 +147,9 @@ export class Bridge {
     const siteKnowledge = new SiteKnowledge(path.join(dataDir, "knowledge"));
     const testScripts = new TestScripts(path.join(dataDir, "scripts"));
     const testingAdmin = new TestingAdmin(testSessions, siteKnowledge, testScripts, login => loginSession({ ...login, toolsDir: path.join(dataDir, "tools") }));
+    const autotestHome = new AutotestHome(path.join(dataDir, "autotest.json"), path.join(dataDir, "autotest"), path.join(PROJECT_ROOT, "autotest-kit"), userSkills.root,
+      { list: () => testSessions.list().map(({ name, url, savedAt }) => ({ name, url, savedAt })), statePath: name => testSessions.get(name)?.statePath ?? null });
+    this.autotestHome = autotestHome;
     this.mcpServers = new McpServers(path.join(dataDir, "mcp-servers.json"));
     this.updater = options.updater === undefined
       ? new UpdateService({
@@ -212,6 +221,7 @@ export class Bridge {
       providers: new ProviderRoutes({ sessions: this.sessions, providers: this.providers, logins: this.logins, usage, logger: this.logger, disabled: policy.disabledProviders }),
       skills: new SkillRoutes({ sessions: this.sessions, skills: this.skills, userSkills, systemPrompt }),
       testing: new TestingRoutes({ sessions: this.sessions, admin: testingAdmin }),
+      autotest: new AutotestRoutes({ sessions: this.sessions, home: autotestHome, runtime: new AutotestRuntime(() => autotestHome.dir) }),
       workspaces: new WorkspaceRoutes({ sessions: this.sessions, references, savedReferences, logger: this.logger, workspaceConfigPath }),
     };
   }
@@ -251,6 +261,21 @@ export class Bridge {
     this.heartbeat.unref?.();
     this.reaper = setInterval(() => this.sessions.reapIdle(), 60_000);
     this.reaper.unref?.();
+    // Refresh the test kit to this release. While a run is going it waits (never replace code under a running test) and asks again every minute.
+    const refreshKit = (): void => {
+      try {
+        const synced = this.autotestHome.syncKit();
+        if (synced.updated.length) this.logger.info("test kit refreshed to this release", { files: synced.updated.length, backup: synced.backup });
+        if (synced.skipped === "a run is in progress") {
+          this.kitRetry ??= setInterval(refreshKit, 60_000);
+          this.kitRetry.unref?.();
+        } else if (this.kitRetry) { clearInterval(this.kitRetry); this.kitRetry = null; }
+      } catch (error) { this.logger.warn("could not refresh the test kit", { error: String(error) }); }
+    };
+    refreshKit();
+    this.stopAutotestWatch = this.autotestHome.runs().watch((run, event) => {
+      for (const session of this.sessions.list()) if (session.isConnected) session.send({ type: "autotest_event", run, event });
+    });
 
     const address = this.server.address();
     const port = typeof address === "object" && address ? address.port : this.config.port;
@@ -375,6 +400,8 @@ export class Bridge {
     if (url.pathname === "/session/workspaces/attach" && method === "POST") return workspaces.attach(req, res);
 
     if (url.pathname === "/session/testing") return testing.handle(req, res, url);
+    if (url.pathname === "/session/autotest") return this.routes.autotest.pane(req, res, url);
+    if (url.pathname === "/tests" || url.pathname.startsWith("/tests/")) return this.routes.autotest.dashboard(req, res, url);
     if (url.pathname === "/session/provider-login") return providers.login(req, res);
     if (url.pathname === "/session/provider-logout") return providers.logout(req, res);
     if (url.pathname === "/session/provider-option") return providers.option(req, res);
@@ -510,6 +537,8 @@ export class Bridge {
     this.maintenance = true;
     if (this.heartbeat) clearInterval(this.heartbeat);
     if (this.reaper) clearInterval(this.reaper);
+    this.stopAutotestWatch?.();
+    if (this.kitRetry) clearInterval(this.kitRetry);
     this.panes.closeSockets();
     const closed = new Promise<void>((resolve) => {
       if (!this.server) return resolve();
