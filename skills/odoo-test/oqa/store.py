@@ -1,4 +1,5 @@
 """JSON files on disk: written atomically, versioned, and guarded by a lock where two writers could meet."""
+import hashlib
 import json
 import os
 import time
@@ -15,6 +16,11 @@ class SchemaError(Exception):
         self.problems = [problems] if isinstance(problems, str) else list(problems)
         self.what = what
         super().__init__(f"{what}: " + "; ".join(self.problems))
+
+
+def digest(obj):
+    """A short, stable fingerprint of a JSON-able value (what a strategy, a script or a set of resources was made from)."""
+    return hashlib.sha256(json.dumps(obj, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()[:16]
 
 
 def read_json(path, default=None):

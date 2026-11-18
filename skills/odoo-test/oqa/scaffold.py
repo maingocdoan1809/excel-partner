@@ -108,7 +108,9 @@ def header(info, item, sha):
         lines.append(f"# starts from the end state of: {', '.join(item['depends_on'])}" + (f" ({item['reuse']})" if item.get("reuse") else ""))
     lines += [f"# edge case: {e}" for e in item.get("edge_cases") or []]
     lines += [f"# data may be missing: {d['what']} -> if so: {d['fallback']}   (o.reach(enough, make) creates records named o.name(...))" for d in item.get("data_needs") or []]
-    lines += ["# o = Odoo helpers: menu button field row rows pager toasts new fill m2o save search open_row expect_text expect_visible expect_value expect_rows expect_no_errors reach name unique",
+    lines += [f"# file {r['name']} ({r['mode']}): {r['purpose']}   -> in step {', '.join(str(s['n']) for s in item['steps'] if r['name'] in (s.get('uses') or []))}: f = s.fixture(\"{r['name']}\"); o.upload(<file input>, f)"
+              for r in item.get("resources") or []]
+    lines += ["# o = Odoo helpers: menu button field row rows pager toasts new fill m2o save upload search open_row expect_text expect_visible expect_value expect_rows expect_no_errors reach name unique",
               "# One function per step: step_<n>(t, s). A failed step is repaired and run again ALONE, from the page where it stopped, so steps share values through t.data,",
               "# never through local variables or module globals (t.data[\"order\"] = o.name(\"order\") in one step, t.data[\"order\"] in a later one).",
               "# Look at the page with `oqa probe` (or `oqa probe --failed` for the screen where a step stopped) when a selector does not fit."]

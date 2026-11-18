@@ -11,7 +11,7 @@ import time
 import types
 from pathlib import Path
 
-from . import connect, diagnose, evidence, events, knowledge, memory, probe, recipe
+from . import connect, diagnose, evidence, events, knowledge, memory, probe, recipe, resources
 from .browser import launch
 from .odoo_ui import Odoo
 from .scaffold import HEADER, STEP_FUNCTION, case_sha, script_path, script_sha, step_hashes, unchecked_steps, unhighlighted_steps, unwritten
@@ -47,7 +47,7 @@ class Step:
     """`with t.step(n) as s:` — `s.hl(...)` names what the picture is about; leaving the block photographs it and records PASS or FAIL."""
 
     def __init__(self, t, n):
-        self.t, self.n, self.targets, self.note = t, n, [], ""
+        self.t, self.n, self.targets, self.note, self.used = t, n, [], "", []
         spec = t.spec[n - 1]
         self.caption, self.expected = spec["action"], spec["expected"]
 
@@ -57,6 +57,19 @@ class Step:
 
     def actual(self, text):
         self.note = text
+
+    def fixture(self, name):
+        """The prepared file `name`, which this step names in its `uses`: a resources.Fixture (`.path` for a file input, `.rows`, `.columns`, `.kind` for the checks).
+        The step's record keeps which files it used, and the dashboard shows them on the step."""
+        if name not in (self.t.spec[self.n - 1].get("uses") or []):
+            raise StepFailed(f"step {self.n} does not name {name} in its `uses`: add it to the step in the analysis, so the dashboard shows where the file is used")
+        try:
+            found = resources.fixture(self.t.session.dir, self.t.session.state(), self.t.case, name)
+        except SchemaError as error:
+            raise StepFailed("\n".join(error.problems)) from error
+        if found.name not in [r["name"] for r in self.used]:
+            self.used.append(found.record())
+        return found
 
     def todo(self):
         raise StepFailed(f"step {self.n} is not written yet: fill in the script")
@@ -148,7 +161,8 @@ class Step:
         rel = (lambda p: Path(p).relative_to(t.session.dir).as_posix())
         try:
             events.append(t.session.dir, "step", case=t.case, attempt=t.attempt, n=self.n, status=status, caption=self.caption, expected=self.expected,
-                          actual=actual, checks=checks, images=[{"raw": rel(pictures["raw"]), "annotated": rel(pictures["annotated"])}] if pictures else [])
+                          actual=actual, checks=checks, images=[{"raw": rel(pictures["raw"]), "annotated": rel(pictures["annotated"])}] if pictures else [],
+                          **({"resources": self.used} if self.used else {}))
         except SchemaError:
             pass                                    # no picture could be taken: the attempt result below says so
         t.done.append({"n": self.n, "status": status, "reason": reason, "diag": diag, "pictures": pictures})

@@ -144,6 +144,17 @@
   .thumb.fail { border-color:var(--fail); }
   .thumb span { position:absolute; right:6px; bottom:6px; font:500 11px/1.4 var(--sans); padding:1px 8px; background:rgba(24,23,21,.82); color:var(--on-dark); border-radius:9999px; }
   .noimg { width:148px; height:88px; border:1px dashed var(--line); border-radius:8px; display:flex; align-items:center; justify-content:center; color:var(--planned); font-size:12px; }
+  .res { margin:12px 0; padding:14px 16px; border:1px solid var(--line); border-left:4px solid var(--c, var(--line)); border-radius:8px; background:var(--bg); overflow-wrap:anywhere; }
+  .res.guessed { --c:var(--pending); } .res.provided { --c:var(--pass); } .res.described { --c:var(--running); }
+  .res-head { display:flex; flex-wrap:wrap; align-items:center; gap:6px 10px; }
+  .res-actions { display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin-top:10px; }
+  .res-actions .btn { height:34px; padding:0 14px; }
+  label.btn { display:inline-flex; align-items:center; cursor:pointer; }
+  .res textarea.spec { width:100%; min-height:130px; margin:8px 0 0; font:400 12px/1.5 var(--mono); }
+  .res .preview { margin-top:10px; overflow:auto; max-height:260px; border:1px solid var(--line-soft); border-radius:8px; }
+  .res .preview table { font-size:12px; } .res .preview th, .res .preview td { padding:5px 10px; position:static; white-space:nowrap; }
+  .res .preview img { display:block; max-width:100%; }
+  .warn { color:var(--pending); } .chip-file { background:var(--sunk); border:1px solid var(--line); }
   details { margin-top:16px; } summary { cursor:pointer; color:var(--muted); font-weight:500; }
   details ul { margin:8px 0 0; padding-left:20px; }
 
@@ -182,7 +193,9 @@ const BOOT = __BOOT__;
 const PHASE = { ANALYZE: "Phân tích", CONNECT: "Kết nối", CONFIRM: "Xác nhận", EXECUTE: "Thực thi", REPORT: "Báo cáo", DONE: "Xong" };
 const STATUS = { INTERRUPTED: "Bị bỏ dở", STOPPED: "Đã dừng", PASS: "PASS", FAIL: "FAIL", PENDING: "PENDING", BLOCKED: "BLOCKED", RUNNING: "Đang chạy", REPAIRING: "Đang sửa lỗi", EXPLORING: "Đang xác thực", PLANNED: "Chờ xác thực", BUILT: "Chờ chạy", VERIFIED: "Đã xác thực", TRYING: "Đang thử", HELD: "Cần xử lý trước", NEW: "Mới", "NOT EXECUTED": "Chưa chạy" };
 const ORDER = ["PASS", "FAIL", "REPAIRING", "RUNNING", "EXPLORING", "BUILT", "INTERRUPTED", "STOPPED", "PENDING", "BLOCKED", "PLANNED", "HELD", "NEW", "NOT EXECUTED"];
-const S = { sig: "", histSig: "", open: {}, draft: {}, hintError: "", sessions: [], ws: "", sel: null, view: null, caseId: null, attempt: null, raw: false, gallery: [], index: 0, error: "", busy: false };
+const MODE = { provided: "Bạn cung cấp", described: "Theo mô tả của bạn", guessed: "AI đoán" };
+const RES_STATUS = { needs_file: "Chưa có file", missing: "Mất file", changed: "File bị đổi", unprepared: "Chưa chuẩn bị" };
+const S = { preview: {}, resError: {}, sig: "", histSig: "", open: {}, draft: {}, hintError: "", sessions: [], ws: "", sel: null, view: null, caseId: null, attempt: null, raw: false, gallery: [], index: 0, error: "", busy: false };
 S.workspaces = []; S.tab = "progress";
 const M = { ws: "", lang: "", q: "", kind: "", key: "", mode: "buttons", view: "", match: "", required: false, data: null, results: null, screen: null, loading: false, error: "", request: 0, detailRequest: 0 };
 const $ = id => document.getElementById(id);
@@ -245,8 +258,10 @@ function drawMain() {
       <div style="margin-top:10px"><button class="btn primary" id="resume" ${S.busy ? "disabled" : ""}>Tiếp tục test</button></div><div class="err">${esc(S.error)}</div></section>`;
   else if (v.waiting) attention = `<section class="attn-panel"><h3>AI đang chờ bạn trả lời</h3><div>${esc(v.waiting.question)}</div>${v.waiting.case ? `<div class="muted">Về case ${esc(v.waiting.case)}</div>` : ""}
       <textarea id="answer" aria-label="Câu trả lời" placeholder="Nhập câu trả lời…"></textarea><button class="btn primary" id="sendAnswer" ${S.busy ? "disabled" : ""}>Gửi trả lời</button><div class="err">${esc(S.error)}</div></section>`;
-  else if (v.can_confirm) attention = `<section class="attn-panel"><h3>Chiến lược đang chờ bạn duyệt</h3><div class="muted">Xem lại thứ tự, dữ liệu dự phòng và các bước. AI chỉ bắt đầu test sau khi bạn xác nhận.</div>
-      <details data-key="strategy" ${isOpen("strategy", true)}><summary>Chiến lược</summary><pre class="strategy">${esc(v.strategy)}</pre></details><div style="margin-top:10px"><button class="btn primary" id="confirm" ${S.busy ? "disabled" : ""}>Xác nhận và bắt đầu test</button></div><div class="err">${esc(S.error)}</div></section>`;
+  else if (v.can_confirm) attention = `<section class="attn-panel"><h3>Chiến lược đang chờ bạn duyệt</h3><div class="muted">Xem lại thứ tự, dữ liệu dự phòng, các bước và các file tài nguyên. AI chỉ bắt đầu test sau khi bạn xác nhận.</div>
+      <details data-key="strategy" ${isOpen("strategy", true)}><summary>Chiến lược</summary><pre class="strategy">${esc(v.strategy)}</pre></details>${resourcePanel(v)}
+      <div style="margin-top:10px"><button class="btn primary" id="confirm" ${S.busy || v.resources_blocking.length ? "disabled" : ""}>Xác nhận và bắt đầu test${v.resources_guessed ? ` (${v.resources_guessed} file do AI đoán)` : ""}</button></div>
+      ${v.resources_blocking.length ? `<div class="err">${v.resources_blocking.map(esc).join("<br>")}</div>` : ""}<div class="err">${esc(S.error)}</div></section>`;
   const rows = v.cases.map(k => `<tr class="case ${cls(k.status)}" tabindex="0" data-id="${esc(k.id)}" aria-selected="${k.id === S.caseId}">
       <td class="mono">${esc(k.id)}</td><td><div class="title">${esc(k.title)}</div></td><td>${esc(k.profile) || '<span class="muted">-</span>'}</td><td>${ticks(k)}</td>
       <td>${k.attempts.length || '<span class="muted">-</span>'}</td><td><span class="status">${dot(k.status)}${esc(STATUS[k.status] || k.status)}</span></td></tr>`).join("");
@@ -289,7 +304,7 @@ function drawDetail(box) {
   const list = steps.map(s => {
     const first = s.images[0];
     const thumb = first ? `<button class="thumb ${s.status === "FAIL" ? "fail" : ""}" data-g="${(g += s.images.length) - s.images.length + 1}" style="background-image:url('${img(first.annotated)}')" aria-label="Phóng to ảnh bước ${s.n}"><span>${s.images.length > 1 ? s.images.length + " ảnh" : "xem"}</span></button>` : `<div class="noimg">${{ PENDING: att ? "chưa chạy" : "chờ xác thực", RUNNING: "đang chạy…", TRYING: "đang thử…", VERIFIED: "đã thử trên trang thật" }[s.status] || "không có ảnh"}</div>`;
-    return `<div class="step ${cls(s.status)}"><div class="n">${LIVE.includes(s.status) ? dot(s.status) : s.n}</div><div><div class="cap">${esc(s.caption)}</div>${s.status === "RUNNING" ? `<div class="live-note">Đang chạy bước này…</div>` : s.status === "TRYING" ? `<div class="live-note">${s.mode === "replay" ? "Đang đưa trang tới bước này…" : "Đang thử trên trang thật…"}</div>` : ""}<div class="exp">Mong đợi: ${esc(s.expected)}${s.checks != null && s.status !== "PENDING" ? ` <span class="tag">${s.checks} kiểm tra</span>` : ""}${s.carried ? ' <span class="tag">giữ từ lần trước</span>' : ""}</div>
+    return `<div class="step ${cls(s.status)}"><div class="n">${LIVE.includes(s.status) ? dot(s.status) : s.n}</div><div><div class="cap">${esc(s.caption)}</div>${s.status === "RUNNING" ? `<div class="live-note">Đang chạy bước này…</div>` : s.status === "TRYING" ? `<div class="live-note">${s.mode === "replay" ? "Đang đưa trang tới bước này…" : "Đang thử trên trang thật…"}</div>` : ""}${fileChips(s, k)}<div class="exp">Mong đợi: ${esc(s.expected)}${s.checks != null && s.status !== "PENDING" ? ` <span class="tag">${s.checks} kiểm tra</span>` : ""}${s.carried ? ' <span class="tag">giữ từ lần trước</span>' : ""}</div>
       ${s.actual && s.status !== "PENDING" ? `<div class="act">${s.status === "PASS" ? "Thực tế: " : ""}${esc(s.actual)}</div>` : ""}</div>${thumb}</div>`;
   }).join("");
   const base = (k.edge_cases.length || k.edge_none || k.data_needs.length || k.questions.length || k.timeout_s) ? `<ul>
@@ -302,7 +317,61 @@ function drawDetail(box) {
   const analysis = (base || notes) ? `<details data-key="analysis-${esc(k.id)}" ${isOpen("analysis-" + k.id, k.repairs.length > 0)}><summary>Phân tích của AI${k.repairs.length ? ` · đã sửa ${k.repairs.length} lần` : ""}</summary>${base}${notes}</details>` : "";
   box.innerHTML = `<h2><span class="mono">${esc(k.id)}</span> ${esc(k.title)}</h2>
     <div><span class="status ${cls(k.status)}">${dot(k.status)}${esc(STATUS[k.status] || k.status)}</span>${k.reason ? ` <span class="muted">· ${esc(k.reason)}</span>` : ""}</div>
-    <div class="chips">${chips}</div>${hintBox(k)}${tabs}${list}${analysis}`;
+    <div class="chips">${chips}</div>${hintBox(k)}${prepared(k)}${tabs}${list}${analysis}`;
+}
+
+const resUrl = (k, name, extra = "") => `/api/resource?ws=${encodeURIComponent(S.sel.ws)}&id=${encodeURIComponent(S.sel.id)}&case=${encodeURIComponent(k)}&name=${encodeURIComponent(name)}${extra}&t=${TOKEN}`;
+const resKey = (k, name) => JSON.stringify([k, name]);
+
+/** The files a step uses, as small tags: the ones it really used when it ran, else the ones the analysis planned for it. */
+function fileChips(s, k) {
+  const ran = (s.resources || []).map(r => r.name), names = ran.length ? ran : (s.uses || []);
+  return names.map(n => { const r = k.resources.find(x => x.name === n); return `<span class="tag chip-file" title="${esc(r ? r.purpose : "")}">File: ${esc(n)}${r ? " · " + esc(MODE[r.mode]) : ""}</span> `; }).join("");
+}
+
+function resFacts(r) {
+  const f = r.facts || {}, bits = [];
+  if (f.rows != null) bits.push(`${f.rows} dòng · ${(f.columns || []).length} cột` + ((f.columns || []).length ? ` (${esc(f.columns.slice(0, 6).join(", "))}${f.columns.length > 6 ? ", …" : ""})` : ""));
+  if (f.width) bits.push(`${f.width}×${f.height}`);
+  if (f.lines != null) bits.push(`${f.lines} dòng chữ`);
+  if (r.bytes) bits.push(r.bytes > 1048576 ? (r.bytes / 1048576).toFixed(1) + " MB" : Math.max(1, Math.round(r.bytes / 1024)) + " KB");
+  if (r.used_by.length) bits.push("dùng ở bước " + r.used_by.join(", "));
+  return bits.join(" · ");
+}
+
+/** The file in short: what it is for, who decided its content, what is inside; its content on demand. `edit` adds the controls only the user has before they approve. */
+function resCard(k, r, edit) {
+  const key = resKey(k, r.name), shown = S.preview[key], spec = r.spec ? JSON.stringify(r.spec, null, 2) : "";
+  const body = shown ? `<div class="preview">${shown.error ? esc(shown.error)
+    : shown.columns ? `<table><thead><tr>${shown.columns.map(c => `<th>${esc(c)}</th>`).join("")}</tr></thead><tbody>${shown.rows.map(row => `<tr>${row.map(c => `<td>${esc(c)}</td>`).join("")}</tr>`).join("")}</tbody></table>${shown.total > shown.rows.length ? `<div class="muted" style="padding:6px 10px">… ${shown.total} dòng, đang hiện ${shown.rows.length}</div>` : ""}`
+    : shown.text != null ? `<pre style="margin:0;padding:8px 10px">${esc(shown.text)}</pre>`
+    : ["png", "jpg"].includes(r.kind) ? `<img alt="${esc(r.name)}" src="${resUrl(k, r.name)}">` : esc(r.name)}</div>` : "";
+  const note = r.mode === "guessed" ? "AI tự đoán nội dung file này: xem lại, sửa hoặc dùng file của bạn." : r.mode === "described" ? "Tạo từ mô tả của bạn." : "";
+  return `<div class="res ${esc(r.mode)}"><div class="res-head"><b>${esc(r.name)}</b><span class="tag">${esc(MODE[r.mode])}</span>${r.edited ? '<span class="tag">bạn đã sửa</span>' : ""}${r.status !== "ready" ? `<span class="tag attn">${esc(RES_STATUS[r.status] || r.status)}</span>` : ""}</div>
+    <div>${esc(r.purpose)}</div><div class="muted">${resFacts(r)}${r.source ? ` · từ ${esc(r.source)}` : ""}</div>
+    ${r.warnings.includes("prefix") ? '<div class="warn">Không ô nào bắt đầu bằng tiền tố test: dữ liệu nạp vào Odoo sẽ khó nhận ra và khó dọn.</div>' : ""}${r.warnings.includes("unreadable") ? '<div class="warn">Không đọc được nội dung file này.</div>' : ""}
+    ${edit && note ? `<div class="muted">${note}</div>` : ""}
+    <div class="res-actions">${r.status === "ready" ? `<button class="btn" data-res-preview="${esc(r.name)}" data-case="${esc(k)}">${shown ? "Ẩn nội dung" : "Xem nội dung"}</button><a class="btn" href="${resUrl(k, r.name, "&download=1")}" download>Tải về</a>` : ""}
+      ${edit ? `<label class="btn">Dùng file của tôi<input type="file" hidden data-res-upload="${esc(r.name)}" data-case="${esc(k)}" accept=".${esc(r.name.split(".").pop())}"></label>` : ""}</div>
+    ${body}${edit && r.makeable && r.spec ? `<details data-key="spec-${esc(key)}" ${isOpen("spec-" + key, false)}><summary>Sửa mô tả để tạo lại file</summary>
+      <textarea class="spec" data-draft="spec-${esc(key)}" aria-label="Mô tả (JSON) của ${esc(r.name)}">${esc(spec)}</textarea>
+      <div class="res-actions"><button class="btn primary" data-res-save="${esc(r.name)}" data-case="${esc(k)}" ${S.busy ? "disabled" : ""}>Lưu và tạo lại</button></div></details>` : ""}
+    ${S.resError[key] ? `<div class="err">${esc(S.resError[key])}</div>` : ""}</div>`;
+}
+
+/** At the strategy: every file of a case that will run, with what the user may do about it. */
+function resourcePanel(v) {
+  const cases = v.cases.filter(k => k.resources.length && k.status !== "HELD");
+  if (!cases.length) return "";
+  return `<details data-key="resources" ${isOpen("resources", true)}><summary>File tài nguyên (${v.resources_total})${v.resources_guessed ? ` · ${v.resources_guessed} do AI đoán` : ""}</summary>
+    <div class="muted">Các file AI cần để chạy case (file import, ảnh, tài liệu đính kèm). Xem nội dung, sửa hoặc dùng file của bạn trước khi xác nhận.</div>
+    ${cases.map(k => `<h4 style="margin:14px 0 0"><span class="mono">${esc(k.id)}</span> ${esc(k.title)}</h4>${k.resources.map(r => resCard(k.id, r, v.resources_editable)).join("")}`).join("")}</details>`;
+}
+
+/** In a case's detail: what was prepared for it before step 1. Read only. */
+function prepared(k) {
+  if (!k.resources.length) return "";
+  return `<details data-key="prep-${esc(k.id)}" ${isOpen("prep-" + k.id, true)}><summary>Chuẩn bị · ${k.resources.length} file</summary>${k.resources.map(r => resCard(k.id, r, false)).join("")}</details>`;
 }
 
 const reportUrl = name => `/api/report?ws=${encodeURIComponent(S.sel.ws)}&id=${encodeURIComponent(S.sel.id)}&name=${encodeURIComponent(name)}&t=${TOKEN}`;
@@ -420,6 +489,8 @@ document.addEventListener("click", async e => {
   if (t.classList.contains("hist")) return select(t.dataset.ws, t.dataset.id);
   if (t.matches("tr.case")) { S.caseId = t.dataset.id; S.attempt = null; return renderMain(); }
   if (t.dataset.attempt) { S.attempt = +t.dataset.attempt; return renderDetail(); }
+  if (t.dataset.resPreview) return togglePreview(t.dataset.case, t.dataset.resPreview);
+  if (t.dataset.resSave) return saveSpec(t.dataset.case, t.dataset.resSave);
   if (t.dataset.g !== undefined) return openLightbox(+t.dataset.g);
   if (t.id === "lbClose") return $("lb").classList.remove("open");
   if (t.id === "lbPrev") { S.index = (S.index + S.gallery.length - 1) % S.gallery.length; return drawLightbox(); }
@@ -428,7 +499,7 @@ document.addEventListener("click", async e => {
   const where = { ws: S.sel && S.sel.ws, id: S.sel && S.sel.id };
   const call = {
     exportReport: () => post("/api/report", where),
-    confirm: () => post("/api/confirm", where), stop: () => post("/api/stop", where), resume: () => post("/api/resume", where),
+    confirm: () => post("/api/confirm", { ...where, resources_sha: S.view && S.view.resources_sha }), stop: () => post("/api/stop", where), resume: () => post("/api/resume", where),
     sendAnswer: () => post("/api/answer", { ...where, text: ($("answer") || {}).value || "" }),
     sendHint: () => post("/api/hint", { ...where, case: S.caseId, text: ($("hint") || {}).value || "" }),
   }[t.id];
@@ -453,7 +524,36 @@ document.addEventListener("submit", e => {
   if (e.target.id === "mapSearchForm") { e.preventDefault(); G.searchOpen = true; return loadMap(); }
   if (e.target.id === "mapDetailForm") { e.preventDefault(); return loadMapScreen(); }
 });
+async function togglePreview(k, name) {
+  const key = resKey(k, name);
+  if (S.preview[key]) delete S.preview[key];
+  else S.preview[key] = await get(resUrl(k, name, "&what=preview")).catch(() => ({ error: "Không đọc được file." }));
+  renderMain();
+}
+async function afterResourceEdit(k, name, r) {
+  const key = resKey(k, name);
+  S.resError[key] = r.error || "";
+  if (!r.error) { delete S.preview[key]; delete S.draft["spec-" + key]; }
+  S.busy = false;
+  await refreshView();
+  renderMain();
+}
+async function saveSpec(k, name) {
+  const key = resKey(k, name), box = [...document.querySelectorAll("textarea.spec")].find(x => x.dataset.draft === "spec-" + key);
+  let spec;
+  try { spec = JSON.parse((box && box.value) || S.draft["spec-" + key] || ""); } catch (error) { S.resError[key] = "Mô tả không phải JSON hợp lệ: " + error.message; return renderMain(); }
+  S.busy = true; renderMain();
+  afterResourceEdit(k, name, await post("/api/resource", { ws: S.sel.ws, id: S.sel.id, case: k, name, spec }));
+}
+async function uploadFile(input) {
+  const file = input.files[0], k = input.dataset.case, name = input.dataset.resUpload;
+  if (!file) return;
+  const data = await new Promise(done => { const reader = new FileReader(); reader.onload = () => done(String(reader.result).split(",")[1] || ""); reader.readAsDataURL(file); });
+  S.busy = true; renderMain();
+  afterResourceEdit(k, name, await post("/api/resource", { ws: S.sel.ws, id: S.sel.id, case: k, name, filename: file.name, data }));
+}
 document.addEventListener("change", e => {
+  if (e.target.dataset && e.target.dataset.resUpload) return uploadFile(e.target);
   if (e.target.id === "mapWorkspace") { S.ws = e.target.value; renderHistory(); return workspaceTab("site_map"); }
   if (e.target.id === "mapLanguage") { M.lang = e.target.value; return loadMap(); }
   if (e.target.id === "mapKind") { M.kind = e.target.value; G.searchOpen = !!(M.kind || M.q); return loadMap(); }

@@ -10,7 +10,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from oqa import paths  # noqa: E402
 
-OWNED = re.compile(r"/sessions/[^/]+/(state\.json|events\.jsonl|cases\.json|analysis\.json|strategy\.json|strategy\.md|evidence/|report/|logs/)|/workspace\.json$|/knowledge/index\.md$|\.odoo-test\.json$")
+OWNED = re.compile(r"/sessions/[^/]+/(state\.json|events\.jsonl|cases\.json|analysis\.json|strategy\.json|strategy\.md|resources\.json|fixtures/|evidence/|report/|logs/)|/workspace\.json$|/knowledge/index\.md$|\.odoo-test\.json$")
 SECRET = re.compile(r"/sessions/[^/]+/auth/|storageState|/credentials", re.I)
 CONFIRM = re.compile(r"(^|[\s;&|\"'])(?:\S*oqa(?:\.py)?|-m\s+oqa)\s+(?:confirm|resume|stop)\b")
 SCRIPT = re.compile(r"\bpython[\w.]*\s+(?:-\S+\s+)*\S*[/\\]workspaces[/\\][^\s]+[/\\]scripts[/\\]\S+\.py")
@@ -29,7 +29,7 @@ def verdict(call):
     target = str(args.get("file_path") or args.get("path") or "").replace("\\", "/")
     if tool in ("Write", "Edit", "MultiEdit", "NotebookEdit") and target and inside_home(target):
         if SECRET.search(target) or OWNED.search(target):
-            return "This file belongs to oqa (session state, evidence, workspace or knowledge). Change it with an oqa command, not by hand: oqa knowledge learn, oqa analyze --submit, oqa ask / answer, oqa finish."
+            return "This file belongs to oqa (session state, evidence, resource files, workspace or knowledge). Change it with an oqa command, not by hand: oqa knowledge learn, oqa analyze --submit (resources are declared in the analysis), oqa ask / answer, oqa finish."
     if tool in ("Read", "Grep", "Glob") and target and SECRET.search(target):
         return "Signed-in cookies and passwords are never read: they are used by oqa only."
     if tool == "Bash":

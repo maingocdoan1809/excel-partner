@@ -27,17 +27,21 @@ Files and formats: [references/contract.md](references/contract.md). Odoo specif
 | INTAKE | read the workbook the user named (add-in: the open file; terminal: the file they gave) | `oqa session new --file <path>`, then at once `oqa dashboard` **in the background**: it serves the progress page and opens it on this session (or reopens the running one). Do it without asking |
 | ANALYZE | judge every case, then hand it in | `oqa analyze --template --out <scratch>/analysis.json` → fill → `oqa analyze --submit <file>` |
 | CONNECT | sign every profile in | `oqa connect` (`--headed` if a two-factor code is needed: ask the user) |
-| CONFIRM | build the strategy, show it, **stop** | `oqa strategy`. Tell the user the strategy is waiting on the dashboard that is already open. Only they confirm (the Confirm button there, or `oqa confirm` in their terminal). You cannot, and must not try. Then `oqa wait` **in the background** |
+| CONFIRM | build the strategy, show it, **stop** | `oqa strategy`. Tell the user the strategy and the resource files (if any) are waiting on the dashboard that is already open: they look at the files, change or replace them, and confirm (the Confirm button there, or `oqa confirm` in their terminal, which refuses while a file is still missing). You cannot, and must not try. Then `oqa wait` **in the background** |
 | EXECUTE | explore each step, build the script, run | `oqa scaffold` → `oqa explore` / `oqa try` → `oqa build` → `oqa run` |
 | REPORT | close | `oqa report`: it writes ONE Excel evidence workbook (a summary sheet, then a sheet per case: what the testcase asked, how you understood it, every step with its red-framed picture, the runs) and **opens it on the user's screen**. Tell them the file path. They can also rebuild or download it any time from the dashboard |
 
-Anytime: `oqa status` (also lists cases whose failure is not explained yet) · `oqa repair ID …` · `oqa ask "<question>" [--case ID]` (then `oqa wait` in the background and stop) · `oqa wait` (ends when the user acts on the dashboard: confirms, answers, sends a hint, stops or resumes, and says which; the dashboard has a Stop button, and a hint box for a case that keeps failing) · `oqa knowledge search|learn` · `oqa probe [--filter text | --failed]` · `oqa lookup models|fields|xmlid|find|search …` · `oqa runner status|stop` · `oqa dashboard`.
+Anytime: `oqa status` (also lists cases whose failure is not explained yet) · `oqa resource list|show <case> <file>` (the prepared files, and what is inside one) · `oqa repair ID …` · `oqa ask "<question>" [--case ID]` (then `oqa wait` in the background and stop) · `oqa wait` (ends when the user acts on the dashboard: confirms, answers, sends a hint, stops or resumes, and says which; the dashboard has a Stop button, and a hint box for a case that keeps failing) · `oqa knowledge search|learn` · `oqa probe [--filter text | --failed]` · `oqa lookup models|fields|xmlid|find|search …` · `oqa runner status|stop` · `oqa dashboard`.
 
 ## ANALYZE: the part that decides everything
 
 The workbook is written for people: short, with assumed data. For **each case** fill the template honestly:
 - `clarity` 1-5 (is the intent unambiguous?) and `sufficiency` 1-5 (does it carry what is needed to run?). Below 3 means `needs_user`: put the questions in `questions` and `oqa ask` them now, not after a failed run.
-- `refs`: every file or record the case points at. Intake already marked which files exist; a missing one is `needs_user`, never invented.
+- `refs`: every file or record the case points at. Intake already marked which files exist; a missing one is `needs_user`, never invented silently: when a `resources` entry covers it (below), mark the ref `waived` with the note `see resource <name>`.
+- `resources`: files the case needs that the environment does not give you: a spreadsheet to import, a picture, an attachment. One entry per file: `name` (with its extension), `purpose`, and a `mode` that says who decided its content:
+  `provided`: the user's own file (`source` = its path when intake found it; leave `source` empty when they must upload it on the dashboard), `described`: the user told you what it holds (`description` = their words, `spec` = what you make from them), `guessed`: your own idea of what the case needs (`spec`). Makeable kinds: xlsx, csv, png, jpg, pdf, txt; any other (docx, zip…) must be `provided`.
+  `spec`: spreadsheet `{columns, rows, count}` (a `{i}` in a text cell is the row number; `count` repeats the rows, so a list longer than a page needs 3 rows of spec, not 150), picture `{width, height, color, text}`, pdf `{text, pages}`, text `{text}`. Start the text of every name-like column of data that will be imported with the workspace's test prefix.
+  Name the file in the `uses` of each step that needs it (every resource must be used). Submitting the analysis makes the files at once; the user sees them at CONFIRM (their content, whether you guessed, with a warning on a file without the test prefix), may edit or replace them, and approves them together with the strategy. If their answer changes a file, submit the analysis again: what they edited on the dashboard stays. Guess when the exact content does not decide the case's result; ask (`needs_user`) when it does (a real price list, a file with business meaning).
 - `data_needs`: data the environment may lack (a list long enough to paginate, a second company, a record in a given state), each with a `fallback`: the step that creates it (`o.reach`, `o.new` + `o.save`). A case must run on **any** environment, so plan the creation, do not hope.
 - `edge_cases`: what can differ between environments or runs: empty list, more than one page, permissions of the profile, language, default values, a record already existing.
 - `depends_on` + `reuse`: when a case can start from where another ended, say so; the runner then keeps the screen instead of starting over.
@@ -51,6 +55,8 @@ The workbook is written for people: short, with assumed data. For **each case** 
 ## EXECUTE: one case at a time; each step is done the moment it is verified
 
 Work **case by case**, never "explore every case, then build, then run". For ONE case: explore its steps, `oqa build`, `oqa run ID`, repair if needed, then move to the next case. Do not explore a case you are not about to finish. A step whose `oqa try` says **ok** has been done for real on the page: go straight on to the next step, do not stop to review other steps or cases first.
+
+A step that uses a file starts with `f = s.fixture("<name>")` (`f.path`, `f.rows`, `f.columns`, `f.kind`; the step's record and the dashboard show that it used it) and attaches it with `o.upload("<selector of the file input, or of the button that opens the chooser>", f)`. Check what the page shows of it (the file name, the preview of the import) and `s.hl` that; compare the page with `f.rows` / `f.columns`, never with a number copied from the spec. Odoo's import wizard is a client action: the sitemap does not list it, explore it with `oqa try` like any screen.
 
 A selector is never a guess. Every line of a script ran once on THIS Odoo, before it was written down, and a wrong guess found while exploring costs nothing. `oqa run` refuses a script that was not built this way.
 
@@ -79,4 +85,4 @@ A selector is never a guess. Every line of a script ran once on THIS Odoo, befor
 
 ## Never
 
-Edit files under the oqa Home by hand · read signed-in state or passwords · confirm for the user · run a case script outside `oqa run` · call a case PASS yourself · test data without the workspace prefix.
+Edit files under the oqa Home by hand · read signed-in state or passwords · confirm for the user · run a case script outside `oqa run` · call a case PASS yourself · test data without the workspace prefix · write a resource file or `resources.json` by hand (declare it in the analysis; the user changes it on the dashboard).

@@ -12,6 +12,7 @@ Kinds and their required fields (every event also has `ts` and `kind`):
   case_started     case, attempt
   step             case, attempt, n, status, caption, expected, actual, images[{raw,annotated}]
                    PASS and FAIL steps MUST carry at least one image pair: a step without a real picture is not recorded.
+                   [resources[{name, kind, mode, sha256, bytes, rows?}]]: the prepared files the step used (s.fixture)
   attempt_finished case, attempt, status PASS|FAIL, reason [failed_step, script_sha]     one run of a case; the case may be repaired and run again
   repair           case, attempt, cause, evidence, change [reanalysis, probed, script_sha, timeout_s, unchanged_reason]
                    the assistant's note after a failed run: what it found, how it knows, what it changed, how it now reads the case. A rerun needs one.

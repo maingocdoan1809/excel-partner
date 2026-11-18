@@ -15,6 +15,7 @@ Every JSON file has `schema_version` (now 1). A reader that meets a larger numbe
 <home>/workspaces/<ws>/current                       id of the session used when none is named
 <home>/workspaces/<ws>/sessions/<id>/
     state.json  cases.json  analysis.json  strategy.json  strategy.md  events.jsonl  evidence/  logs/
+    resources.json  fixtures/<case>/<file>                the files the cases need (see resources.json below)
 ```
 
 A session is chosen by `--ws` / `--session`, else `$OQA_WS` / `$OQA_SESSION` (what the add-in sets for a chat), else the workspace's `current`.
@@ -67,13 +68,22 @@ Phases: `ANALYZE → CONNECT → CONFIRM → EXECUTE → REPORT → DONE` (INTAK
 ## analysis.json (ANALYZE)
 
 Produced by `oqa analyze --template`, completed by the assistant, accepted only by `oqa analyze --submit`. Per case:
-`id, profile, verdict (ready|needs_user|blocked), clarity{score 1-5, notes}, sufficiency{score 1-5, missing}, refs[{text, status: ok|missing|asked|waived, note}], data_needs[{what, fallback}], edge_cases[] or edge_cases_none_reason, depends_on[], reuse, steps[{n, action, expected}], timeout_s (optional, 5-120, default 8), questions[] (needs_user) / reason (blocked)`.
+`id, profile, verdict (ready|needs_user|blocked), clarity{score 1-5, notes}, sufficiency{score 1-5, missing}, refs[{text, status: ok|missing|asked|waived, note}], data_needs[{what, fallback}], resources[{name, mode, purpose, spec|description|source}] (optional), edge_cases[] or edge_cases_none_reason, depends_on[], reuse, steps[{n, action, expected, uses[]}], timeout_s (optional, 5-120, default 8), questions[] (needs_user) / reason (blocked)`.
 `ready` needs clarity ≥ 3, sufficiency ≥ 3, no reference left `missing`, and may depend only on other `ready` cases. No cycles.
+
+## resources.json (ANALYZE, CONFIRM)
+
+The files a case needs before it can run. Declared in the analysis (`resources` of a case, `uses` of a step), made by `oqa analyze --submit`, checked and optionally changed by the user at CONFIRM, frozen by their approval.
+`{schema_version, resources: {case: {name: entry}}}`, `entry = {name, mode, purpose, description, spec?, source?, sha256, bytes, facts, edited}`; the file is `fixtures/<case>/<name>`.
+`mode`: `provided` (the user's file: found next to the workbook, or uploaded on the dashboard), `described` (made from what the user said), `guessed` (the assistant's idea; the dashboard says so). `edited` = the user changed it on the dashboard: a later analysis never overwrites it. Editing a spec makes the entry `described`, uploading a file makes it `provided`.
+Makeable from `spec`: `xlsx`/`csv` `{columns, rows, count?, sheet?, delimiter?, encoding?}` (`{i}` in a text cell = the row number from 1; `count` repeats the rows), `png`/`jpg` `{width, height, color, text}`, `pdf` `{text, pages}`, `txt` `{text}`; other kinds only as `provided`. `facts`: `bytes`, and `rows` + `columns` (spreadsheets), `width` + `height` (pictures), `lines` (text), `prefix_missing` (no cell starts with the workspace's test prefix: a warning, not a block), `unreadable`.
+`confirm` needs every resource of a case that will run to have its file, and stores `confirmation.resources_sha` = the digest of every resource's mode and spec (or content, for a file the user gave). The dashboard sends the digest it showed, and a change in between is refused. A script gets a file only through `s.fixture(name)` (the step must name it in `uses`), which checks that digest and the file's sha256.
+Dashboard routes (token and Host/Origin checked like the others): `GET /api/resource?ws&id&case&name[&what=preview|&download=1]` serves the file or its first rows; `POST /api/resource {ws, id, case, name, spec | filename + data (base64, at most 8 MB)}` changes one, in CONNECT or CONFIRM only. `GET /api/session` carries per case `resources[{name, kind, mode, purpose, status, edited, facts, warnings, used_by}]` and, for the session, `resources_sha`, `resources_editable`, `resources_guessed`, `resources_total`, `resources_blocking`.
 
 ## strategy.json / strategy.md (CONFIRM)
 
 `strategy.json = {schema_version, order:[case], excluded:[{id, verdict, reason}], analysis_sha, sha}`. `strategy.md` is the same for people.
-`confirm` succeeds only if `sha` is intact and matches `analysis.json`: the user approves exactly what will run.
+`confirm` succeeds only if `sha` is intact and matches `analysis.json`, and every resource of a case that will run has its file: the user approves exactly what will run, with the files it will use. `strategy.md` lists them per case.
 **Only a person confirms**: `oqa confirm` needs a real terminal (the assistant's shell is not one), or the dashboard's Confirm button.
 
 ## events.jsonl
@@ -85,7 +95,7 @@ One JSON object per line, appended in order; each has `ts` and `kind`. Readers s
 | session_started | workspace, file |
 | phase | phase, text |
 | ask / answered | question / answer, [case] |
-| confirmed | by, strategy_sha |
+| confirmed | by, strategy_sha, resources_sha |
 | case_planned | case, title, steps[{n, action, expected}], order |
 | stopped / resumed | by (the user's Stop and Resume) |
 | hint | case, text (the user's advice; the case goes back in the queue with a fresh budget) |
@@ -95,7 +105,7 @@ One JSON object per line, appended in order; each has `ts` and `kind`. Readers s
 | explore | case, step, ok, [code, url, error]: the assistant tried code for a step on the real page |
 | case_started | case, attempt, [from_step]: `from_step` > 1 when the run picked up at a step that failed before (the steps before it are carried from the earlier run) |
 | case_started | case, attempt |
-| step | case, attempt, n, status PASS\|FAIL\|SKIPPED, caption, expected, actual, [checks], images[{raw, annotated}] (`checks` = how many checks of the expected result ran; a PASS step needs at least one) |
+| step | case, attempt, n, status PASS\|FAIL\|SKIPPED, caption, expected, actual, [checks], images[{raw, annotated}], [resources[{name, kind, mode, sha256, bytes, rows?}]] (`checks` = how many checks of the expected result ran; a PASS step needs at least one; `resources` = the prepared files the step used) |
 | case_finished | case, status PASS\|FAIL\|PENDING\|BLOCKED\|NOT EXECUTED, attempts |
 | session_finished | counts |
 
@@ -115,6 +125,7 @@ kind: login | navigation | locator | data | error | fix | quirk | rule. Never a 
 | `ws show\|list` | the workspace (no secrets: each profile says whether a password is saved) |
 | `session new --file F` / `show` / `list` | INTAKE: read the workbook → `cases.json`, session starts in ANALYZE |
 | `analyze --template [--out F]` / `--submit F` | the skeleton to fill / hand in the analysis (validated; ANALYZE → CONNECT) |
+| `resource list` / `resource show CASE FILE [--rows N]` | the files the cases need (who decided each, what is inside, where it is used) / the first rows of one |
 | `strategy` | order the ready cases, write `strategy.json` and `strategy.md` (phase CONFIRM) |
 | `confirm` | the user approves (terminal only); CONFIRM → EXECUTE |
 | `ask "Q" [--case ID]` / `answer "text"` | wait for the user / record their reply |

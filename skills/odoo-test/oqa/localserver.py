@@ -47,6 +47,10 @@ class LocalApp:
         """True when the server should stop (the form was saved)."""
         return False
 
+    def limit(self, path):
+        """The most bytes a POST to `path` may carry."""
+        return MAX_BODY
+
     def _handler(self):
         app = self
 
@@ -104,7 +108,7 @@ class LocalApp:
                 body = {}
                 if method == "POST":
                     length = int(self.headers.get("Content-Length") or 0)
-                    if length > MAX_BODY:
+                    if length > app.limit(url.path):
                         return self._send(413, {"error": "too large"})
                     try:
                         body = json.loads(self.rfile.read(length) or b"{}")

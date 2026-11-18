@@ -13,7 +13,7 @@ import webbrowser
 from pathlib import Path
 from urllib.parse import quote
 
-from . import VERSION, build_id, analysis, connect, memory, dashboard_server, doctor, events, init_server, intake, knowledge, mcp_server, paths, probe, recipe, report, runtime, scaffold, service, sitemap, workspace
+from . import VERSION, build_id, analysis, connect, memory, dashboard_server, doctor, events, init_server, intake, knowledge, mcp_server, paths, probe, recipe, report, resources, runtime, scaffold, service, sitemap, workspace
 from .secrets import SecretStoreUnavailable, default_store
 from .state import MAX_REPAIRS, GateError, Session
 from .store import SchemaError, read_json, write_json
@@ -103,19 +103,25 @@ def cmd_analyze(args):
     if not isinstance(submitted, dict):
         raise SchemaError(f"{args.submit} is not an analysis file", "analysis")
     analysis.validate(submitted, cases, config)
+    prepared = resources.sync(session.dir, submitted, config["test_prefix"])            # the files exist before the user is asked to approve anything
     write_json(session.dir / "analysis.json", submitted)
     session.analysis_submitted()
     counts = {}
     for case in submitted["cases"]:
         counts[case["verdict"]] = counts.get(case["verdict"], 0) + 1
-    return {"accepted": True, "verdicts": counts}, f"Analysis accepted ({', '.join(f'{n} {v}' for v, n in counts.items())}). Next: {session.summary()['next']}"
+    lines = [f"Analysis accepted ({', '.join(f'{n} {v}' for v, n in counts.items())})."]
+    if prepared["resources"]:
+        lines.append(f"{prepared['resources']} resource file(s) prepared ({prepared['guessed']} guessed" + (f", {prepared['needs_file']} waiting for the user's file" if prepared["needs_file"] else "")
+                     + "): the user checks and may change them on the dashboard before approving. See them: oqa resource list")
+    return {"accepted": True, "verdicts": counts, "resources": prepared}, "\n".join(lines + [f"Next: {session.summary()['next']}"])
 
 
 def cmd_strategy(args):
     session = Session.open(args.ws, args.session)
     session.require("CONFIRM")
     config = workspace.load(session.ws)
-    data, text = analysis.strategy(read_json(session.dir / "analysis.json"), session.cases(), config)
+    doc = read_json(session.dir / "analysis.json")
+    data, text = analysis.strategy(doc, session.cases(), config, {c["id"]: resources.view(session.dir, c["id"], c) for c in doc["cases"]})
     write_json(session.dir / "strategy.json", data)
     (session.dir / "strategy.md").write_text(text + "\n", encoding="utf-8")
     session.strategy_ready(data["sha"])
@@ -133,8 +139,35 @@ def cmd_confirm(args, is_tty=None):
         print((session.dir / "strategy.md").read_text(encoding="utf-8"))
         if input("Type 'yes' to approve this strategy and start testing: ").strip().lower() not in ("yes", "y", "có", "co"):
             raise GateError("Not confirmed.")
-    strategy_doc = session.confirm_current("terminal")
+    strategy_doc = session.confirm_current("terminal")           # refuses a resource that still has no file; those are uploaded on the dashboard
     return {"confirmed": True, "by": "terminal"}, f"Confirmed. {len(strategy_doc['order'])} cases will run. Next: {session.summary()['next']}"
+
+
+def _resource_rows(session):
+    doc = read_json(session.dir / "analysis.json")
+    if doc is None:
+        raise GateError("No analysis yet: oqa analyze --submit first.")
+    return [(c["id"], r) for c in doc["cases"] for r in resources.view(session.dir, c["id"], c)]
+
+
+def cmd_resource(args):
+    """The files the cases need: list them, or show what is inside one (the first rows of a spreadsheet)."""
+    session = Session.open(args.ws, args.session)
+    language = workspace.load(session.ws).get("language")
+    rows = _resource_rows(session)
+    if args.what == "list":
+        lines = [f"{case}: " + resources.describe(r, language) + (f"  used by step {', '.join(map(str, r['used_by']))}" if r["used_by"] else "") + ("  [edited by the user]" if r["edited"] else "") for case, r in rows]
+        return {"resources": [{"case": case, **r} for case, r in rows], "sha": resources.digest_of(session.dir)}, "\n".join(lines) or "No case declares a resource."
+    if not (args.case and args.name):
+        raise GateError("Say which one: oqa resource show <case> <file name>")
+    if not any(case == args.case and r["name"] == args.name for case, r in rows):
+        raise GateError(f"{args.case} has no resource {args.name}. List them: oqa resource list")
+    shown = resources.preview(session.dir, args.case, args.name, args.rows)
+    if "columns" in shown:
+        lines = [" | ".join(shown["columns"])] + [" | ".join(row) for row in shown["rows"]] + [f"({shown['total']} data row(s) in the file)"]
+    else:
+        lines = [shown.get("text") or json.dumps(shown)]
+    return shown, "\n".join(lines)
 
 
 def cmd_connect(args):
@@ -608,6 +641,11 @@ def build_parser():
     p.add_argument("--out", metavar="FILE", help="with --template: write it here instead of printing")
     add("strategy", cmd_strategy, "build the strategy the user must approve")
     add("confirm", cmd_confirm, "the USER approves the strategy (needs a real terminal)")
+    p = add("resource", cmd_resource, "the files the cases need (spreadsheets to import, pictures, documents): list them or look inside one")
+    p.add_argument("what", choices=["list", "show"])
+    p.add_argument("case", nargs="?")
+    p.add_argument("name", nargs="?", help="the file name, as in the analysis")
+    p.add_argument("--rows", type=int, default=10, help="show: how many data rows to print")
     p = add("connect", cmd_connect, "sign every profile in and record how this Odoo behaves after login")
     p.add_argument("--headed", action="store_true", help="show the browser (for a two-factor code only the user can enter)")
     p = add("scaffold", cmd_scaffold, "write the case script skeletons (reuses scripts from earlier sessions)")

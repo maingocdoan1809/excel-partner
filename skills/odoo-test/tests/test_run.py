@@ -6,7 +6,7 @@ import pytest
 pytest.importorskip("playwright")
 
 from conftest import make_workbook  # noqa: E402
-from oqa import analysis, connect, evidence, events, intake, odoo_ui, report, runtime, scaffold, view, workspace  # noqa: E402
+from oqa import analysis, connect, evidence, events, intake, odoo_ui, report, resources, runtime, scaffold, view, workspace  # noqa: E402
 from oqa.secrets import MemoryStore  # noqa: E402
 from oqa.state import GateError, Session  # noqa: E402
 from oqa.store import write_json  # noqa: E402
@@ -89,15 +89,16 @@ def explain(session, case, n=0):
                           script_sha=scaffold.script_sha(scaffold.script_path(session, case)), unchanged_reason="rerun on purpose")
 
 
-def approve(session, ws, store, strategy_of=None):
-    """ANALYZE .. CONFIRM with real code paths (connect uses the browser)."""
+def approve(session, ws, store, strategy_of=None, uses=None):
+    """ANALYZE .. CONFIRM with real code paths (connect uses the browser). `uses` is {case: {step: [resource names]}}."""
     data = {"schema_version": 1, "cases": []}
     for case in session.cases()["cases"]:
         steps = STEPS[case["id"]]
         data["cases"].append({"id": case["id"], "profile": "Admin", "verdict": "ready", "clarity": {"score": 4, "notes": ""}, "sufficiency": {"score": 4, "missing": []}, "refs": [],
                               "data_needs": [], "edge_cases": ["too few rows"], "depends_on": ["T-1"] if case["id"] == "T-2" else [], "reuse": "", **(strategy_of or {}).get(case["id"], {}),
-                              "steps": [{"n": n, "action": a, "expected": e} for n, (a, e) in enumerate(steps, 1)]})
+                              "steps": [{"n": n, "action": a, "expected": e, "uses": ((uses or {}).get(case["id"]) or {}).get(n, [])} for n, (a, e) in enumerate(steps, 1)]})
     analysis.validate(data, session.cases(), ws)
+    resources.sync(session.dir, data, ws["test_prefix"])
     write_json(session.dir / "analysis.json", data)
     session.analysis_submitted()
     connect.connect(session, ws, store)
@@ -174,6 +175,52 @@ def test_cases_run_in_one_browser_and_every_step_has_a_framed_picture(live):
     for e in steps:
         pair = e["images"][0]
         assert evidence.check(session.dir / pair["raw"], session.dir / pair["annotated"]) is None
+
+
+ATTACH = """
+def run(t):
+    o = t.o
+    with t.step(1) as s:
+        f = s.fixture("lines.xlsx")
+        o.page.evaluate('''() => { document.body.insertAdjacentHTML('beforeend', '<div><input type=file class=o_input_file><span id=picked></span></div>');
+            document.querySelector('.o_input_file').onchange = e => { document.getElementById('picked').textContent = e.target.files[0].name; }; }''')
+        o.upload(".o_input_file", f)
+        s.hl("#picked")
+        s.equals(o.page.inner_text("#picked"), "lines.xlsx")
+        s.check(f.rows == 3 and f.columns == ["Product", "Qty"], "the file holds the rows the analysis planned")
+    with t.step(2) as s:
+        s.hl(".o_web_client")
+        o.expect_visible(".o_web_client")
+    with t.step(3) as s:
+        s.hl(".o_web_client")
+        o.expect_visible(".o_web_client")
+    with t.step(4) as s:
+        s.hl(".o_web_client")
+        o.expect_visible(".o_web_client")
+"""
+LINES = {"name": "lines.xlsx", "mode": "guessed", "purpose": "the lines to attach", "spec": {"columns": ["Product", "Qty"], "rows": [["ZZ_AUTOTEST_p-{i}", 2]], "count": 3}}
+
+
+def test_a_step_attaches_a_prepared_file_and_its_record_names_it(live):
+    session, ws, store = live
+    data = approve(session, ws, store, {"T-1": {"resources": [LINES]}}, {"T-1": {1: ["lines.xlsx"]}})
+    write_script(session, "T-1", ATTACH, data)
+    result = runtime.Runner(session, ws, store).run(["T-1"])[0]
+    assert result["status"] == "PASS", result
+    first = next(e for e in events.read(session.dir) if e["kind"] == "step" and e["n"] == 1)
+    assert first["resources"] == [{"name": "lines.xlsx", "kind": "xlsx", "mode": "guessed", "sha256": first["resources"][0]["sha256"], "bytes": first["resources"][0]["bytes"], "rows": 3}]
+    assert all("resources" not in e for e in events.read(session.dir) if e["kind"] == "step" and e["n"] > 1)
+    shown = next(c for c in view.case_records(session) if c["id"] == "T-1")["attempts"][0]["steps"][0]
+    assert shown["resources"][0]["name"] == "lines.xlsx" and shown["uses"] == ["lines.xlsx"]
+
+
+def test_a_prepared_file_that_was_swapped_after_the_approval_fails_the_step_with_a_picture(live):
+    session, ws, store = live
+    data = approve(session, ws, store, {"T-1": {"resources": [LINES]}}, {"T-1": {1: ["lines.xlsx"]}})
+    write_script(session, "T-1", ATTACH, data)
+    resources.file_of(session.dir, "T-1", "lines.xlsx").write_bytes(b"not what the user saw")
+    result = runtime.Runner(session, ws, store).run(["T-1"])[0]
+    assert result["status"] == "FAIL" and result["failed_step"] == 1 and "changed" in result["reason"] and result["picture"]
 
 
 def test_a_failing_step_is_photographed_explained_repaired_and_run_again(live):

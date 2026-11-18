@@ -10,17 +10,15 @@ analysis.json = {schema_version, cases: [ {
     edge_cases     [text]                                what can differ between environments; or `edge_cases_none_reason`
     depends_on     [case id]                             cases whose end state this one starts from
     reuse          text                                  what it takes over from them (optional)
-    steps          [{n, action, expected}]               the strategy for the case, not the one-line description in the workbook
+    resources      [{name, mode, purpose, spec | description | source}]   files the case needs (see resources.py): prepared before the user approves
+    steps          [{n, action, expected, uses}]         the strategy for the case, not the one-line description in the workbook; `uses` names the resources of the step
     timeout_s      int 5-120 (optional)                  how long one wait may last on this case's pages; default 8. A slow screen, a heavy report
     questions / reason                                   needs_user: what to ask; blocked: why
 } ]}
 
 `ready` needs clarity >= 3, sufficiency >= 3 and no ref left `missing`, and may depend only on other `ready` cases."""
-import hashlib
-import json
-
-from . import SCHEMA_VERSION, memory
-from .store import SchemaError
+from . import SCHEMA_VERSION, memory, resources
+from .store import SchemaError, digest
 
 VERDICTS = ("ready", "needs_user", "blocked")
 REF_STATUSES = ("ok", "missing", "asked", "waived")
@@ -37,8 +35,8 @@ def template(cases_doc, workspace):
             "id": case["id"], "previous": memory.recall(workspace["name"], stem, case["id"]), "profile": profiles[0] if len(profiles) == 1 else "", "verdict": "",
             "clarity": {"score": 0, "notes": ""}, "sufficiency": {"score": 0, "missing": []},
             "refs": [{"text": r["text"], "status": "ok" if r["status"] == "found" else "missing", "note": r.get("path", "")} for r in case["refs"]],
-            "data_needs": [], "edge_cases": [], "depends_on": list(case["case_refs"]), "reuse": "",
-            "steps": [{"n": i, "action": line, "expected": ""} for i, line in enumerate(case["steps"], 1)],
+            "data_needs": [], "resources": [], "edge_cases": [], "depends_on": list(case["case_refs"]), "reuse": "",
+            "steps": [{"n": i, "action": line, "expected": "", "uses": []} for i, line in enumerate(case["steps"], 1)],
             "_title": case["title"], "_expected": case["expected"],
         })
     return {"schema_version": SCHEMA_VERSION, "cases": items}
@@ -89,6 +87,7 @@ def validate(analysis, cases_doc, workspace):
             for position, step in enumerate(steps, 1):
                 if not isinstance(step, dict) or step.get("n") != position or not str(step.get("action", "")).strip() or not str(step.get("expected", "")).strip():
                     problems.append(f"{at}: step {position} needs n={position}, an action and an expected result")
+        problems += resources.problems(c, at)
         if "timeout_s" in c and not (isinstance(c["timeout_s"], int) and not isinstance(c["timeout_s"], bool) and MIN_TIMEOUT <= c["timeout_s"] <= MAX_TIMEOUT):
             problems.append(f"{at}: timeout_s must be a whole number of seconds from {MIN_TIMEOUT} to {MAX_TIMEOUT}")
         for dep in c.get("depends_on") or []:
@@ -160,10 +159,6 @@ def order(analysis, cases_doc):
     return out, excluded
 
 
-def digest(obj):
-    return hashlib.sha256(json.dumps(obj, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()[:16]
-
-
 def verify_strategy(strategy_doc, analysis):
     """True when strategy.json is untouched since `strategy()` made it and still matches the analysis it came from."""
     body = {k: v for k, v in strategy_doc.items() if k != "sha"}
@@ -172,14 +167,15 @@ def verify_strategy(strategy_doc, analysis):
 
 LABELS = {
     "vi": {"title": "Chiến lược test", "run": "Sẽ chạy theo thứ tự", "skip": "Chưa chạy (cần xử lý trước)", "profile": "Profile", "deps": "Phụ thuộc", "reuse": "Tận dụng",
-           "data": "Dữ liệu có thể thiếu → cách bù", "edge": "Tình huống biên", "steps": "Các bước", "clarity": "Rõ ràng", "suff": "Đủ dữ kiện", "none": "không"},
+           "data": "Dữ liệu có thể thiếu → cách bù", "files": "File tài nguyên", "edge": "Tình huống biên", "steps": "Các bước", "clarity": "Rõ ràng", "suff": "Đủ dữ kiện", "none": "không"},
     "en": {"title": "Test strategy", "run": "Will run in this order", "skip": "Not run yet (needs attention)", "profile": "Profile", "deps": "Depends on", "reuse": "Reuses",
-           "data": "Data that may be missing → fallback", "edge": "Edge cases", "steps": "Steps", "clarity": "Clarity", "suff": "Sufficiency", "none": "none"},
+           "data": "Data that may be missing → fallback", "files": "Resource files", "edge": "Edge cases", "steps": "Steps", "clarity": "Clarity", "suff": "Sufficiency", "none": "none"},
 }
 
 
-def strategy(analysis, cases_doc, workspace):
-    """(strategy dict, markdown). The digest in the dict is what `confirm` checks, so the user approves exactly what will run."""
+def strategy(analysis, cases_doc, workspace, files=None):
+    """(strategy dict, markdown). The digest in the dict is what `confirm` checks, so the user approves exactly what will run.
+    `files` is {case: resources.view(...)}: the resources, which the user approves at the same time (their digest is checked by `confirm` too)."""
     ordered, excluded = order(analysis, cases_doc)
     by_id, info = {c["id"]: c for c in analysis["cases"]}, {c["id"]: c for c in cases_doc["cases"]}
     data = {"schema_version": SCHEMA_VERSION, "order": ordered, "excluded": excluded, "analysis_sha": digest(analysis)}
@@ -193,6 +189,8 @@ def strategy(analysis, cases_doc, workspace):
                   f"- {t['deps']}: {', '.join(c.get('depends_on') or []) or t['none']}" + (f" · {t['reuse']}: {c['reuse']}" if c.get("reuse") else "")]
         if c.get("data_needs"):
             lines.append(f"- {t['data']}: " + "; ".join(f"{d['what']} → {d['fallback']}" for d in c["data_needs"]))
+        if (files or {}).get(ident):
+            lines.append(f"- {t['files']}: " + "; ".join(resources.describe(r, workspace.get("language")) for r in files[ident]))
         lines.append(f"- {t['edge']}: " + ("; ".join(c.get("edge_cases") or []) or c.get("edge_cases_none_reason", "")))
         lines += [f"- {t['steps']}:"] + [f"  {s['n']}. {s['action']} → {s['expected']}" for s in c["steps"]] + [""]
     if excluded:

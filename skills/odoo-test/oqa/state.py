@@ -11,7 +11,7 @@ import re
 import time
 from contextlib import contextmanager
 
-from . import SCHEMA_VERSION, analysis, events, memory, paths
+from . import SCHEMA_VERSION, analysis, events, memory, paths, resources
 from .store import SchemaError, locked, read_json, write_json
 
 PHASES = ("ANALYZE", "CONNECT", "CONFIRM", "EXECUTE", "REPORT", "DONE")
@@ -121,8 +121,9 @@ class Session:
                 raise GateError(f"Not allowed in phase {state['phase']}. Next: {NEXT[state['phase']]}")
             state["strategy_sha"] = sha
 
-    def confirm(self, by, sha):
-        """The user's approval. `sha` must be the digest of the strategy on disk now, so what they approved is what runs."""
+    def confirm(self, by, sha, resources_sha=None):
+        """The user's approval. `sha` must be the digest of the strategy on disk now, so what they approved is what runs. `resources_sha` is the digest of the resource
+        files they looked at (the current one when not given): a script may only use files that still match it."""
         with self.update() as state:
             if state["waiting"]:
                 raise GateError("The session is waiting for the user to answer; run `oqa answer` first.")
@@ -130,18 +131,30 @@ class Session:
                 raise GateError(f"Nothing to confirm in phase {state['phase']}. Next: {NEXT[state['phase']]}")
             if not state["strategy_sha"] or state["strategy_sha"] != sha:
                 raise GateError("The strategy changed or was never built; run `oqa strategy` and ask the user to review it again.")
-            state["confirmation"] = {"by": by, "at": time.strftime("%Y-%m-%d %H:%M:%S"), "strategy_sha": sha}
-            events.append(self.dir, "confirmed", by=by, strategy_sha=sha)
+            resources_sha = resources_sha or resources.digest_of(self.dir)
+            state["confirmation"] = {"by": by, "at": time.strftime("%Y-%m-%d %H:%M:%S"), "strategy_sha": sha, "resources_sha": resources_sha}
+            events.append(self.dir, "confirmed", by=by, strategy_sha=sha, resources_sha=resources_sha)
             self._enter(state, "EXECUTE", "Confirmed; running the cases one by one")
 
-    def confirm_current(self, by):
+    def confirm_current(self, by, resources_sha=None):
         """The user approves the strategy that is on disk now (the terminal and the dashboard both come here). Refuses a strategy that was
-        edited or no longer matches the analysis."""
-        strategy_doc = read_json(self.dir / "strategy.json")
-        if not strategy_doc or not analysis.verify_strategy(strategy_doc, read_json(self.dir / "analysis.json")):
+        edited or no longer matches the analysis, a resource that has no file yet, and resources that changed since `resources_sha` (what the user was looking at)."""
+        strategy_doc, analysis_doc = read_json(self.dir / "strategy.json"), read_json(self.dir / "analysis.json")
+        if not strategy_doc or not analysis.verify_strategy(strategy_doc, analysis_doc):
             raise GateError("strategy.json is missing or no longer matches the analysis; run `oqa strategy` again.")
-        self.confirm(by, strategy_doc["sha"])
+        current = resources.digest_of(self.dir)
+        if resources_sha and resources_sha != current:
+            raise GateError("The resource files changed since you last looked at them. Look again, then confirm.")
+        lacking = resources.blocking(self.dir, analysis_doc, strategy_doc["order"])
+        if lacking:
+            raise GateError("Not every resource file is ready:\n" + "\n".join(f"  {line}" for line in lacking))
+        self.confirm(by, strategy_doc["sha"], current)
         return strategy_doc
+
+    def edit_resource(self, case, name, spec=None, upload=None, filename="", prefix=""):
+        """The user changes one resource file (a new spec, or a file of their own) before they approve the strategy. Not after: what ran must be what they approved."""
+        self.require("CONNECT", "CONFIRM", working=False)
+        return resources.edit(self.dir, case, name, spec=spec, upload=upload, filename=filename, prefix=prefix)
 
     # --- asking the user ----------------------------------------------------------
     def ask(self, question, case=None):

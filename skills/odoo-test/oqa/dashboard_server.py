@@ -1,12 +1,14 @@
-"""`oqa dashboard`: pick a session from the history and watch its cases and steps, with the picture of every step. Read-only, except the two things only
-the user does: approve the strategy and answer the assistant's question."""
+"""`oqa dashboard`: pick a session from the history and watch its cases and steps, with the picture of every step. Read-only, except what only
+the user does: approve the strategy (after looking at, and if they wish changing, the resource files) and answer the assistant's question."""
+import base64
+import binascii
 import json
 import re
 import unicodedata
 from pathlib import Path
 from urllib.parse import quote
 
-from . import paths, report, sitemap, view, workspace
+from . import paths, report, resources, sitemap, view, workspace
 from .localserver import LocalApp, font_faces
 from .state import GateError, Session
 from .store import SchemaError
@@ -33,6 +35,9 @@ class Dashboard(LocalApp):
     def finished(self):
         return self.quit                # `oqa dashboard` of a newer skill asks an older dashboard to leave
 
+    def limit(self, path):
+        return resources.MAX_UPLOAD * 4 // 3 + 4096 if path == "/api/resource" else super().limit(path)          # a file the user gives, sent as base64
+
     def page(self, query):
         boot = json.dumps({"select": list(self.select) if self.select else None}).replace("</", "<\\/")
         return PAGE.read_text(encoding="utf-8").replace("__TOKEN__", self.token).replace("__BOOT__", boot).replace("/*__FONT_FACES__*/", font_faces()).replace("/*__SITE_MAP_CSS__*/", SITE_MAP_SCRIPT.with_suffix(".css").read_text(encoding="utf-8")).replace("/*__SITE_MAP__*/", SITE_MAP_SCRIPT.read_text(encoding="utf-8"))
@@ -47,6 +52,36 @@ class Dashboard(LocalApp):
         if root not in target.parents or target.suffix.lower() not in (".png", ".jpg") or not target.is_file():
             return 404, {"error": "no such picture"}
         return 200, target.read_bytes(), "image/png" if target.suffix.lower() == ".png" else "image/jpeg"
+
+    def _resource(self, query):
+        """A resource file of a session (to look at or download), or the first rows of a spreadsheet as JSON. The name must be one the analysis declared."""
+        session = self._session(query)
+        case, name = query.get("case", ""), query.get("name", "")
+        if name not in resources.load(session.dir)["resources"].get(case, {}):
+            return 404, {"error": "no such resource"}
+        if query.get("what") == "preview":
+            return 200, resources.preview(session.dir, case, name)
+        target = resources.file_of(session.dir, case, name)
+        if not target.is_file():
+            return 404, {"error": "the file is not there"}
+        kind = resources.kind_of(name)
+        known = {"png": "image/png", "jpg": "image/jpeg", "pdf": "application/pdf", "csv": "text/csv", "txt": "text/plain",
+                 "xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"}.get(kind, "application/octet-stream")
+        return 200, target.read_bytes(), known, {"Content-Disposition": _attachment(name) if query.get("download") else "inline"}
+
+    def _edit_resource(self, body):
+        """The user changes a resource: a new spec, or a file of their own (base64) in place of it."""
+        session = self._session(body)
+        prefix = workspace.load(session.ws)["test_prefix"]
+        if body.get("spec") is not None:
+            session.edit_resource(str(body.get("case", "")), str(body.get("name", "")), spec=body["spec"], prefix=prefix)
+        else:
+            try:
+                data = base64.b64decode(str(body.get("data", "")), validate=True)
+            except (binascii.Error, ValueError):
+                return 200, {"error": "The file could not be read."}
+            session.edit_resource(str(body.get("case", "")), str(body.get("name", "")), upload=data, filename=str(body.get("filename", "")), prefix=prefix)
+        return 200, {"ok": True}
 
     def _report_file(self, query):
         session = self._session(query)
@@ -157,8 +192,12 @@ class Dashboard(LocalApp):
             if method == "GET" and path == "/api/image":
                 return self._image(query)
             if method == "POST" and path == "/api/confirm":
-                self._session(body).confirm_current("dashboard")
+                self._session(body).confirm_current("dashboard", str(body.get("resources_sha") or "") or None)
                 return 200, {"ok": True}
+            if method == "GET" and path == "/api/resource":
+                return self._resource(query)
+            if method == "POST" and path == "/api/resource":
+                return self._edit_resource(body)
             if method == "GET" and path == "/api/report":
                 return self._report_file(query)
             if method == "POST" and path == "/api/report":

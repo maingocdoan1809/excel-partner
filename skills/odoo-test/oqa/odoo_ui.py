@@ -179,6 +179,19 @@ class Odoo:
             raise AssertionError("the form did not save: " + diagnose.read(self.page)["summary"])
         return self.ready()
 
+    def upload(self, target, fixture):
+        """Attach a prepared file (`s.fixture(name)`, or a path) to a file field. `target` is the `<input type=file>` or the button / widget that opens the file chooser
+        (a selector or a locator). Waits for the client to settle, so the next line sees the uploaded file."""
+        path = str(getattr(fixture, "path", fixture))
+        found = self.page.locator(target) if isinstance(target, str) else target
+        if found.first.evaluate("e => e.tagName === 'INPUT' && e.type === 'file'"):
+            found.first.set_input_files(path)
+        else:
+            with self.page.expect_file_chooser() as chooser:
+                found.first.click()
+            chooser.value.set_files(path)
+        return self.ready()
+
     def search(self, text):
         box = self.page.locator(".o_searchview_input").first
         box.fill(text)

@@ -2,7 +2,7 @@
 they can never disagree about a case, a step or a picture."""
 import time
 
-from . import events, knowledge, paths, recipe
+from . import events, knowledge, paths, recipe, resources
 from .state import MAX_REPAIRS, PHASES, Session
 from .store import read_json
 
@@ -68,7 +68,8 @@ def _steps(planned, ran, carried=None, running=False):
         now_running = going and not e                 # the attempt is on: the first step with no result yet is the one being run
         going = going and not now_running
         out.append({"n": step["n"], "caption": step["action"], "expected": step["expected"], "status": e["status"] if e else ("RUNNING" if now_running else "PENDING"),
-                    "actual": e["actual"] if e else "", "images": e["images"] if e else [], "checks": e.get("checks") if e else None, "carried": bool(kept)})
+                    "actual": e["actual"] if e else "", "images": e["images"] if e else [], "checks": e.get("checks") if e else None, "carried": bool(kept),
+                    "uses": step.get("uses") or [], "resources": e.get("resources", []) if e else []})
     return out
 
 
@@ -138,7 +139,8 @@ def case_records(session: Session):
                     "source": {"category": case.get("category", ""), "type": case.get("type", ""), "pre": case.get("pre", ""), "steps": case.get("steps", []),
                               "expected": case.get("expected", ""), "note": case.get("note", ""), "role": case.get("role", "")}, "profile": item.get("profile", ""), "verdict": item.get("verdict", held.get(ident, {}).get("verdict", "")),
                     "explore": explore, "status": status, "reason": (result or {}).get("reason") or held.get(ident, {}).get("reason", ""), "attempts": attempts,
-                    "planned": [{"n": s["n"], "caption": s["action"], "expected": s["expected"]} for s in item.get("steps") or []],
+                    "planned": [{"n": s["n"], "caption": s["action"], "expected": s["expected"], "uses": s.get("uses") or []} for s in item.get("steps") or []],
+                    "resources": resources.view(session.dir, ident, item),
                     "depends_on": item.get("depends_on") or [], "edge_cases": item.get("edge_cases") or [], "edge_none": item.get("edge_cases_none_reason", ""),
                     "data_needs": item.get("data_needs") or [], "clarity": (item.get("clarity") or {}).get("score"), "sufficiency": (item.get("sufficiency") or {}).get("score"),
                     "questions": item.get("questions") or [], "hints": (state.get("hints") or {}).get(ident, []), "used": state["attempts"].get(ident, 0),
@@ -176,7 +178,18 @@ def session_view(session: Session):
             "confirmed": bool(state["confirmation"]), "created": state["created"], "updated": log[-1]["ts"] if log else state["created"], "idle_hours": round(hours, 1), "idle": hours >= IDLE_HOURS, "now": latest["text"] if latest else "",
             "counts": counts(records), "total": len(records), "cases": records, "connect": state.get("connect"),
             "reports": reports(session), "strategy": strategy_md.read_text(encoding="utf-8") if strategy_md.exists() else "", "can_confirm": current == "CONFIRM" and (session.dir / "strategy.json").exists()
-            and state["strategy_sha"] is not None, "knowledge": len(knowledge.search(session.ws))}
+            and state["strategy_sha"] is not None, "knowledge": len(knowledge.search(session.ws)), **_resource_state(session, state, records)}
+
+
+def _resource_state(session, state, records):
+    """What the dashboard needs to let the user check the resource files and approve them: the digest they are looking at (sent back with Confirm, so a change in between
+    is noticed), whether they may still edit, how many are the assistant's guess, and what stops the approval."""
+    analysis = read_json(session.dir / "analysis.json")
+    order = (read_json(session.dir / "strategy.json") or {}).get("order", [])
+    mine = [r for k in records if k["id"] in order for r in k["resources"]]
+    return {"resources_sha": resources.digest_of(session.dir), "resources_editable": state["phase"] in ("CONNECT", "CONFIRM"),
+            "resources_guessed": sum(r["mode"] == "guessed" for r in mine), "resources_total": len(mine),
+            "resources_blocking": resources.blocking(session.dir, analysis, order) if analysis and order else []}
 
 
 def list_sessions():

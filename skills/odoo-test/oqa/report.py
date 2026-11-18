@@ -26,7 +26,8 @@ LABELS = {
         "src_exp": "Kết quả mong đợi (file gốc)", "profile": "Profile", "result": "Kết quả", "runs": "Số lần chạy", "checks": "Số kiểm tra", "remark": "Nhận xét",
         "s1": "1. Testcase yêu cầu gì (theo file gốc)", "s2": "2. AI hiểu và lên kế hoạch thế nào", "s3": "3. Kết quả", "s4": "4. Từng bước và ảnh evidence (lần chạy cuối)", "s5": "5. Các lần chạy",
         "note": "Ghi chú trong file", "row": "Dòng trong file", "deps": "Tiếp nối từ", "rating": "Đánh giá đề bài", "clarity": "Rõ ràng", "suff": "Đủ dữ kiện", "edge": "Tình huống biên đã tính",
-        "data": "Dữ liệu có thể thiếu → cách bù", "asked": "Câu hỏi AI cần hỏi bạn", "hints": "Gợi ý của bạn", "repairs": "AI phân tích lại và sửa",
+        "data": "Dữ liệu có thể thiếu → cách bù", "files": "File tài nguyên", "file_used": "File dùng", "mode_provided": "người dùng cung cấp",
+        "mode_described": "AI sinh theo mô tả của người dùng", "mode_guessed": "AI tự đoán", "edited": "người dùng đã sửa", "asked": "Câu hỏi AI cần hỏi bạn", "hints": "Gợi ý của bạn", "repairs": "AI phân tích lại và sửa",
         "r_after": "Sau lần {n}", "r_cause": "nguyên nhân", "r_evidence": "căn cứ", "r_change": "đã sửa", "r_reread": "hiểu lại case", "verdict": "Kết luận", "step": "Bước", "action": "Thao tác",
         "expected": "Kết quả mong đợi", "actual": "Thực tế", "nchecks": "Kiểm tra", "evidence": "Ảnh evidence", "attempt": "Lần", "failed": "Bước lỗi", "reason": "Lý do",
         "notrun": "Chưa chạy", "none": "(không có)", "case_sheet": "Mở sheet",
@@ -39,7 +40,8 @@ LABELS = {
         "src_exp": "Expected result (source file)", "profile": "Profile", "result": "Result", "runs": "Runs", "checks": "Checks", "remark": "Remark",
         "s1": "1. What the testcase asks (from the source file)", "s2": "2. How the assistant understood and planned it", "s3": "3. Result", "s4": "4. Each step and its evidence picture (last run)", "s5": "5. Runs",
         "note": "Note in the file", "row": "Row in the file", "deps": "Continues from", "rating": "Rating of the case", "clarity": "Clarity", "suff": "Sufficiency", "edge": "Edge cases considered",
-        "data": "Data that may be missing → fallback", "asked": "Questions for you", "hints": "Your hints", "repairs": "How the assistant re-analysed and repaired",
+        "data": "Data that may be missing → fallback", "files": "Resource files", "file_used": "File used", "mode_provided": "provided by the user",
+        "mode_described": "made from the user's description", "mode_guessed": "the assistant's guess", "edited": "edited by the user", "asked": "Questions for you", "hints": "Your hints", "repairs": "How the assistant re-analysed and repaired",
         "r_after": "After run {n}", "r_cause": "cause", "r_evidence": "evidence", "r_change": "changed", "r_reread": "now reads the case as", "verdict": "Conclusion", "step": "Step", "action": "Action",
         "expected": "Expected result", "actual": "Actual", "nchecks": "Checks", "evidence": "Evidence picture", "attempt": "Run", "failed": "Failed step", "reason": "Reason",
         "notrun": "Not run", "none": "(none)", "case_sheet": "Open sheet",
@@ -146,6 +148,8 @@ def write_case(sheet, session: Session, record, t):
     line("rating", f"{t['clarity']} {record['clarity']}/5 · {t['suff']} {record['sufficiency']}/5" if record["clarity"] else "")
     line("edge", "\n".join(f"• {e}" for e in record["edge_cases"]) or record["edge_none"])
     line("data", "\n".join(f"• {d['what']} → {d['fallback']}" for d in record["data_needs"]))
+    if record["resources"]:
+        line("files", "\n".join(f"• {r['name']} [{t['mode_' + r['mode']]}{', ' + t['edited'] if r['edited'] else ''}]: {r['purpose']}" + (f" ({r['facts']['rows']} rows)" if "rows" in r["facts"] else "") for r in record["resources"]))
     if record["questions"]:
         line("asked", "\n".join(f"• {q}" for q in record["questions"]))
     section("s3")
@@ -166,10 +170,11 @@ def write_case(sheet, session: Session, record, t):
     steps = last["steps"] if last else [{"n": p["n"], "caption": p["caption"], "expected": p["expected"], "status": "PENDING", "actual": "", "images": [], "checks": None} for p in record["planned"]]
     for step in steps:
         step_label = shown(step["status"], t)
-        for column, value in enumerate((step["n"], step["caption"], step["expected"], step["actual"], step.get("checks") if step.get("checks") is not None else "", step_label), 1):
+        actual = step["actual"] + "".join(f"\n{t['file_used']}: {r['name']} [{t['mode_' + r['mode']]}]" for r in step.get("resources") or [])
+        for column, value in enumerate((step["n"], step["caption"], step["expected"], actual, step.get("checks") if step.get("checks") is not None else "", step_label), 1):
             sheet.cell(row, column, value).alignment = wrap
         paint(sheet.cell(row, 6), step_label)
-        height = max(height_for(step["caption"], 42), height_for(step["expected"], 42), height_for(step["actual"], 42))
+        height = max(height_for(step["caption"], 42), height_for(step["expected"], 42), height_for(actual, 42))
         picture = session.dir / step["images"][0]["annotated"] if step["images"] else None
         if picture and picture.exists():
             image = Image(str(picture))
