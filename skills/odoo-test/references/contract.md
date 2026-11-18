@@ -11,6 +11,7 @@ Every JSON file has `schema_version` (now 1). A reader that meets a larger numbe
 ```
 <home>/workspaces/<ws>/workspace.json
 <home>/workspaces/<ws>/knowledge/index.md
+<home>/workspaces/<ws>/knowledge/sitemap.json             the screens of this Odoo and how they lead to each other (`oqa sitemap build`)
 <home>/workspaces/<ws>/current                       id of the session used when none is named
 <home>/workspaces/<ws>/sessions/<id>/
     state.json  cases.json  analysis.json  strategy.json  strategy.md  events.jsonl  evidence/  logs/
@@ -23,6 +24,14 @@ A session is chosen by `--ws` / `--session`, else `$OQA_WS` / `$OQA_SESSION` (wh
 `{schema_version, name, url, db, profiles:[{name, login, note}], reference_dirs:[path], language: vi|ja|en, test_prefix}`.
 Never a password: each profile's password is in the credential store under the key `oqa:<workspace>:<profile>`
 (Windows Credential Manager; the `keyring` package elsewhere).
+
+## sitemap.json
+
+`{schema_version, meta:{generated, profile, odoo_version, menus, actions, views, object_buttons, truncated}, nodes:{key: node}, edges:[{from, to, kind, label?, name?}], unresolved:[{where, why}]}`.
+Read from Odoo's menus, actions and view definitions through read-only calls (nothing is clicked); it shows what the profile named in `meta` may see.
+Node keys: `menu:<id>` · `window|server|client|url|report:<id>` (actions) · `view:<model>:<type>:<id>`. A view node carries `buttons:[{label, name, type: action|object|open|edit, invisible?, stat?}]` and `disabled:[create|edit|delete|duplicate]` (what the view switches off: no New button, read only) and `fields:[{name, label, type, required, readonly, relation?, options?, invisible?, widget?}]` (`required` / `readonly` are true, false or the expression of the view when it depends on other fields; `options` are `value=label` of a selection).
+Edge kinds: `menu` (parent to child), `opens` (menu to action), `shows` (action to view), `row` (list or kanban to the form of the model), `button` (view to the action a `type="action"` button opens).
+A `type="object"` button calls a method: where it leads is unknown until it is run, so it has no edge (it is counted in `meta.object_buttons`). Asked through `oqa sitemap find|buttons|path` or the MCP server `oqa mcp` (tools `sitemap_find`, `sitemap_buttons`, `sitemap_fields`, `sitemap_path`; `oqa mcp --config` prints its `.mcp.json` entry).
 
 ## state.json
 

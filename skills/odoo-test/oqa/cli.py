@@ -13,12 +13,12 @@ import webbrowser
 from pathlib import Path
 from urllib.parse import quote
 
-from . import VERSION, build_id, analysis, connect, memory, dashboard_server, doctor, events, init_server, intake, knowledge, paths, probe, recipe, report, runtime, scaffold, service, workspace
+from . import VERSION, build_id, analysis, connect, memory, dashboard_server, doctor, events, init_server, intake, knowledge, mcp_server, paths, probe, recipe, report, runtime, scaffold, service, sitemap, workspace
 from .secrets import SecretStoreUnavailable, default_store
 from .state import MAX_REPAIRS, GateError, Session
 from .store import SchemaError, read_json, write_json
 
-REFUSED = (GateError, SchemaError, paths.PathError, knowledge.KnowledgeError, SecretStoreUnavailable, connect.LoginFailed)
+REFUSED = (GateError, SchemaError, paths.PathError, knowledge.KnowledgeError, SecretStoreUnavailable, connect.LoginFailed, sitemap.SitemapError)
 
 
 # --- commands ---------------------------------------------------------------------
@@ -293,14 +293,19 @@ def cmd_finish(args):
     return {"case": args.case, "status": args.status}, f"{args.case} recorded as {args.status}. Next: " + session.summary()["next"]
 
 
+def _session_and_workspace(args):
+    """The session (None when there is none yet) and the workspace of a command that only looks at the Odoo, so it works before a session exists."""
+    try:
+        session = Session.open(args.ws, args.session)
+        return session, workspace.load(session.ws)
+    except paths.PathError:
+        return None, workspace.load(paths.resolve_workspace(args.ws))
+
+
 def cmd_lookup(args):
     """Read-only questions to the ORM of the Odoo under test: the technical name of a model or field, an external id, a record by name. No script, no step used."""
     from .odoo_ui import Odoo
-    try:
-        session = Session.open(args.ws, args.session)
-        ws = workspace.load(session.ws)
-    except paths.PathError:
-        session, ws = None, workspace.load(paths.resolve_workspace(args.ws))
+    session, ws = _session_and_workspace(args)
     with probe.signed_in(session, ws, default_store(), args.profile, headless=not args.headed) as page:
         o = Odoo(page, ws["url"], ws.get("test_prefix") or "ZZ_AUTOTEST_")
         if args.what == "models":
@@ -430,6 +435,41 @@ def cmd_dashboard(args):
     finally:
         pointer.unlink(missing_ok=True)
     return {"stopped": True}, "Dashboard stopped."
+
+
+def cmd_sitemap(args):
+    """The sitemap of the Odoo under test: `build` reads its menus, actions and view definitions (read only, nothing is clicked); the rest reads the saved file."""
+    if args.what == "build":
+        from .odoo_ui import Odoo
+        session, ws = _session_and_workspace(args)
+        with probe.signed_in(session, ws, default_store(), args.profile, headless=not args.headed) as page:
+            o = Odoo(page, ws["url"], ws.get("test_prefix") or "ZZ_AUTOTEST_")
+            data = sitemap.build(o.rpc, args.profile or ws["profiles"][0]["name"], page.evaluate(connect.VERSION_JS) or "")
+        file = sitemap.save(ws["name"], data)
+        m = data["meta"]
+        return {"file": str(file), "meta": m, "unresolved": data["unresolved"]}, "\n".join(
+            [f"Sitemap written to {file}", sitemap.header(data), f"{m['object_buttons']} buttons call a method (where they lead is only known by running them); {len(data['unresolved'])} things could not be read."]
+            + [f"  {u['where']}: {u['why']}" for u in data["unresolved"][:10]])
+    ws = paths.resolve_workspace(args.ws)
+    data = sitemap.load(ws)
+    if args.what == "show":
+        return {"meta": data["meta"], "unresolved": data["unresolved"]}, sitemap.header(data)
+    if not args.target:
+        raise GateError(f"Say what to look for: oqa sitemap {args.what} <words>")
+    text = {"find": lambda: sitemap.text_find(data, args.target, args.limit or 12, args.kind), "buttons": lambda: sitemap.text_buttons(data, args.target, args.view, args.match, args.limit or 30),
+            "fields": lambda: sitemap.text_fields(data, args.target, args.view, args.match, args.required, args.limit or 40), "path": lambda: sitemap.text_path(data, args.source, args.target)}[args.what]()
+    return {"text": text}, text
+
+
+def cmd_mcp(args):
+    """Run the sitemap MCP server on stdin/stdout, or with --config print how to register it."""
+    root = Path(__file__).resolve().parents[1]
+    if args.config:
+        entry = {"command": "python", "args": [str(root / "oqa.py"), "mcp"] + (["--ws", args.ws] if args.ws else [])}
+        snippet = {"mcpServers": {"oqa-sitemap": entry}}
+        return snippet, json.dumps(snippet, indent=2)
+    mcp_server.serve(args.ws)
+    return {}, ""
 
 
 def cmd_hooks(args):
@@ -616,6 +656,19 @@ def build_parser():
     p.add_argument("--limit", type=int, default=20)
     p.add_argument("--profile")
     p.add_argument("--headed", action="store_true")
+    p = add("sitemap", cmd_sitemap, "the map of this Odoo's screens: build it once, then find a screen, its buttons or the way between two screens")
+    p.add_argument("what", choices=["build", "show", "find", "buttons", "fields", "path"])
+    p.add_argument("target", nargs="?", help="find: words; buttons / fields: a screen (key or words); path: the screen to reach")
+    p.add_argument("--from", dest="source", default="", help="path: the screen to start from (default: the menus)")
+    p.add_argument("--kind", default="", choices=["", "menu", "action", "view"], help="find: only this kind of screen")
+    p.add_argument("--view", default="", help="buttons / fields: only this view type (form, list, kanban...); fields: the form by default")
+    p.add_argument("--match", default="", help="buttons / fields: only those whose label or name contains this")
+    p.add_argument("--required", action="store_true", help="fields: only the fields that are, or can be, required")
+    p.add_argument("--limit", type=int, default=0, help="most lines to print (find 12, buttons 30, fields 40)")
+    p.add_argument("--profile")
+    p.add_argument("--headed", action="store_true")
+    p = add("mcp", cmd_mcp, "serve the sitemap to the assistant as an MCP server (stdio); --config prints the .mcp.json entry")
+    p.add_argument("--config", action="store_true")
     p = add("probe", cmd_probe, "list what can be clicked and filled on a page (to find a selector)")
     p.add_argument("--case", help="the case this probe is for (shows in its repair log); with --failed, the case whose failed step to read")
     p.add_argument("--failed", action="store_true", help="read the page where the latest failed step stopped (saved when it failed; no browser is opened)")

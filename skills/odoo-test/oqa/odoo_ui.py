@@ -7,7 +7,7 @@ import time
 from . import diagnose
 
 TIMEOUT = 8000
-READ_METHODS = ("search_read", "search_count", "read", "read_group", "fields_get", "name_search", "check_access_rights")      # what `o.rpc` will call: reading only
+READ_METHODS = ("search_read", "search_count", "read", "read_group", "fields_get", "name_search", "check_access_rights", "get_views")      # what `o.rpc` will call: reading only
 MAX_ROWS = 200
 QUIET_MS = 400
 BUSY = ".o_loading_indicator:not(.d-none), .o_blockUI, .o_loading:not(.d-none), .fa-spin, .o_view_loading, .placeholder-glow"
