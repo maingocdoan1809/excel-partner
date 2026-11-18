@@ -88,6 +88,6 @@ Panes for different open files can read each other (`read_connected_file`) or ha
 
 ## Environment notes
 
-- Source files are CRLF (autocrlf). The Bash tool can mangle quoting inside heredocs; for multi-line helper scripts, write a file and run it with `node`. No Python on this machine.
+- Source files are CRLF (autocrlf). The Bash tool can mangle quoting inside heredocs; for multi-line helper scripts, write a file and run it with `node` (or `python`: Python 3.12 is installed). The `skills/odoo-test` skill is Python; test it from its own venv: `skills/odoo-test/.venv/Scripts/python.exe -m pytest` (run in `skills/odoo-test`).
 - Installed product data: `%LOCALAPPDATA%\Excel Partner` (config, cert, logs, `runtime-state.json`). Stop only processes you started, by PID or port.
 - `bin/doctor-checks.mjs` intentionally keeps its own per-provider auth probing (its tests inject a fake runner); known duplication, leave it.

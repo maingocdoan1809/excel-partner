@@ -1,0 +1,182 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Odoo Test: cấu hình workspace</title>
+<style>
+  /*__FONT_FACES__*/
+  :root { --bg:#faf9f5; --card:#efe9de; --sunk:#f5f0e8; --line:#e6dfd8; --ink:#141413; --body:#3d3d3a; --muted:#6c6a64; --accent:#cc785c; --accent-active:#a9583e; --accent-ink:#ffffff; --ring:rgba(204,120,92,.18);
+          --ok:#2f7a45; --bad:#b23c3c; --display:"Be Vietnam Pro", "Segoe UI", -apple-system, BlinkMacSystemFont, Roboto, "Helvetica Neue", Arial, sans-serif; --sans:"Be Vietnam Pro", "Segoe UI", -apple-system, BlinkMacSystemFont, Roboto, "Helvetica Neue", Arial, sans-serif; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#181715; --card:#252320; --sunk:#1b1a17; --line:#34322d; --ink:#faf9f5; --body:#d8d5cd; --muted:#a09d96; --ring:rgba(204,120,92,.28); --ok:#5db872; --bad:#e26f6f; } }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--body); font:15px/1.55 var(--sans); }
+  main { max-width:780px; margin:0 auto; padding:56px 24px 96px; }
+  h1 { font:400 40px/1.1 var(--display); letter-spacing:-.8px; color:var(--ink); margin:0 0 10px; }
+  p.lead { color:var(--muted); margin:0 0 36px; max-width:62ch; }
+  section { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:28px 32px; margin-bottom:20px; }
+  section > h2 { font:500 12px/1.4 var(--sans); text-transform:uppercase; letter-spacing:1.5px; color:var(--muted); margin:0 0 18px; }
+  label { display:block; font-weight:500; color:var(--ink); margin:16px 0 6px; }
+  label small { font-weight:400; color:var(--muted); }
+  input, select { width:100%; height:40px; padding:0 14px; border:1px solid var(--line); border-radius:8px; background:var(--bg); color:var(--ink); font:inherit; }
+  input:focus, select:focus { outline:none; border-color:var(--accent); box-shadow:0 0 0 3px var(--ring); }
+  :focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+  .row { display:grid; gap:10px; grid-template-columns:120px 1fr 1fr 1fr 40px; align-items:center; margin-bottom:10px; }
+  .row.head { color:var(--muted); font-size:13px; margin-bottom:4px; }
+  .dir { display:grid; grid-template-columns:1fr 40px; gap:10px; margin-bottom:10px; }
+  button { font:inherit; font-weight:500; height:40px; padding:0 20px; border:1px solid var(--line); background:var(--bg); color:var(--ink); border-radius:8px; cursor:pointer; }
+  button.primary { background:var(--accent); color:var(--accent-ink); border-color:var(--accent); }
+  button.primary:active { background:var(--accent-active); border-color:var(--accent-active); }
+  button.icon { padding:0; color:var(--muted); }
+  button:disabled { opacity:.55; cursor:default; }
+  .bar { display:flex; gap:12px; align-items:center; flex-wrap:wrap; margin-top:10px; }
+  .msg { padding:10px 14px; border-radius:8px; margin:0; white-space:pre-wrap; background:var(--bg); border:1px solid var(--line); }
+  .msg.ok { color:var(--ok); border-color:var(--ok); }
+  .msg.bad { color:var(--bad); border-color:var(--bad); }
+  details summary { cursor:pointer; color:var(--muted); font-weight:500; }
+  .done { text-align:center; padding:56px 10px; }
+  .done h2 { font:400 30px/1.2 var(--display); letter-spacing:-.4px; color:var(--ink); text-transform:none; margin:0 0 8px; }
+  @media (max-width:640px) { .row { grid-template-columns:1fr 1fr; } .row.head { display:none; } main { padding:32px 16px 64px; } section { padding:20px; } h1 { font-size:30px; } }
+</style>
+</head>
+<body>
+<main id="app">
+  <h1>Cấu hình workspace</h1>
+  <p class="lead">Một workspace là một hệ thống Odoo cần test: địa chỉ, các tài khoản và (nếu có) thư mục chứa file mà testcase nhắc đến. Mật khẩu được lưu trong Windows Credential Manager, không nằm trong file cấu hình.</p>
+
+  <section>
+    <h2>Hệ thống</h2>
+    <label for="existing">Workspace</label>
+    <div class="bar" style="margin-top:0">
+      <select id="existing" style="flex:1"></select>
+    </div>
+    <label for="name">Tên workspace <small>(chữ, số, . _ -)</small></label>
+    <input id="name" autocomplete="off" placeholder="vd: erp-staging">
+    <label for="url">Địa chỉ Odoo <small>(địa chỉ bạn mở trên trình duyệt)</small></label>
+    <input id="url" autocomplete="off" placeholder="vd: http://192.0.2.10:8069">
+    <label for="db">Database <small>(chỉ cần khi Odoo có nhiều database)</small></label>
+    <input id="db" autocomplete="off">
+    <div class="bar">
+      <button id="check" type="button">Kiểm tra địa chỉ</button>
+      <span id="checkMsg" class="msg" hidden></span>
+    </div>
+  </section>
+
+  <section>
+    <h2>Profile (tài khoản dùng để test)</h2>
+    <div class="row head"><span>Tên profile</span><span>Tài khoản</span><span>Mật khẩu</span><span>Ghi chú vai trò</span><span></span></div>
+    <div id="profiles"></div>
+    <button id="addProfile" type="button">+ Thêm profile</button>
+  </section>
+
+  <section>
+    <h2>Thư mục tham chiếu <small style="text-transform:none">(tùy chọn)</small></h2>
+    <p style="color:var(--muted);margin:0 0 10px">Thư mục chứa các file mà testcase nhắc tới (file import, file đính kèm). AI chỉ đọc những thư mục bạn khai báo ở đây.</p>
+    <div id="dirs"></div>
+    <button id="addDir" type="button">+ Thêm thư mục</button>
+  </section>
+
+  <section>
+    <details>
+      <summary>Nâng cao</summary>
+      <label for="language">Ngôn ngữ AI trả lời</label>
+      <select id="language"><option value="vi">Tiếng Việt</option><option value="ja">日本語</option><option value="en">English</option></select>
+      <label for="prefix">Tiền tố dữ liệu test <small>(mọi bản ghi do test tạo đều bắt đầu bằng chuỗi này)</small></label>
+      <input id="prefix" autocomplete="off">
+      <label for="home">Thư mục lưu dữ liệu <small>(mặc định nằm trong thư mục người dùng; đổi sẽ không chuyển dữ liệu cũ)</small></label>
+      <input id="home" autocomplete="off">
+    </details>
+  </section>
+
+  <div class="bar">
+    <button id="save" class="primary" type="button">Lưu</button>
+    <span id="saveMsg" class="msg" hidden></span>
+  </div>
+</main>
+
+<script>
+const TOKEN = "__TOKEN__";
+const BOOT = __BOOT__;
+const $ = id => document.getElementById(id);
+const api = (path, body) => fetch(path, { method: body ? "POST" : "GET", headers: { "X-OQA-Token": TOKEN, "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : undefined }).then(r => r.json());
+
+function say(el, text, kind) { el.hidden = !text; el.textContent = text || ""; el.className = "msg " + (kind || ""); }
+
+function profileRow(p = {}) {
+  const row = document.createElement("div");
+  row.className = "row";
+  row.innerHTML = '<input data-k="name" placeholder="Admin"><input data-k="login" placeholder="admin" autocomplete="off"><input data-k="password" type="password" autocomplete="new-password"><input data-k="note" placeholder="vd: toàn quyền"><button type="button" class="icon" title="Xóa" aria-label="Xóa profile">✕</button>';
+  row.querySelector('[data-k=name]').value = p.name || "";
+  row.querySelector('[data-k=login]').value = p.login || "";
+  row.querySelector('[data-k=note]').value = p.note || "";
+  row.querySelector('[data-k=password]').placeholder = p.has_secret ? "•••••• đã lưu (để trống = giữ)" : "";
+  row.dataset.hadSecret = p.has_secret ? "1" : "";
+  row.querySelector("button").onclick = () => row.remove();
+  $("profiles").append(row);
+}
+function dirRow(value = "") {
+  const row = document.createElement("div");
+  row.className = "dir";
+  row.innerHTML = '<input placeholder="vd: D:/tai-lieu-test"><button type="button" class="icon" title="Xóa" aria-label="Xóa thư mục">✕</button>';
+  row.querySelector("input").value = value;
+  row.querySelector("button").onclick = () => row.remove();
+  $("dirs").append(row);
+}
+
+function fill(ws) {
+  $("name").value = ws.name || "";
+  $("url").value = ws.url || "";
+  $("db").value = ws.db || "";
+  $("language").value = ws.language || "vi";
+  $("prefix").value = ws.test_prefix || "ZZ_AUTOTEST_";
+  $("profiles").innerHTML = ""; $("dirs").innerHTML = "";
+  (ws.profiles && ws.profiles.length ? ws.profiles : [{}]).forEach(profileRow);
+  (ws.reference_dirs || []).forEach(dirRow);
+}
+
+function collect() {
+  const profiles = [], passwords = {};
+  for (const row of $("profiles").children) {
+    const get = k => row.querySelector(`[data-k=${k}]`).value.trim();
+    if (!get("name") && !get("login")) continue;
+    profiles.push({ name: get("name"), login: get("login"), note: get("note") });
+    const pw = row.querySelector("[data-k=password]").value;
+    if (pw) passwords[get("name")] = pw;
+  }
+  return {
+    workspace: { name: $("name").value.trim(), url: $("url").value.trim(), db: $("db").value.trim(), profiles, language: $("language").value, test_prefix: $("prefix").value.trim(),
+                 reference_dirs: [...$("dirs").querySelectorAll("input")].map(i => i.value.trim()).filter(Boolean) },
+    passwords, home: $("home").value.trim(),
+  };
+}
+
+$("addProfile").onclick = () => profileRow();
+$("addDir").onclick = () => dirRow();
+$("existing").onchange = async () => {
+  const name = $("existing").value;
+  fill(name ? (await api("/api/workspace?name=" + encodeURIComponent(name))).workspace : {});
+  say($("saveMsg"), "");
+};
+$("check").onclick = async () => {
+  say($("checkMsg"), "Đang kiểm tra…");
+  const r = await api("/api/check", { url: $("url").value.trim() });
+  if (!r.ok) return say($("checkMsg"), r.error || "Không mở được địa chỉ này.", "bad");
+  say($("checkMsg"), `Mở được (HTTP ${r.status}). ` + (r.odoo ? "Có vẻ là Odoo." : "Chưa nhận ra đây là Odoo, bạn kiểm tra lại địa chỉ nhé.") + (r.tls_unverified ? " Chứng chỉ HTTPS không hợp lệ (vẫn truy cập được)." : ""), r.odoo ? "ok" : "bad");
+};
+$("save").onclick = async () => {
+  $("save").disabled = true;
+  say($("saveMsg"), "Đang lưu…");
+  try {
+    const r = await api("/api/save", collect());
+    if (r.error) { say($("saveMsg"), r.error, "bad"); $("save").disabled = false; return; }
+    $("app").innerHTML = '<section class="done"><h2>Đã lưu workspace “' + r.name.replace(/[<>&]/g, "") + '”</h2><p>Bạn có thể đóng tab này. AI sẽ tiếp tục ngay.</p></section>';
+  } catch (e) { say($("saveMsg"), "Không lưu được: " + e, "bad"); $("save").disabled = false; }
+};
+
+$("existing").innerHTML = '<option value="">Tạo workspace mới</option>' + BOOT.names.map(n => `<option>${n.replace(/[<>&"]/g, "")}</option>`).join("");
+$("home").value = BOOT.home;
+$("home").disabled = BOOT.homeFixed;
+if (BOOT.workspace) { $("existing").value = BOOT.workspace.name; fill(BOOT.workspace); } else fill({ name: BOOT.suggest || "" });
+</script>
+</body>
+</html>

@@ -192,6 +192,11 @@ export function setupTestingPanel(client: () => BridgeClient): { refresh(): Prom
     await refresh();
   });
 
+  document.querySelectorAll<HTMLButtonElement>("[data-odoo-test]").forEach(element => element.addEventListener("click", async () => {
+    try { await client().testingAction({ action: "odoo-test", page: element.dataset.odooTest }); status.textContent = "Opening in your browser…"; }
+    catch (error) { status.textContent = errorText(error); }
+  }));
+
   document.querySelectorAll<HTMLButtonElement>("[data-testing-folder]").forEach(element => element.addEventListener("click", async () => {
     try { await client().testingAction({ action: "open-folder", kind: element.dataset.testingFolder }); status.textContent = ""; }
     catch (error) { status.textContent = errorText(error); }

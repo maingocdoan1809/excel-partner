@@ -229,8 +229,10 @@ export class SkillStore {
     const templates = this.listTemplates(name);
     const files = [...this.referenceFiles(skill.dir), ...templates.filter((item) => item.kind === "text").map((item) => `templates/${item.name}`)];
 
+    /** `${CLAUDE_SKILL_DIR}` in a skill's text is the skill's own folder (the convention of skill folders in terminal CLIs), so a skill can name its scripts wherever it is installed. */
+    const here = (text: string) => text.replaceAll("${CLAUDE_SKILL_DIR}", skill.dir.replaceAll("\\", "/"));
     if (!file || file === "SKILL.md") {
-      const { body } = parseFrontmatter(fs.readFileSync(path.join(skill.dir, "SKILL.md"), "utf8"));
+      const { body } = parseFrontmatter(here(fs.readFileSync(path.join(skill.dir, "SKILL.md"), "utf8")));
       const templateList = templates.length ? `\n\nTemplates supplied by the user (read before creating a similar file):\n${templates.map((item) => `- ${item.name} (${item.kind}): ${item.path}`).join("\n")}\nRead workbooks with read_workbook_file, images with read_attached_image, and text with read_skill {"name":"${name}","file":"templates/<name>"}.` : "";
       return { name, description: skill.description, content: body.trim() + templateList, files, templates, file: null };
     }
@@ -258,7 +260,7 @@ export class SkillStore {
     if (!stat.isFile() || stat.size > MAX_FILE_BYTES) {
       throw new SkillError(`'${file}' is not a file or is larger than ${MAX_FILE_BYTES} bytes`);
     }
-    return { name, description: skill.description, content: fs.readFileSync(target, "utf8"), files, templates, file };
+    return { name, description: skill.description, content: here(fs.readFileSync(target, "utf8")), files, templates, file };
   }
 
   private referenceFiles(dir: string): string[] {

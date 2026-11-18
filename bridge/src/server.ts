@@ -35,6 +35,7 @@ import { discoverSessionMcp } from "./session-mcp.js";
 import { WorkbookSession } from "./session.js";
 import { SiteKnowledge } from "./site-knowledge.js";
 import { UserSkills } from "./skill-upload.js";
+import { OdooTest } from "./odoo-test.js";
 import { SkillStore } from "./skills.js";
 import { standalonePage } from "./standalone-page.js";
 import { SystemPromptStore } from "./system-prompt.js";
@@ -98,6 +99,7 @@ export class Bridge {
   /** The management token; taken out of the environment at once so provider CLIs and scripts never inherit it. */
   private readonly controlToken = process.env.OFFICE_PARTNER_CONTROL_TOKEN;
   private readonly skills: SkillStore;
+  private readonly odooTest: OdooTest;
   private readonly logins: ProviderLoginManager;
   private readonly mcpServers: McpServers;
   private readonly updater: UpdateService | null;
@@ -124,6 +126,7 @@ export class Bridge {
       logger: this.logger.child("sessions"),
     });
     this.skills = options.skills ?? new SkillStore(config.skillDirs);
+    this.odooTest = new OdooTest(this.skills);
     const userSkills = new UserSkills(options.skillUploadDir ?? path.join(os.homedir(), ".excel-partner", "skills"));
     const systemPrompt = new SystemPromptStore(options.systemPromptFile === undefined
       ? process.env.BRIDGE_CONFIG ? path.join(path.dirname(process.env.BRIDGE_CONFIG), "system-prompt.txt") : path.join(PROJECT_ROOT, "run", "system-prompt.txt")
@@ -211,7 +214,7 @@ export class Bridge {
       mcp: new McpRoutes({ sessions: this.sessions, mcpServers: this.mcpServers, discover: discoverMcp }),
       providers: new ProviderRoutes({ sessions: this.sessions, providers: this.providers, logins: this.logins, usage, logger: this.logger, disabled: policy.disabledProviders }),
       skills: new SkillRoutes({ sessions: this.sessions, skills: this.skills, userSkills, systemPrompt }),
-      testing: new TestingRoutes({ sessions: this.sessions, admin: testingAdmin }),
+      testing: new TestingRoutes({ sessions: this.sessions, admin: testingAdmin, odooTest: this.odooTest }),
       workspaces: new WorkspaceRoutes({ sessions: this.sessions, references, savedReferences, logger: this.logger, workspaceConfigPath }),
     };
   }

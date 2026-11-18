@@ -43,3 +43,8 @@ THIRD_PARTY_NOTICES.md
 .claude/hillclimb/**/state.json
 .claude/hillclimb/**/trajectory/
 .claude/hillclimb/**/*.log
+
+# odoo-test skill (Python)
+skills/odoo-test/.venv/
+__pycache__/
+.pytest_cache/
