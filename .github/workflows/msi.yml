@@ -3,7 +3,15 @@ name: msi
 on:
   workflow_dispatch:
   push:
+    branches: [main, main-office, claude/hopeful-tesla-mk1phw]
     tags: ["v*"]
+    paths:
+      - installer/msi/**
+      - scripts/msi/**
+      - scripts/build-msi*.mjs
+      - bin/runtime-manifest.json
+      - npm-shrinkwrap.json
+      - .github/workflows/msi.yml
   pull_request:
     paths:
       - installer/msi/**
