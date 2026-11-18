@@ -3,6 +3,7 @@
 
 Two sources: a page opened now (`probe`), and the page where a step stopped, saved at that moment (`failed`), which needs no browser and is the screen the
 assistant actually has to fix: opening the landing page shows nothing of a form six steps in."""
+import contextlib
 import re
 
 from . import browser, connect
@@ -28,7 +29,9 @@ KEPT = 400                    # lines saved from the page where a step stopped
 FAILED_FILE = "failed_page.txt"
 
 
-def probe(session, ws, store, profile_name=None, path=None, needle="", headless=True):
+@contextlib.contextmanager
+def signed_in(session, ws, store, profile_name=None, path=None, headless=True):
+    """A page of this Odoo, signed in as the profile and settled: for `oqa probe` and `oqa lookup`, which only look."""
     profile = next((p for p in ws["profiles"] if p["name"] == profile_name), ws["profiles"][0])
     with browser.launch(headless) as new_page:
         _, page = new_page(connect.storage_path(session, profile["name"]) if session else None)
@@ -37,7 +40,12 @@ def probe(session, ws, store, profile_name=None, path=None, needle="", headless=
         page.goto(landing if landing and landing.startswith("http") else ws["url"] + (landing or "/web"), wait_until="domcontentloaded")
         if "/web/login" in page.url:
             connect.login(page, ws, profile, store)
-        Odoo(page, ws["url"]).ready()
+        Odoo(page, ws["url"], ws.get("test_prefix") or "ZZ_AUTOTEST_").ready()
+        yield page
+
+
+def probe(session, ws, store, profile_name=None, path=None, needle="", headless=True):
+    with signed_in(session, ws, store, profile_name, path, headless) as page:
         return {"url": page.url, "title": page.title(), "elements": page.evaluate(JS, [needle, SHOWN])}
 
 

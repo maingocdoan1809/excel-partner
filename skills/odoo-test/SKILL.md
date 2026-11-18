@@ -31,7 +31,7 @@ Files and formats: [references/contract.md](references/contract.md). Odoo specif
 | EXECUTE | explore each step, build the script, run | `oqa scaffold` → `oqa explore` / `oqa try` → `oqa build` → `oqa run` |
 | REPORT | close | `oqa report`: it writes ONE Excel evidence workbook (a summary sheet, then a sheet per case: what the testcase asked, how you understood it, every step with its red-framed picture, the runs) and **opens it on the user's screen**. Tell them the file path. They can also rebuild or download it any time from the dashboard |
 
-Anytime: `oqa status` (also lists cases whose failure is not explained yet) · `oqa repair ID …` · `oqa ask "<question>" [--case ID]` (then `oqa wait` in the background and stop) · `oqa wait` (ends when the user acts on the dashboard: confirms, answers, sends a hint, stops or resumes, and says which; the dashboard has a Stop button, and a hint box for a case that keeps failing) · `oqa knowledge search|learn` · `oqa dbcheck --sql "select …" [--expect '[{"id":"7"}]']` (try a query in the user's open pgAdmin) · `oqa probe [--filter text | --failed]` · `oqa runner status|stop` · `oqa dashboard`.
+Anytime: `oqa status` (also lists cases whose failure is not explained yet) · `oqa repair ID …` · `oqa ask "<question>" [--case ID]` (then `oqa wait` in the background and stop) · `oqa wait` (ends when the user acts on the dashboard: confirms, answers, sends a hint, stops or resumes, and says which; the dashboard has a Stop button, and a hint box for a case that keeps failing) · `oqa knowledge search|learn` · `oqa dbcheck --sql "select …" [--expect '[{"id":"7"}]']` (try a query in the user's open pgAdmin) · `oqa probe [--filter text | --failed]` · `oqa lookup models|fields|xmlid|find|search …` · `oqa runner status|stop` · `oqa dashboard`.
 
 ## ANALYZE: the part that decides everything
 
@@ -73,6 +73,7 @@ A selector is never a guess. Every line of a script ran once on THIS Odoo, befor
 
 - Read what commands print; do not open session files, whole pages or scripts marked `reuse`.
 - Look at a picture only when the printed reason and `page says` are not enough.
+- A model, field or external id is never guessed from a label on screen: `oqa lookup models <text>`, `oqa lookup fields <model> --filter <label>`, `oqa lookup xmlid <module.name>`, `oqa lookup find <model> --filter <name>` (read only, the profile's own rights; the same as `o.models`, `o.fields`, `o.xmlid`, `o.find`, `o.records`, `o.model_exists` in a `try`).
 - Before debugging: `oqa knowledge search --text <words>`. To find a selector: `oqa probe --filter <word>` (a few lines), not a page dump.
 - Same failure twice with no new information: change the approach, do not rerun it. Exploring first is cheaper than a failed run.
 

@@ -8,6 +8,19 @@ Odoo is not a generic web app. Read this when a step surprises you.
 - Two-factor (`input[name=totp_token]`) stops a script. Ask the user (`oqa connect --headed`) or use a test account without it.
 - The client is a single page: `o.ready()` (done by every helper) waits for `.o_web_client`, the loading indicator and spinners, then until the screen stops changing (~0.4 s), so late-rendering records and widgets are there; never sleep. `oqa try` waits the same way before it prints the page. A slow screen: raise the case's `timeout_s`.
 
+## Look it up, do not guess (read only)
+Names on screen are labels; scripts, domains and `expect_*` need technical names. Ask the ORM with the signed-in profile (its rights apply; only reading methods go out):
+
+| You want | CLI | In a `try` / script |
+|---|---|---|
+| is it `sale.order`? which models mention "invoice" | `oqa lookup models invoice` | `o.models("invoice")`, `o.model_exists("sale.order")` |
+| the technical name behind the label "Customer" | `oqa lookup fields sale.order --filter customer` | `o.fields("sale.order", "customer")` |
+| an external id (`base.main_company`, a group, a menu, a view) | `oqa lookup xmlid base.main_company` | `o.xmlid("base.main_company")` → `{model, res_id}` |
+| does a partner / product / user with this name exist | `oqa lookup find res.partner --filter Azure` | `o.find("res.partner", "Azure")` |
+| a few records | `oqa lookup search sale.order --domain "[['state','=','sale']]" --fields name,amount_total` | `o.records(model, domain, fields, limit)` (at most 200) |
+
+`o.rpc(model, method, args, kwargs)` is the one door: it refuses anything that is not `search_read`, `search_count`, `read`, `read_group`, `fields_get`, `name_search`, `check_access_rights`. Changing data is done through the screen, like a user.
+
 ## Where things are
 | You want | Look for | Helper |
 |---|---|---|

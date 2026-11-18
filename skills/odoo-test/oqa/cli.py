@@ -338,6 +338,45 @@ def cmd_dbcheck(args):
     return {**result, "picture": str(out)}, "\n".join(lines + [f"picture: {out}"])
 
 
+def cmd_lookup(args):
+    """Read-only questions to the ORM of the Odoo under test: the technical name of a model or field, an external id, a record by name. No script, no step used."""
+    from .odoo_ui import Odoo
+    try:
+        session = Session.open(args.ws, args.session)
+        ws = workspace.load(session.ws)
+    except paths.PathError:
+        session, ws = None, workspace.load(paths.resolve_workspace(args.ws))
+    with probe.signed_in(session, ws, default_store(), args.profile, headless=not args.headed) as page:
+        o = Odoo(page, ws["url"], ws.get("test_prefix") or "ZZ_AUTOTEST_")
+        if args.what == "models":
+            data = [{"model": m, "label": n} for m, n in o.models(args.target or "", args.limit)]
+            lines = [f"{d['model']}  \"{d['label']}\"" for d in data]
+        elif args.what == "fields":
+            if not args.target:
+                raise GateError("Say the model: oqa lookup fields res.partner [--filter word]")
+            data = o.fields(args.target, args.filter or "", args.limit)
+            lines = [f"{d['name']}  \"{d.get('string', '')}\"  {d.get('type', '')}" + (f" -> {d['relation']}" if d.get("relation") else "") + ("  required" if d.get("required") else "") + ("  readonly" if d.get("readonly") else "") for d in data]
+        elif args.what == "xmlid":
+            if not args.target:
+                raise GateError("Say the external id: oqa lookup xmlid base.main_company")
+            found = o.xmlid(args.target)
+            data = [found] if found else []
+            lines = [f"{found['ref']} -> {found['model']},{found['res_id']}"] if found else [f"no external id '{args.target}'"]
+        elif args.what == "find":
+            if not (args.target and args.filter):
+                raise GateError("Say the model and the text: oqa lookup find res.partner --filter Azure")
+            data = [{"id": i, "name": n} for i, n in o.find(args.target, args.filter, args.limit)]
+            lines = [f"{d['id']}  {d['name']}" for d in data]
+        else:                                                           # search
+            if not args.target:
+                raise GateError("Say the model: oqa lookup search sale.order --domain \"[['state','=','sale']]\" --fields name,amount_total")
+            import ast as _ast
+            domain = _ast.literal_eval(args.domain) if args.domain else []
+            data = o.records(args.target, domain, [f for f in (args.fields or "").split(",") if f], args.limit)
+            lines = [json.dumps(r, ensure_ascii=False) for r in data]
+    return {"results": data}, "\n".join(lines or ["(nothing found)"])
+
+
 def cmd_probe(args):
     if args.failed:
         session = Session.open(args.ws, args.session)
@@ -624,6 +663,15 @@ def build_parser():
     p.add_argument("--out", default="dbcheck.png")
     p.add_argument("--show", type=int, default=5, help="rows to print")
     p.add_argument("--make-shortcut", action="store_true", help="put the shortcut 'pgAdmin (oqa)' on the Desktop: pgAdmin4.exe with the DevTools port oqa attaches to")
+    p = add("lookup", cmd_lookup, "ask the Odoo under test (read only): models, fields, external ids, records by name")
+    p.add_argument("what", choices=["models", "fields", "xmlid", "find", "search"])
+    p.add_argument("target", nargs="?", help="models: text in the name; fields/find/search: the model; xmlid: module.name")
+    p.add_argument("--filter", help="fields: text in the field name or label; find: the text to look for")
+    p.add_argument("--domain", help="search: a domain, for example \"[['state','=','sale']]\"")
+    p.add_argument("--fields", help="search: comma separated fields to return")
+    p.add_argument("--limit", type=int, default=20)
+    p.add_argument("--profile")
+    p.add_argument("--headed", action="store_true")
     p = add("probe", cmd_probe, "list what can be clicked and filled on a page (to find a selector)")
     p.add_argument("--case", help="the case this probe is for (shows in its repair log); with --failed, the case whose failed step to read")
     p.add_argument("--failed", action="store_true", help="read the page where the latest failed step stopped (saved when it failed; no browser is opened)")

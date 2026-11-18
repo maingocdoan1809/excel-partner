@@ -7,6 +7,8 @@ import time
 from . import diagnose
 
 TIMEOUT = 8000
+READ_METHODS = ("search_read", "search_count", "read", "read_group", "fields_get", "name_search", "check_access_rights")      # what `o.rpc` will call: reading only
+MAX_ROWS = 200
 QUIET_MS = 400
 BUSY = ".o_loading_indicator:not(.d-none), .o_blockUI, .o_loading:not(.d-none), .fa-spin, .o_view_loading, .placeholder-glow"
 BUSY_FREE = "() => ![...document.querySelectorAll(%r)].some(e => { const b = e.getBoundingClientRect(); return b.width > 0 && b.height > 0; })" % BUSY
@@ -84,6 +86,51 @@ class Odoo:
 
     def row(self, text):
         return self.page.locator(".o_data_row", has_text=text).first
+
+    # --- looking things up (read only) ---------------------------------------------------
+    def rpc(self, model, method, args=None, kwargs=None):
+        """One READ-ONLY call to Odoo's ORM with the signed-in session (the profile's own rights apply). Writing methods are refused here, whatever the script says."""
+        if method not in READ_METHODS:
+            raise PermissionError(f"o.rpc only reads ({', '.join(READ_METHODS)}); '{method}' changes data: do it through the screen")
+        body = {"jsonrpc": "2.0", "method": "call", "params": {"model": model, "method": method, "args": args or [], "kwargs": kwargs or {}}}
+        answer = self.page.request.post(f"{self.base}/web/dataset/call_kw/{model}/{method}", data=body).json()
+        if answer.get("error"):
+            error = answer["error"]
+            raise AssertionError(f"{model}.{method}: {(error.get('data') or {}).get('message') or error.get('message')}")
+        return answer.get("result")
+
+    def records(self, model, domain=None, fields=None, limit=20, order=None):
+        """search_read: [{field: value}] (a many2one is [id, name]). At most MAX_ROWS."""
+        kwargs = {"fields": fields or [], "limit": min(int(limit), MAX_ROWS)}
+        if order:
+            kwargs["order"] = order
+        return self.rpc(model, "search_read", [domain or []], kwargs)
+
+    def models(self, like="", limit=30):
+        """[(technical name, label)] of the models whose name or label contains `like`: is it `sale.order` or `sale.orders`?"""
+        domain = ["|", ["model", "ilike", like], ["name", "ilike", like]] if like else []
+        return [(r["model"], r["name"]) for r in self.records("ir.model", domain, ["model", "name"], limit, "model")]
+
+    def model_exists(self, model):
+        return bool(self.rpc("ir.model", "search_count", [[["model", "=", model]]]))
+
+    def fields(self, model, like="", limit=60):
+        """[{name, string, type, relation, required, readonly}] of a model's fields whose name or label contains `like`: the technical name behind a label on screen."""
+        info = self.rpc(model, "fields_get", [], {"attributes": ["string", "type", "relation", "required", "readonly"]})
+        needle = like.lower()
+        rows = [{"name": n, **{k: v for k, v in a.items() if v not in (None, False, "")}} for n, a in sorted(info.items())
+                if not needle or needle in n.lower() or needle in str(a.get("string", "")).lower()]
+        return rows[:limit]
+
+    def xmlid(self, ref):
+        """{model, res_id, ref} for an external id like `base.main_company` or `sale.group_sale_manager`, or None when it does not exist."""
+        module, _, name = ref.partition(".")
+        found = self.records("ir.model.data", [["module", "=", module], ["name", "=", name]], ["model", "res_id"], 1)
+        return {"ref": ref, "model": found[0]["model"], "res_id": found[0]["res_id"]} if found else None
+
+    def find(self, model, text, limit=5):
+        """[(id, display name)] of the records of `model` whose name contains `text` (name_search): is there such a partner / product / user?"""
+        return [tuple(r) for r in self.rpc(model, "name_search", [], {"name": text, "limit": min(int(limit), MAX_ROWS)})]
 
     def rows(self):
         return self.page.locator(".o_data_row").count()
