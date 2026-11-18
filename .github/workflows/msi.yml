@@ -1,0 +1,70 @@
+name: msi
+# The thin per-user installer (about 8 MB). Everything it downloads at install time is pinned in bin/runtime-manifest.json.
+# Pull requests build it only when the installer files change (the paths below); main-office builds it on every push except documentation and tests.
+on:
+  workflow_dispatch:
+  push: # a push to, or merge into, main-office builds the MSIs unless only documentation or tests changed (the MSI carries all other code)
+    branches: [main-office]
+    paths-ignore:
+      - "**.md"
+      - docs/**
+      - tests/**
+    tags: ["v*"] # a version tag always builds (GitHub applies no path filter to tags)
+  pull_request:
+    paths:
+      - installer/msi/**
+      - scripts/msi/**
+      - scripts/build-msi*.mjs
+      - bin/runtime-manifest.json
+      - npm-shrinkwrap.json
+      - .github/workflows/msi.yml
+permissions:
+  contents: read
+jobs:
+  msi:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Read the pinned Node.js
+        id: pin
+        shell: bash
+        run: echo "node=$(node -p "require('./bin/runtime-manifest.json').node.version")" >> "$GITHUB_OUTPUT"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ steps.pin.outputs.node }}
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npx vitest run tests/msi-payload.test.ts tests/architecture.test.ts
+      - name: WiX 5.0.2
+        run: |
+          dotnet tool install --global wix --version 5.0.2
+          wix extension add --global WixToolset.Util.wixext/5.0.2
+      - name: Payload and MSI (x64, arm64)
+        shell: bash
+        run: |
+          npm run pack:release
+          for arch in x64 arm64; do
+            node scripts/build-msi-payload.mjs --arch "$arch"
+            node scripts/build-msi.mjs --arch "$arch"
+          done
+      - name: Silent install, status, uninstall (x64)
+        shell: pwsh
+        run: |
+          $msi = (Get-ChildItem release/*-x64.msi).FullName
+          $p = Start-Process msiexec.exe -ArgumentList '/i', "`"$msi`"", '/qn', '/l*v', 'install.log', 'PROVIDERS=none', 'NOSIDELOAD=1' -Wait -PassThru
+          if ($p.ExitCode -ne 0) { Get-Content install.log -Tail 80; exit $p.ExitCode }
+          $env:Path = "$env:LOCALAPPDATA\Programs\nodejs;$env:APPDATA\npm;$env:Path"
+          office-partner status
+          & "$env:LOCALAPPDATA\Programs\nodejs\node.exe" --version
+          $p = Start-Process msiexec.exe -ArgumentList '/x', "`"$msi`"", '/qn', '/l*v', 'uninstall.log' -Wait -PassThru
+          if ($p.ExitCode -ne 0) { Get-Content uninstall.log -Tail 80; exit $p.ExitCode }
+          if (Test-Path "$env:APPDATA\npm\node_modules\office-partner") { throw 'The package folder was not removed.' }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: office-partner-msi
+          path: |
+            release/*.msi
+            release/msi/*/payload-info.json
+            *.log

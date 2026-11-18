@@ -161,6 +161,40 @@
         <header class="panel-head"><button type="button" class="back" data-close="testing" aria-label="Back to chat">←</button><div class="settings-heading"><h2>Testing</h2><p>Sign-ins and resources for your test runs.</p></div></header>
         <p id="testing-status" class="template-help" role="status" aria-live="polite"></p>
         <div class="panel-body">
+          <section class="testing-section settings-card" aria-labelledby="at-run-heading">
+            <h3 id="at-run-heading" class="testing-heading">Test run</h3>
+            <p class="template-help">Open your test-case workbook and ask the assistant to run it. Progress and results appear in the sheet and here as they happen.</p>
+            <div id="at-progress" class="testing-list">No run yet.</div>
+            <div class="reference-actions"><button id="at-sync" type="button" class="secondary">Send this workbook to the test kit</button><a id="at-dashboard" class="button secondary" target="_blank" rel="noopener" href="/tests">Open dashboard <span aria-hidden="true">↗</span></a></div>
+            <p id="at-sync-note" class="settings-footnote"></p>
+          </section>
+          <section class="testing-section settings-card" aria-labelledby="at-env-heading">
+            <h3 id="at-env-heading" class="testing-heading">Environment and account</h3>
+            <p class="template-help">Saved into the kit's <code>qa.config.json</code> in one folder. Only the <em>names</em> of the environment variables that hold the account are saved, never a password.</p>
+            <form id="at-form" class="testing-form">
+              <div class="testing-field"><label for="at-project">Project name</label><input id="at-project" type="text" maxlength="60" required autocomplete="off" /></div>
+              <div class="testing-field"><label for="at-url">System address</label><input id="at-url" type="url" placeholder="https://staging.example.com" required autocomplete="off" /></div>
+              <div class="testing-field"><label for="at-account">Test account (shown in reports)</label><input id="at-account" type="text" maxlength="200" autocomplete="off" /></div>
+              <div class="testing-field"><label for="at-auth">Sign-in</label><select id="at-auth"><option value="session">Use a saved sign-in (recommended: no password needed)</option><option value="manual">A person signs in once in the test browser</option><option value="form">The kit fills the sign-in form</option><option value="none">No sign-in</option></select></div>
+              <div class="testing-field" id="at-session-fields"><label for="at-signin">Saved sign-in</label><select id="at-signin"></select><p class="settings-footnote">Create or renew one in “Sign-ins” further down this screen. The kit starts already signed in; if it expires you will be asked to sign in again.</p></div>
+              <div class="testing-field" id="at-form-fields"><p class="settings-footnote"><strong>Only for “The kit fills the sign-in form”.</strong> These two boxes ask for the <em>names</em> of two variables you create on this computer (Windows: Settings > search “environment variables”), for example <code>QA_USER</code> holding the user name and <code>QA_PASSWORD</code> holding the password. Do not type the user name or the password here. If that sounds like too much, choose “Use a saved sign-in” above: you sign in once in a browser and nothing else is needed.</p><label for="at-login-url">Sign-in page (path, for example /login)</label><input id="at-login-url" type="text" value="/login" autocomplete="off" /><label for="at-user-env">Variable NAME that holds the user name (for example QA_USER)</label><input id="at-user-env" type="text" value="QA_USER" autocomplete="off" /><label for="at-pass-env">Variable NAME that holds the password (for example QA_PASSWORD)</label><input id="at-pass-env" type="text" value="QA_PASSWORD" autocomplete="off" /></div>
+              <div class="testing-field"><label for="at-prefix">Prefix of every record a test creates</label><input id="at-prefix" type="text" value="ZZ_AUTOTEST_" autocomplete="off" /></div>
+              <div class="testing-field"><label for="at-lang">Assistant language</label><select id="at-lang"><option value="vi">Tiếng Việt</option><option value="ja">日本語</option><option value="en">English</option></select></div>
+              <div class="testing-field"><label for="at-repeat">Stop a run when the same error happens this many times</label><input id="at-repeat" type="number" min="2" max="10" value="3" /></div>
+              <label class="settings-check"><input id="at-blackbox" type="checkbox" checked /> Never read the application's source code</label>
+              <label class="settings-check"><input id="at-ask-data" type="checkbox" /> Ask me before creating test records (names start with the prefix above; they are removed after the run)</label>
+              <button id="at-save" type="submit">Save</button>
+            </form>
+            <p id="at-save-note" class="settings-footnote" role="status"></p>
+          </section>
+          <section class="testing-section settings-card" aria-labelledby="at-kit-heading">
+            <h3 id="at-kit-heading" class="testing-heading">Test kit</h3>
+            <div id="at-kit" class="testing-list"></div>
+            <div class="testing-field"><label for="at-home">Folder for the kit, results and notes (an empty or new folder)</label><input id="at-home" type="text" autocomplete="off" /></div>
+            <div class="reference-actions"><button id="at-home-save" type="button" class="secondary">Use this folder</button></div>
+            <div class="reference-actions"><button id="at-install" type="button" class="secondary">Install Python libraries and browser</button></div>
+            <pre id="at-install-log" class="testing-log" hidden></pre>
+          </section>
           <section class="testing-section settings-card" aria-labelledby="odoo-test-heading">
             <h3 id="odoo-test-heading" class="testing-heading">Odoo Test</h3>
             <p class="template-help">Test an Odoo system from a testcase file. Set up the system once, then ask your assistant to test a file and watch each step here.</p>

@@ -8,6 +8,8 @@ export * from "./tools.js";
 export * from "./tools-advanced.js";
 export * from "./analyze.js";
 export * from "./tools-testing.js";
+export * from "./autotest.js";
+export * from "./autotest-state.js";
 export * from "./tools-word.js";
 export * from "./tools-ppt.js";
 export * from "./registry.js";

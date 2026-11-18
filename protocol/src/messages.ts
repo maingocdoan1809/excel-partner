@@ -5,6 +5,7 @@ import { AnySelectionSnapshotSchema, ToolResultSchema } from "./tool-results.js"
 import { HostIdSchema } from "./host.js";
 import { MAX_DELEGATED_TEXT } from "./tools-advanced.js";
 import { AdminPolicySchema } from "./policy.js";
+import { AutotestEventSchema } from "./autotest.js";
 
 /* -------------------------------------------------------------------------- */
 /* Client -> Bridge                                                            */
@@ -256,6 +257,13 @@ export const PingMessageSchema = z.object({
   nonce: z.string(),
 });
 
+/** A line the autotest kit wrote to a run's event stream, pushed to every task pane so Excel and the Test screen follow the run live. */
+export const AutotestEventMessageSchema = z.object({
+  type: z.literal("autotest_event"),
+  run: z.string().min(1).max(200),
+  event: AutotestEventSchema,
+});
+
 export const ServerMessageSchema = z.union([
   z.object({ type: z.literal("user_input_closed"), callId: z.string() }),
   HelloOkMessageSchema,
@@ -265,6 +273,7 @@ export const ServerMessageSchema = z.union([
   BrowserFrameMessageSchema,
   ConnectedFilesMessageSchema,
   DelegatedPromptMessageSchema,
+  AutotestEventMessageSchema,
   PingMessageSchema,
   ...ProviderEventSchema.options,
 ]);

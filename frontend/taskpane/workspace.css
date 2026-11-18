@@ -364,3 +364,14 @@ body.browser-active .browser-dock { display: none; }
 .mcp-server-row button { font-size: 11px; }
 .mcp-picker { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border); font-size: 12px; color: var(--text-secondary); }
 .mcp-picker h3 { margin: 0 0 10px; font-size: 12px; color: var(--text); }
+
+/* Test run / environment sections of the Testing screen */
+.testing-panel select, .testing-panel input[type="number"] { width: 100%; min-width: 0; }
+.testing-log { max-height: 160px; overflow: auto; margin: 10px 0 0; padding: 10px; font-size: 11px; white-space: pre-wrap; overflow-wrap: anywhere; border: 1px solid var(--border); border-radius: 6px; }
+.at-case { display: grid; grid-template-columns: auto 1fr auto; gap: 8px; align-items: baseline; padding: 3px 0; }
+.at-case b { font-weight: 600; }
+.at-bar { display: flex; height: 8px; margin: 8px 0; overflow: hidden; border-radius: 4px; background: var(--border); }
+.at-bar i { display: block; }
+.at-PASS { color: #18794e; } .at-FAIL { color: #c0262d; } .at-RUNNING { color: #1f5fbf; } .at-PENDING, .at-BLOCKED { color: #a15c00; }
+.testing-panel a.button { display: inline-flex; align-items: center; gap: 4px; padding: 7px 12px; border: 1px solid var(--border); border-radius: 6px; color: var(--text); font-size: 12px; text-decoration: none; }
+.testing-panel .settings-check { display: flex; gap: 8px; align-items: center; color: var(--text); font-size: 12px; }

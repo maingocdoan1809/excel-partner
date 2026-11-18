@@ -17,6 +17,22 @@ No administrator rights are needed, and nothing is installed machine-wide except
   - On Remote Desktop servers and with fast user switching, the bridge refuses connections from other users' processes.
   - Only the first user can run it at a time.
 
+## MSI installer
+
+A per-user MSI (about 8 MB) is built by `.github/workflows/msi.yml` (`npm run build:msi` locally, with the WiX 5.0.2 CLI) for x64 and ARM64. It is the same install as the script below, packaged for Intune and SCCM:
+
+```bat
+msiexec /i office-partner-0.1.26-x64.msi /qn /l*v install.log PROVIDERS=copilot NOSIDELOAD=1
+```
+
+- Run it in the user's context. `PROVIDERS` defaults to `copilot`; `NOSIDELOAD=1` is for a manifest deployed from the Microsoft 365 admin center.
+- Inside the MSI: the add-in, its dependencies pinned by `npm-shrinkwrap.json`, and the Windows SQLite and koffi binaries. A computer therefore needs no GitHub download and no compiler.
+- Downloaded while installing, pinned in `bin/runtime-manifest.json` with a SHA-256 for the Node.js zip: Node.js (into `%LOCALAPPDATA%\Programs\nodejs`) and the Copilot CLI. Behind a firewall, allow nodejs.org and registry.npmjs.org; `OP_NODE_MIRROR` and npm's `registry` setting point to internal mirrors.
+- It always uses its own pinned Node.js, never one already on the computer, because the bundled SQLite binary is built for that Node.js release.
+- It installs into `%APPDATA%\npm\node_modules\office-partner`, so `office-partner update` and `rollback` keep working. Updates change the files without changing the MSI's version in Apps & features.
+- Not included: Python (`run_python`, skills with scripts), Git Bash, Chromium, and the Claude, Codex and OpenCode providers (`office-partner providers install <provider>` adds one). Those features say what is missing when used.
+- The install log is `%LOCALAPPDATA%\Excel Partner\msi-install.log`.
+
 ## Silent install (Intune, SCCM, scripts)
 
 Run `install-office-partner.cmd` **in the user's context** (Intune: *Install behavior = User*). Run as SYSTEM, it exits with code 60.

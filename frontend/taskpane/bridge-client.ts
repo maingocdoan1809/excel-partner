@@ -49,6 +49,16 @@ export interface TestingOverview {
   pendingSignIn: { name: string; url: string } | null;
   folders: { sessions: string; knowledge: string; scripts: string };
 }
+export interface AutotestOverview {
+  home: string;
+  settings: import("../../protocol/src/autotest.js").AutotestSettings | null;
+  kitInstalled: boolean; kitVersion: string; activeWorkbook: string | null; knowledge: number; dashboardPath: string;
+  signIns: Array<{ name: string; url: string; savedAt: string }>;
+  kitSync: { updated: string[]; backup: string | null; skipped: string };
+  resultValues: Record<string, string>;
+  runs: Array<{ id: string; phase: string; started: string; updated: string; counts: Record<string, number>; total: number; stopReason: string }>;
+  runtime: { python: string | null; pythonOk: boolean; missing: string[]; ready: boolean; install: { state: "idle" | "running" | "done" | "failed"; log: string } };
+}
 export interface ModelCatalog { models: Array<{ id: string; name: string }>; defaultModelId: string | null }
 
 interface ConnectedFileApproval { fileId?: string; name?: string; host?: string; action?: "message"; text?: string; /** Set when a program on this computer, not another file's assistant, sends the request to this file. */ from?: string }
@@ -68,6 +78,8 @@ export interface BridgeClientHandlers {
   readWorkbookName?(): Promise<string | null>;
   /** The workbooks open with this add-in changed (one opened, closed or renamed). The current file is first. */
   onConnectedFiles?(files: ConnectedFile[]): void;
+  /** The kit wrote a progress line of a test run (see protocol/autotest.ts). */
+  onAutotestEvent?(run: string, event: import("../../protocol/src/autotest.js").AutotestEvent): void;
   /** Another file's chat asked this workbook to show a range. Reject with the reason when it cannot. */
   goTo?(target: { sheet?: string; address: string }): Promise<void>;
   /** Another workbook's assistant asked this one to do something. Run it as a turn, or call declineDelegation. */
@@ -250,6 +262,15 @@ export class BridgeClient {
     return this.sessionFetch("/session/workspaces/attach", { method: "POST", body: JSON.stringify({ path }) });
   }
 
+  autotestOverview(): Promise<AutotestOverview> { return this.sessionFetch<AutotestOverview>("/session/autotest"); }
+  async autotestAction(body: Record<string, unknown>): Promise<Record<string, unknown>> {
+    return this.sessionFetch<Record<string, unknown>>("/session/autotest", { method: "POST", body: JSON.stringify(body) });
+  }
+  /** Send the open workbook so the kit can read it; the answer is where the bridge saved the copy. */
+  async autotestUploadWorkbook(name: string, bytes: Uint8Array): Promise<string> {
+    const data = await this.sessionFetch<{ saved: string }>(`/session/autotest?name=${encodeURIComponent(name)}`, { method: "PUT", body: bytes as BodyInit, headers: { "content-type": "application/octet-stream" } });
+    return data.saved;
+  }
   testingOverview(): Promise<TestingOverview> { return this.sessionFetch<TestingOverview>("/session/testing"); }
   async testingView(kind: "note" | "script", site: string, id: string): Promise<string> {
     const query = new URLSearchParams({ view: kind, site, ...(kind === "note" ? { name: id } : { caseId: id }) });
@@ -469,6 +490,9 @@ export class BridgeClient {
         return;
       case "delegated_prompt":
         this.handlers.onDelegatedPrompt?.(message);
+        return;
+      case "autotest_event":
+        this.handlers.onAutotestEvent?.(message.run, message.event);
         return;
       default:
         if (message.type === "turn_finished") this.closeQuestions(message.requestId);

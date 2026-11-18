@@ -1,6 +1,22 @@
 {
   "schemaVersion": 1,
   "autoUpdate": { "COPILOT_AUTO_UPDATE": "false", "DISABLE_AUTOUPDATER": "1", "DISABLE_UPDATES": "1", "OPENCODE_DISABLE_AUTOUPDATE": "true" },
+  "node": {
+    "version": "22.23.5", "abi": 127,
+    "win32": {
+      "x64": { "sha256": "4a191082e9706866830379d577d2cc8a50c776fcd9436a8d061b063ed0d9a0e3" },
+      "arm64": { "sha256": "c1856817f611738c77534efbff8a5a17990593eab24046bc8d2c23a77a160d13" }
+    }
+  },
+  "native": {
+    "better-sqlite3": {
+      "version": "12.9.0",
+      "prebuilt": {
+        "win32-x64": { "sha256": "794073307603e7d88e0fbd64ac2e0c584f74d207146b61cc2c0a9217a53c082f" },
+        "win32-arm64": { "sha256": "c20f0202226da3b727557564119abf3c3273c1efa5e61bc2118c8c1c83e3015a" }
+      }
+    }
+  },
   "providers": {
     "claude": {
       "package": "@anthropic-ai/claude-code", "version": "2.1.294", "minVersion": "2.1.294", "bin": "claude",

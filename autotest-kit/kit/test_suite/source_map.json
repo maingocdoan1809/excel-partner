@@ -1,0 +1,10 @@
+{
+ "_help": "Source file -> testcase workbook mapping for `/system-test source` (python -m qakit.tools.impact). repos: name -> path of the git repo (relative to the autotest root or absolute). rules: pattern = fnmatch on the path inside the repo ('*' also matches '/'); files = workbook numbers (_NN_) or parts of workbook names, '*' = all; level direct = every ID of the workbook, cross = only IDs whose 分類/タイプ contain one of 'tags', broad = warning only. ignore = paths never mapped. ui_globs (optional) = files scanned for removed UI strings.",
+ "repos": {"app": ".."},
+ "ignore": ["*.md", "*.test.*", "*.spec.*", "**/__tests__/*", "autotest/*"],
+ "rules": [
+  {"repo": "app", "pattern": "src/pages/login*", "files": ["01"], "level": "direct", "area": "Login", "map": "A §1"},
+  {"repo": "app", "pattern": "src/auth/*", "files": ["*"], "level": "cross", "tags": ["Permission", "Phân quyền"], "area": "Permissions of every screen", "map": "B §1"},
+  {"repo": "app", "pattern": "src/components/layout/*", "files": ["*"], "level": "broad", "area": "Shared layout", "map": "A §0"}
+ ]
+}

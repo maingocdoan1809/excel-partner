@@ -27,6 +27,8 @@
     "frontend/taskpane/styles.css",
     "frontend/taskpane/workspace.css",
     "bin/",
+    "autotest-kit/",
+    "!autotest-kit/**/__pycache__/",
     "gateway/bin/",
     "gateway/dist/*.mjs",
     "gateway/README.md",
@@ -66,6 +68,7 @@
     "dev:bridge": "tsx watch bridge/src/index.ts",
     "dev:gateway": "node scripts/dev-gateway.mjs",
     "pack:release": "node scripts/pack-release.mjs",
+    "build:msi": "node scripts/build-msi-payload.mjs && node scripts/build-msi.mjs",
     "smoke": "tsx scripts/live-smoke.ts",
     "test:live": "vitest run tests/providers.live.test.ts"
   },

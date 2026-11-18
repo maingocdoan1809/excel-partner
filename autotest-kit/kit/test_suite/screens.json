@@ -1,0 +1,4 @@
+{
+ "_help": "Tên màn hình hiển thị cho người duyệt (scope --brief, phiên xác nhận). Khóa = số _NN_ của file testcase hoặc một phần tên file. /autotest-init điền bản đầu.",
+ "01": "Màn hình đăng nhập"
+}
