@@ -9,7 +9,6 @@ from .secrets import SecretStore
 from .store import SchemaError, read_json, write_json
 
 LANGUAGES = ("vi", "ja", "en")
-PGADMIN_KEYS = ("group", "server", "database")      # where the database is read through pgAdmin (opened and connected by the user); no credentials here
 PREFIX_RE = re.compile(r"^[A-Za-z0-9_-]{2,30}$")
 
 
@@ -35,9 +34,7 @@ def normalize(raw):
     for p in raw.get("profiles") or []:
         if isinstance(p, dict) and (str(p.get("name", "")).strip() or str(p.get("login", "")).strip()):
             profiles.append({"name": str(p.get("name", "")).strip(), "login": str(p.get("login", "")).strip(), "note": str(p.get("note", "")).strip()})
-    pg = raw.get("pgadmin") if isinstance(raw.get("pgadmin"), dict) else {}
-    pgadmin = {k: str(pg.get(k, "") or "").strip() for k in PGADMIN_KEYS}          # where the database is read through pgAdmin; its password is in the credential store
-    return {"schema_version": SCHEMA_VERSION, "name": text("name"), "url": url.rstrip("/"), "db": text("db"), "profiles": profiles, "pgadmin": pgadmin,
+    return {"schema_version": SCHEMA_VERSION, "name": text("name"), "url": url.rstrip("/"), "db": text("db"), "profiles": profiles,
             "reference_dirs": [str(d).strip() for d in raw.get("reference_dirs") or [] if str(d).strip()],
             "language": text("language", "vi") or "vi", "test_prefix": text("test_prefix", "ZZ_AUTOTEST_") or "ZZ_AUTOTEST_"}
 

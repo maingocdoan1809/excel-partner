@@ -63,17 +63,6 @@
   </section>
 
   <section>
-    <h2>Chụp dữ liệu trong database (tùy chọn)</h2>
-    <p class="hint">Để trống nếu không cần. Bạn tự mở pgAdmin bằng shortcut "pgAdmin (oqa)" và kết nối database; AI chỉ vào chạy câu SELECT và chụp ảnh. Không cần nhập mật khẩu ở đây.</p>
-    <label for="pgGroup">Nhóm server trong pgAdmin <small>(vd: Servers)</small></label>
-    <input id="pgGroup" autocomplete="off">
-    <label for="pgServer">Server <small>(vd: localhost)</small></label>
-    <input id="pgServer" autocomplete="off">
-    <label for="pgDb">Database <small>(vd: db_astralink_dev)</small></label>
-    <input id="pgDb" autocomplete="off">
-  </section>
-
-  <section>
     <h2>Profile (tài khoản dùng để test)</h2>
     <div class="row head"><span>Tên profile</span><span>Tài khoản</span><span>Mật khẩu</span><span>Ghi chú vai trò</span><span></span></div>
     <div id="profiles"></div>
@@ -139,7 +128,6 @@ function fill(ws) {
   $("url").value = ws.url || "";
   $("db").value = ws.db || "";
   $("language").value = ws.language || "vi";
-  const pg = ws.pgadmin || {}; $("pgGroup").value = pg.group || ""; $("pgServer").value = pg.server || ""; $("pgDb").value = pg.database || "";
   $("prefix").value = ws.test_prefix || "ZZ_AUTOTEST_";
   $("profiles").innerHTML = ""; $("dirs").innerHTML = "";
   (ws.profiles && ws.profiles.length ? ws.profiles : [{}]).forEach(profileRow);
@@ -156,7 +144,7 @@ function collect() {
     if (pw) passwords[get("name")] = pw;
   }
   return {
-    workspace: { name: $("name").value.trim(), url: $("url").value.trim(), db: $("db").value.trim(), profiles, pgadmin: { group: $("pgGroup").value.trim(), server: $("pgServer").value.trim(), database: $("pgDb").value.trim() }, language: $("language").value, test_prefix: $("prefix").value.trim(),
+    workspace: { name: $("name").value.trim(), url: $("url").value.trim(), db: $("db").value.trim(), profiles, language: $("language").value, test_prefix: $("prefix").value.trim(),
                  reference_dirs: [...$("dirs").querySelectorAll("input")].map(i => i.value.trim()).filter(Boolean) },
     passwords, home: $("home").value.trim(),
   };
