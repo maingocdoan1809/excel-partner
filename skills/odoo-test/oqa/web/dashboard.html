@@ -1,0 +1,500 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Odoo Test: tiến độ</title>
+<style>
+  /* Warm editorial look: a cream canvas, coral used sparingly, a serif for headings, dark surfaces for code. No external fonts: the stacks fall back to what the computer has. */
+  /*__FONT_FACES__*/
+  :root {
+    --bg:#faf9f5; --surface:#faf9f5; --sunk:#f5f0e8; --card:#efe9de; --line:#e6dfd8; --line-soft:#ebe6df;
+    --ink:#141413; --body:#3d3d3a; --muted:#6c6a64; --accent:#cc785c; --accent-active:#a9583e; --accent-ink:#ffffff; --ring:rgba(204,120,92,.18);
+    --dark:#181715; --dark-soft:#1f1e1b; --dark-elev:#252320; --on-dark:#faf9f5; --on-dark-soft:#a09d96;
+    --pass:#2f7a45; --fail:#b23c3c; --pending:#8a5a00; --blocked:#6c6a64; --running:#2b7a6b; --repairing:#a9583e; --planned:#7d7a72;
+    --display:"Be Vietnam Pro", "Segoe UI", -apple-system, BlinkMacSystemFont, Roboto, "Helvetica Neue", Arial, sans-serif;
+    --sans:"Be Vietnam Pro", "Segoe UI", -apple-system, BlinkMacSystemFont, Roboto, "Helvetica Neue", Arial, sans-serif;
+    --mono:"JetBrains Mono", "Cascadia Mono", Consolas, "Courier New", "DejaVu Sans Mono", monospace;
+  }
+  @media (prefers-color-scheme: dark) { :root {
+    --bg:#181715; --surface:#1f1e1b; --sunk:#1b1a17; --card:#252320; --line:#34322d; --line-soft:#2b2a26;
+    --ink:#faf9f5; --body:#d8d5cd; --muted:#a09d96; --accent:#cc785c; --accent-active:#a9583e; --accent-ink:#ffffff; --ring:rgba(204,120,92,.28);
+    --dark:#12110f; --dark-soft:#12110f; --dark-elev:#252320; --on-dark:#faf9f5; --on-dark-soft:#a09d96;
+    --pass:#5db872; --fail:#e26f6f; --pending:#d4a017; --blocked:#a09d96; --running:#5db8a6; --repairing:#e8a55a; --planned:#8e8b82; } }
+  * { box-sizing:border-box; }
+  html, body { height:100%; }
+  body { margin:0; background:var(--bg); color:var(--body); font:14px/1.55 var(--sans); font-variant-numeric:tabular-nums; }
+  button { font:inherit; color:inherit; }
+  :focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+  .mono { font-family:var(--mono); font-size:13px; white-space:nowrap; }
+  .muted { color:var(--muted); }
+  h1, h2, h3 { color:var(--ink); }
+  [hidden] { display:none !important; }
+
+  .top { height:64px; display:flex; align-items:center; gap:14px; padding:0 32px; background:var(--bg); border-bottom:1px solid var(--line); }
+  .top b { font:400 22px/1 var(--display); letter-spacing:-.3px; color:var(--ink); }
+  .live { margin-left:auto; display:flex; align-items:center; gap:8px; color:var(--muted); }
+  .dot { width:8px; height:8px; border-radius:50%; background:var(--planned); }
+  .dot.on { background:var(--pass); animation:pulse 1.8s ease-in-out infinite; }
+  @keyframes pulse { 50% { opacity:.35; } }
+  @keyframes spin { to { transform:rotate(360deg); } }
+  .spin { display:inline-block; width:11px; height:11px; margin-right:8px; border:2px solid var(--line); border-top-color:var(--c); border-radius:50%; animation:spin .9s linear infinite; vertical-align:-1px; }
+  .step .n .spin { margin:0; }
+  .step.s-RUNNING, .step.s-TRYING { background:linear-gradient(90deg, color-mix(in srgb, var(--c) 9%, transparent), transparent 60%); }
+  .live-note { color:var(--c); font-weight:500; margin-top:6px; }
+  @media (prefers-reduced-motion: reduce) { .spin { animation:pulse 1.8s ease-in-out infinite; border-top-color:var(--c); } }
+  @media (prefers-reduced-motion: reduce) { .dot.on { animation:none; } }
+
+  .layout { display:grid; grid-template-columns:320px minmax(0,1fr); height:calc(100% - 64px); }
+  .rail { background:var(--sunk); border-right:1px solid var(--line); overflow:auto; }
+  .rail header { padding:20px 20px 14px; display:flex; flex-direction:column; gap:12px; position:sticky; top:0; background:var(--sunk); border-bottom:1px solid var(--line); }
+  .rail h2 { margin:0; font:500 12px/1.4 var(--sans); letter-spacing:1.5px; text-transform:uppercase; color:var(--muted); }
+  select { width:100%; height:40px; padding:0 12px; border:1px solid var(--line); border-radius:8px; background:var(--bg); color:var(--ink); font:inherit; }
+  select:focus, textarea:focus { outline:none; border-color:var(--accent); box-shadow:0 0 0 3px var(--ring); }
+  .hist { width:100%; text-align:left; border:0; border-bottom:1px solid var(--line-soft); background:transparent; padding:16px 20px; cursor:pointer; display:block; }
+  .hist[aria-current=true] { background:var(--card); box-shadow:inset 4px 0 0 var(--accent); }
+  .hist .name { font-weight:500; color:var(--ink); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .hist .sub { display:flex; justify-content:space-between; gap:8px; color:var(--muted); font-size:13px; margin:2px 0 10px; }
+  .tag { font:500 12px/1.4 var(--sans); padding:2px 10px; background:var(--card); border-radius:9999px; color:var(--ink); white-space:nowrap; }
+  .hist .tag { background:var(--bg); }
+  .tag.attn { background:var(--accent); color:var(--accent-ink); text-transform:uppercase; letter-spacing:1.5px; font-size:11px; }
+
+  .bar { display:flex; height:8px; border-radius:9999px; overflow:hidden; background:var(--line); gap:2px; }
+  .bar i { display:block; min-width:4px; }
+  .s-PASS { --c:var(--pass); } .s-FAIL { --c:var(--fail); } .s-PENDING { --c:var(--pending); } .s-BLOCKED, .s-STOPPED, .s-INTERRUPTED { --c:var(--blocked); }
+  .s-RUNNING { --c:var(--running); } .s-REPAIRING { --c:var(--repairing); } .s-PLANNED, .s-HELD, .s-NEW, .s-NOT { --c:var(--planned); }
+  .s-EXPLORING, .s-TRYING { --c:var(--repairing); } .s-BUILT { --c:var(--pending); } .s-VERIFIED { --c:var(--pass); }
+  .bar i, .sq { background:var(--c); }
+  .sq { display:inline-block; width:8px; height:8px; border-radius:50%; margin-right:8px; vertical-align:baseline; }
+
+  main { overflow:auto; padding:40px max(40px, calc((100% - 1200px) / 2)) 80px; }
+  .empty { max-width:460px; margin:12vh auto; text-align:center; color:var(--muted); }
+  .empty b { display:block; font:400 28px/1.2 var(--display); letter-spacing:-.3px; color:var(--ink); margin-bottom:10px; }
+  h1 { margin:0; font:400 36px/1.15 var(--display); letter-spacing:-.5px; overflow-wrap:anywhere; }
+  .meta { display:flex; flex-wrap:wrap; gap:4px 20px; color:var(--muted); margin:10px 0 28px; }
+  .meta b { color:var(--ink); font-weight:500; }
+
+  .track { display:grid; grid-template-columns:repeat(6, 1fr); gap:6px; margin-bottom:32px; }
+  .track div { padding:10px 0 0; border-top:2px solid var(--line); color:var(--muted); font-size:13px; }
+  .track .done { border-color:var(--ink); color:var(--ink); }
+  .track .current { border-color:var(--accent); color:var(--ink); font-weight:500; }
+  .track small { display:block; color:var(--muted); font-weight:400; font-size:12px; }
+
+  .summary { display:flex; flex-wrap:wrap; align-items:baseline; gap:8px 28px; margin-bottom:12px; }
+  .summary span { white-space:nowrap; } .summary strong { font:400 40px/1 var(--display); letter-spacing:-1px; margin-right:6px; color:var(--ink); }
+  .now { color:var(--muted); margin:14px 0 24px; min-height:1.5em; }
+
+  .attn-panel { background:var(--card); border:1px solid var(--line); border-left:4px solid var(--accent); border-radius:12px; padding:24px 28px; margin-bottom:28px; }
+  .attn-panel h3 { margin:0 0 6px; font:400 24px/1.2 var(--display); letter-spacing:-.3px; }
+  .attn-panel textarea { width:100%; min-height:80px; margin:12px 0; padding:12px 14px; border:1px solid var(--line); border-radius:8px; background:var(--bg); color:var(--ink); font:inherit; resize:vertical; }
+  .btn { height:40px; padding:0 20px; border:1px solid var(--line); border-radius:8px; background:var(--bg); color:var(--ink); font-weight:500; cursor:pointer; }
+  .btn.primary { background:var(--accent); color:var(--accent-ink); border-color:var(--accent); }
+  .btn.primary:active { background:var(--accent-active); border-color:var(--accent-active); }
+  .btn:disabled { opacity:.5; cursor:default; }
+  pre.strategy { margin:14px 0 0; padding:20px 24px; max-height:300px; overflow:auto; background:var(--dark-soft); color:var(--on-dark); border-radius:12px; white-space:pre-wrap; font:400 13px/1.65 var(--mono); }
+  .err { color:var(--fail); margin-top:8px; white-space:pre-wrap; }
+  .head { display:flex; gap:16px; align-items:flex-start; justify-content:space-between; }
+  .reports { display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin:0 0 28px; }
+  a.btn { text-decoration:none; display:inline-flex; align-items:center; color:var(--ink); }
+  a.btn.primary { color:var(--accent-ink); }
+  .btn.danger { border-color:var(--fail); color:var(--fail); background:var(--bg); }
+  .btn.danger:active { background:var(--fail); color:var(--bg); }
+  .hint-box { margin:16px 0; padding:18px 20px; border:1px solid var(--line); border-left:4px solid var(--accent); border-radius:12px; background:var(--card); }
+  .hint-box h3 { margin:0 0 4px; font:400 20px/1.25 var(--display); letter-spacing:-.2px; }
+  .hint-box textarea { width:100%; min-height:72px; margin:12px 0; padding:12px 14px; border:1px solid var(--line); border-radius:8px; background:var(--bg); color:var(--ink); font:inherit; resize:vertical; }
+  .idle { margin:0 0 16px; padding:10px 14px; border:1px solid var(--line); border-left:4px solid var(--blocked); border-radius:8px; background:var(--card); color:var(--body); }
+  .ai-notes { margin:16px 0 0; }
+  .note { margin:10px 0; padding:12px 14px; border:1px solid var(--line); border-left:4px solid var(--repairing); border-radius:8px; background:var(--bg); overflow-wrap:anywhere; }
+  .note h4 { margin:0 0 6px; font:500 13px/1.4 var(--sans); color:var(--ink); }
+  .note dl { margin:0; display:grid; grid-template-columns:max-content 1fr; gap:4px 12px; }
+  .note dt { color:var(--muted); } .note dd { margin:0; }
+  .said { margin-top:8px; padding:8px 12px; border-left:3px solid var(--accent); border-radius:0 8px 8px 0; background:var(--bg); overflow-wrap:anywhere; }
+
+  .split { display:grid; grid-template-columns:minmax(0,1.05fr) minmax(0,1fr); gap:24px; align-items:start; }
+  @media (max-width:1100px) { .layout { grid-template-columns:1fr; } .rail { max-height:240px; border-right:0; border-bottom:1px solid var(--line); } .split { grid-template-columns:1fr; } }
+  @media (max-width:767px) { main { padding:24px 20px 48px; } h1 { font-size:28px; } .top { padding:0 20px; } .summary strong { font-size:32px; } }
+  .panel { background:var(--surface); border:1px solid var(--line); border-radius:12px; overflow:hidden; }
+  table { width:100%; border-collapse:collapse; }
+  th { text-align:left; font:500 12px/1.4 var(--sans); letter-spacing:1.5px; text-transform:uppercase; color:var(--muted); padding:14px 16px; border-bottom:1px solid var(--line); background:var(--sunk); position:sticky; top:0; }
+  td { padding:14px 16px; border-bottom:1px solid var(--line-soft); vertical-align:middle; }
+  tr.case { cursor:pointer; }
+  tr.case[aria-selected=true] td { background:var(--card); } tr.case[aria-selected=true] td:first-child { box-shadow:inset 4px 0 0 var(--accent); }
+  tr.case:last-child td { border-bottom:0; }
+  .ticks { display:inline-flex; gap:3px; vertical-align:middle; margin-right:8px; }
+  .ticks i { width:6px; height:14px; border-radius:3px; background:var(--c, transparent); border:1px solid var(--line); }
+  .ticks i.p { --c:var(--pass); border-color:var(--pass); } .ticks i.f { --c:var(--fail); border-color:var(--fail); }
+  .status { white-space:nowrap; font-weight:500; color:var(--c); }
+  .title { overflow:hidden; text-overflow:ellipsis; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; color:var(--ink); }
+
+  .detail { padding:28px; position:sticky; top:0; max-height:calc(100vh - 120px); overflow:auto; }
+  .detail h2 { margin:0 0 6px; font:400 26px/1.2 var(--display); letter-spacing:-.4px; }
+  .chips { display:flex; flex-wrap:wrap; gap:8px; margin:12px 0 18px; }
+  .tabs { display:flex; gap:0; margin:6px 0 14px; border-bottom:1px solid var(--line); }
+  .tabs button { background:none; border:0; border-bottom:2px solid transparent; padding:10px 16px; cursor:pointer; color:var(--muted); font-weight:500; }
+  .tabs button[aria-selected=true] { color:var(--ink); border-color:var(--accent); }
+  .workspace-tabs { margin:0; border:0; }
+  .workspace-tabs button { white-space:nowrap; }
+  /*__SITE_MAP_CSS__*/
+  .step { display:grid; grid-template-columns:28px minmax(0,1fr) 148px; gap:14px; padding:18px 0; border-bottom:1px solid var(--line-soft); }
+  .step:last-child { border-bottom:0; }
+  .step .n { color:var(--c); font-weight:500; font-family:var(--mono); }
+  .step .cap { font-weight:500; color:var(--ink); } .step .exp { color:var(--muted); margin-top:3px; }
+  .step .act { margin-top:8px; padding:8px 12px; border-left:3px solid var(--c); border-radius:0 8px 8px 0; background:var(--sunk); overflow-wrap:anywhere; }
+  .thumb { width:148px; height:88px; border:1px solid var(--line); border-radius:8px; background:var(--sunk) center top/cover no-repeat; cursor:zoom-in; padding:0; position:relative; overflow:hidden; }
+  .thumb.fail { border-color:var(--fail); }
+  .thumb span { position:absolute; right:6px; bottom:6px; font:500 11px/1.4 var(--sans); padding:1px 8px; background:rgba(24,23,21,.82); color:var(--on-dark); border-radius:9999px; }
+  .noimg { width:148px; height:88px; border:1px dashed var(--line); border-radius:8px; display:flex; align-items:center; justify-content:center; color:var(--planned); font-size:12px; }
+  details { margin-top:16px; } summary { cursor:pointer; color:var(--muted); font-weight:500; }
+  details ul { margin:8px 0 0; padding-left:20px; }
+
+  .lightbox { position:fixed; inset:0; background:rgba(24,23,21,.94); display:none; flex-direction:column; z-index:20; }
+  .lightbox.open { display:flex; }
+  .lb-bar { display:flex; align-items:center; gap:10px; padding:14px 24px; color:var(--on-dark); }
+  .lb-bar .grow { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .lb-bar button { background:var(--dark-elev); color:var(--on-dark); border:1px solid #3a3833; border-radius:8px; height:36px; padding:0 16px; cursor:pointer; font-weight:500; }
+  .lb-bar button[aria-pressed=true] { background:var(--on-dark); color:var(--dark); }
+  .lb-body { flex:1; overflow:auto; display:flex; justify-content:center; align-items:flex-start; padding:0 24px 24px; }
+  .lb-body img { max-width:100%; height:auto; background:#fff; border-radius:8px; }
+</style>
+</head>
+<body>
+<div class="top"><b>Odoo Test</b><nav class="tabs workspace-tabs" role="tablist" aria-label="Workspace">
+  <button id="tab-progress" role="tab" data-workspace-tab="progress" aria-selected="true" aria-controls="main">Tiến độ test</button>
+  <button id="tab-site-map" role="tab" data-workspace-tab="site_map" aria-selected="false" aria-controls="siteMapMain" tabindex="-1">site_map</button>
+</nav><div class="live" aria-live="polite"><span class="dot" id="dot"></span><span id="liveText">đang tải…</span></div></div>
+<div class="layout">
+  <aside class="rail">
+    <header><h2>Lịch sử test</h2><select id="wsFilter" aria-label="Lọc theo workspace"></select></header>
+    <div id="history"></div>
+  </aside>
+  <main id="main" role="tabpanel" aria-labelledby="tab-progress"></main>
+  <main id="siteMapMain" role="tabpanel" aria-labelledby="tab-site-map" hidden></main>
+</div>
+<div class="lightbox" id="lb" role="dialog" aria-modal="true" aria-label="Ảnh bằng chứng">
+  <div class="lb-bar"><span class="grow" id="lbTitle"></span>
+    <button id="lbRaw" aria-pressed="false" title="Phím R">Ảnh gốc</button><button id="lbPrev" aria-label="Ảnh trước">←</button><button id="lbNext" aria-label="Ảnh sau">→</button><button id="lbClose">Đóng (Esc)</button></div>
+  <div class="lb-body"><img id="lbImg" alt=""></div>
+</div>
+
+<script>
+const TOKEN = "__TOKEN__";
+const BOOT = __BOOT__;
+const PHASE = { ANALYZE: "Phân tích", CONNECT: "Kết nối", CONFIRM: "Xác nhận", EXECUTE: "Thực thi", REPORT: "Báo cáo", DONE: "Xong" };
+const STATUS = { INTERRUPTED: "Bị bỏ dở", STOPPED: "Đã dừng", PASS: "PASS", FAIL: "FAIL", PENDING: "PENDING", BLOCKED: "BLOCKED", RUNNING: "Đang chạy", REPAIRING: "Đang sửa lỗi", EXPLORING: "Đang xác thực", PLANNED: "Chờ xác thực", BUILT: "Chờ chạy", VERIFIED: "Đã xác thực", TRYING: "Đang thử", HELD: "Cần xử lý trước", NEW: "Mới", "NOT EXECUTED": "Chưa chạy" };
+const ORDER = ["PASS", "FAIL", "REPAIRING", "RUNNING", "EXPLORING", "BUILT", "INTERRUPTED", "STOPPED", "PENDING", "BLOCKED", "PLANNED", "HELD", "NEW", "NOT EXECUTED"];
+const S = { sig: "", histSig: "", open: {}, draft: {}, hintError: "", sessions: [], ws: "", sel: null, view: null, caseId: null, attempt: null, raw: false, gallery: [], index: 0, error: "", busy: false };
+S.workspaces = []; S.tab = "progress";
+const M = { ws: "", lang: "", q: "", kind: "", key: "", mode: "buttons", view: "", match: "", required: false, data: null, results: null, screen: null, loading: false, error: "", request: 0, detailRequest: 0 };
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const cls = s => "s-" + String(s).split(" ")[0];
+const LIVE = ["RUNNING", "REPAIRING", "EXPLORING", "TRYING"];          // the server only sends these while something is really working (see view.py)
+const dot = s => LIVE.includes(s) ? '<i class="spin"></i>' : '<i class="sq"></i>';
+const get = path => fetch(path + (path.includes("?") ? "&" : "?") + "t=" + TOKEN).then(r => r.json());
+const post = (path, body) => fetch(path + "?t=" + TOKEN, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }).then(r => r.json());
+const img = (path) => `/api/image?ws=${encodeURIComponent(S.sel.ws)}&id=${encodeURIComponent(S.sel.id)}&path=${encodeURIComponent(path)}&t=${TOKEN}`;
+const clock = ts => (ts || "").slice(11, 16);
+const day = ts => (ts || "").slice(0, 10);
+
+function bar(counts, total) {
+  const parts = ORDER.filter(k => counts[k]).map(k => `<i class="${cls(k)}" style="flex:${counts[k]}" title="${esc(STATUS[k] || k)} ${counts[k]}"></i>`).join("");
+  return `<div class="bar" role="img" aria-label="${total} case">${parts}</div>`;
+}
+
+/** Replacing a panel's HTML empties it for an instant, and the browser then forgets how far it was scrolled. Put every scroll position back after a redraw. */
+function scrollers() { return ["#main", ".detail", "pre.strategy", ".rail"].map(sel => document.querySelector(sel)); }
+function keepScroll(draw) {
+  const before = scrollers().map(el => (el ? el.scrollTop : 0));
+  draw();
+  scrollers().forEach((el, i) => { if (el) el.scrollTop = before[i]; });
+}
+const isOpen = (key, fallback) => ((key in S.open ? S.open[key] : fallback) ? "open" : "");
+
+function renderHistory() { keepScroll(drawHistory); }
+
+function drawHistory() {
+  const names = [...new Set([...S.workspaces.map(w => w.name), ...S.sessions.map(s => s.workspace)])];
+  $("wsFilter").innerHTML = '<option value="">Tất cả workspace</option>' + names.map(n => `<option ${n === S.ws ? "selected" : ""}>${esc(n)}</option>`).join("");
+  const list = S.sessions.filter(s => !S.ws || s.workspace === S.ws);
+  $("history").innerHTML = list.map(s => {
+    const cur = S.sel && S.sel.ws === s.workspace && S.sel.id === s.session;
+    const file = s.file.split(/[\\/]/).pop();
+    return `<button class="hist" data-ws="${esc(s.workspace)}" data-id="${esc(s.session)}" aria-current="${cur}">
+      <div class="name" title="${esc(file)}">${esc(file)}</div>
+      <div class="sub"><span>${esc(s.workspace)} · ${esc(day(s.created))} ${esc(clock(s.created))}</span><span>${s.waiting ? '<span class="tag attn">chờ bạn</span>' : s.idle ? `<span class="tag" title="Không có hoạt động ${s.idle_hours} giờ">bỏ dở? · ${esc(PHASE[s.phase])}</span>` : `<span class="tag">${esc(PHASE[s.phase])}</span>`}</span></div>
+      ${bar(s.counts, s.total)}</button>`;
+  }).join("") || '<p class="muted" style="padding:14px">Chưa có phiên test nào.</p>';
+}
+
+function ticks(c) {
+  const last = c.attempts.length ? c.attempts[c.attempts.length - 1].steps : c.planned.map(() => ({ status: "PENDING" }));
+  const done = last.filter(s => s.status === "PASS").length;
+  return `<span class="ticks">${last.map(s => `<i class="${s.status === "PASS" ? "p" : s.status === "FAIL" ? "f" : ""}"></i>`).join("")}</span><span class="muted">${done}/${last.length}</span>`;
+}
+
+function renderMain() { keepScroll(drawMain); }
+
+function drawMain() {
+  const v = S.view;
+  if (!v) { $("main").innerHTML = `<div class="empty"><b>Chưa chọn phiên test</b>Mỗi yêu cầu test là một phiên. Hãy bảo AI test một file testcase, rồi chọn phiên ở cột bên trái.</div>`; return; }
+  const total = v.total, c = v.counts, passed = c.PASS || 0;
+  const phases = v.phases.map(p => `<div class="${p.state}">${esc(PHASE[p.phase])}<small>${p.at ? esc(clock(p.at)) : "&nbsp;"}</small></div>`).join("");
+  const stats = ORDER.filter(k => c[k]).map(k => `<span class="${cls(k)}"><strong>${c[k]}</strong><i class="sq"></i>${esc(STATUS[k] || k)}</span>`).join("") || '<span class="muted">Chưa có case nào.</span>';
+  let attention = "";
+  if (v.stopped) attention = `<section class="attn-panel"><h3>Bạn đã dừng test</h3><div class="muted">Bước đang chạy được hoàn tất, không có bước nào bắt đầu thêm. AI đang đợi. Bấm tiếp tục khi sẵn sàng.</div>
+      <div style="margin-top:10px"><button class="btn primary" id="resume" ${S.busy ? "disabled" : ""}>Tiếp tục test</button></div><div class="err">${esc(S.error)}</div></section>`;
+  else if (v.waiting) attention = `<section class="attn-panel"><h3>AI đang chờ bạn trả lời</h3><div>${esc(v.waiting.question)}</div>${v.waiting.case ? `<div class="muted">Về case ${esc(v.waiting.case)}</div>` : ""}
+      <textarea id="answer" aria-label="Câu trả lời" placeholder="Nhập câu trả lời…"></textarea><button class="btn primary" id="sendAnswer" ${S.busy ? "disabled" : ""}>Gửi trả lời</button><div class="err">${esc(S.error)}</div></section>`;
+  else if (v.can_confirm) attention = `<section class="attn-panel"><h3>Chiến lược đang chờ bạn duyệt</h3><div class="muted">Xem lại thứ tự, dữ liệu dự phòng và các bước. AI chỉ bắt đầu test sau khi bạn xác nhận.</div>
+      <details data-key="strategy" ${isOpen("strategy", true)}><summary>Chiến lược</summary><pre class="strategy">${esc(v.strategy)}</pre></details><div style="margin-top:10px"><button class="btn primary" id="confirm" ${S.busy ? "disabled" : ""}>Xác nhận và bắt đầu test</button></div><div class="err">${esc(S.error)}</div></section>`;
+  const rows = v.cases.map(k => `<tr class="case ${cls(k.status)}" tabindex="0" data-id="${esc(k.id)}" aria-selected="${k.id === S.caseId}">
+      <td class="mono">${esc(k.id)}</td><td><div class="title">${esc(k.title)}</div></td><td>${esc(k.profile) || '<span class="muted">-</span>'}</td><td>${ticks(k)}</td>
+      <td>${k.attempts.length || '<span class="muted">-</span>'}</td><td><span class="status">${dot(k.status)}${esc(STATUS[k.status] || k.status)}</span></td></tr>`).join("");
+  $("main").innerHTML = `
+    <div class="head"><h1>${esc(v.file.split(/[\\/]/).pop())}</h1>${v.phase === "EXECUTE" && v.can_stop ? `<button class="btn danger" id="stop" ${S.busy ? "disabled" : ""}>Dừng test</button>` : ""}</div>
+    <div class="meta"><span>Workspace <b>${esc(v.workspace)}</b></span><span class="mono">${esc(v.session)}</span><span>Bắt đầu ${esc(v.created)}</span><span>${(v.connect && v.connect.version) ? "Odoo " + esc(v.connect.version) : ""}</span><span>${v.knowledge} mục tri thức</span></div>
+    <div class="track">${phases}</div>
+    <div class="summary"><span><strong>${passed}</strong>/${total} đạt</span>${stats}</div>
+    ${bar(c, total)}
+    <div class="now">${esc(v.now)}</div>
+    ${v.idle && !v.waiting ? `<div class="idle">Phiên này không có hoạt động ${Math.floor(v.idle_hours)} giờ nay: AI có thể đã dừng giữa chừng. Các case đang chạy hoặc đang sửa được hiển thị là "Bị bỏ dở". Bảo AI chạy <span class="mono">oqa status</span> để tiếp tục.</div>` : ""}
+    ${reportBar(v)}
+    ${attention}
+    <div class="split"><div class="panel"><table><thead><tr><th>Case</th><th>Nội dung</th><th>Profile</th><th>Bước</th><th>Lần</th><th>Kết quả</th></tr></thead><tbody>${rows}</tbody></table></div>
+    <div class="panel detail" id="detail"></div></div>`;
+  renderDetail();
+  restoreDrafts();
+}
+
+function renderDetail() {
+  const box = $("detail");
+  if (!box) return;
+  const top = box.scrollTop;
+  drawDetail(box);
+  box.scrollTop = top;
+}
+
+function drawDetail(box) {
+  const v = S.view, k = v && v.cases.find(x => x.id === S.caseId);
+  if (!k) { box.innerHTML = '<p class="muted">Chọn một case để xem từng bước và ảnh bằng chứng.</p>'; return; }
+  const att = k.attempts.find(a => a.n === S.attempt) || k.attempts[k.attempts.length - 1];
+  const ex = k.explore || { verified: [], trying: null };
+  const steps = att ? att.steps : k.planned.map(p => ({ ...p, images: [], actual: "",
+    status: ex.trying && ex.trying.step === p.n ? "TRYING" : ex.verified.includes(p.n) ? "VERIFIED" : "PENDING", mode: ex.trying && ex.trying.step === p.n ? ex.trying.mode : "" }));
+  S.gallery = steps.flatMap(s => s.images.map(im => ({ ...im, caption: `Bước ${s.n}: ${s.caption}` })));
+  const chips = [k.profile && `Profile ${k.profile}`, k.depends_on.length && `Tiếp từ ${k.depends_on.join(", ")}`, k.clarity && `Rõ ràng ${k.clarity}/5`, k.sufficiency && `Đủ dữ kiện ${k.sufficiency}/5`, `dòng ${k.row}`].filter(Boolean)
+    .map(t => `<span class="tag">${esc(t)}</span>`).join("");
+  const tabs = k.attempts.length > 1 ? `<div class="tabs" role="tablist">${k.attempts.map(a => `<button role="tab" data-attempt="${a.n}" aria-selected="${att && a.n === att.n}"><i class="sq ${cls(a.status)}"></i>Lần ${a.n} · ${esc(STATUS[a.status] || a.status)}${a.from_step > 1 ? ` · từ bước ${a.from_step}` : ""}</button>`).join("")}</div>` : "";
+  let g = -1;
+  const list = steps.map(s => {
+    const first = s.images[0];
+    const thumb = first ? `<button class="thumb ${s.status === "FAIL" ? "fail" : ""}" data-g="${(g += s.images.length) - s.images.length + 1}" style="background-image:url('${img(first.annotated)}')" aria-label="Phóng to ảnh bước ${s.n}"><span>${s.images.length > 1 ? s.images.length + " ảnh" : "xem"}</span></button>` : `<div class="noimg">${{ PENDING: att ? "chưa chạy" : "chờ xác thực", RUNNING: "đang chạy…", TRYING: "đang thử…", VERIFIED: "đã thử trên trang thật" }[s.status] || "không có ảnh"}</div>`;
+    return `<div class="step ${cls(s.status)}"><div class="n">${LIVE.includes(s.status) ? dot(s.status) : s.n}</div><div><div class="cap">${esc(s.caption)}</div>${s.status === "RUNNING" ? `<div class="live-note">Đang chạy bước này…</div>` : s.status === "TRYING" ? `<div class="live-note">${s.mode === "replay" ? "Đang đưa trang tới bước này…" : "Đang thử trên trang thật…"}</div>` : ""}<div class="exp">Mong đợi: ${esc(s.expected)}${s.checks != null && s.status !== "PENDING" ? ` <span class="tag">${s.checks} kiểm tra</span>` : ""}${s.carried ? ' <span class="tag">giữ từ lần trước</span>' : ""}</div>
+      ${s.actual && s.status !== "PENDING" ? `<div class="act">${s.status === "PASS" ? "Thực tế: " : ""}${esc(s.actual)}</div>` : ""}</div>${thumb}</div>`;
+  }).join("");
+  const base = (k.edge_cases.length || k.edge_none || k.data_needs.length || k.questions.length || k.timeout_s) ? `<ul>
+      ${k.edge_cases.map(e => `<li>Tình huống biên: ${esc(e)}</li>`).join("")}${k.edge_none ? `<li>Không có tình huống biên: ${esc(k.edge_none)}</li>` : ""}
+      ${k.data_needs.map(d => `<li>Dữ liệu có thể thiếu: ${esc(d.what)} → ${esc(d.fallback)}</li>`).join("")}${k.questions.map(q => `<li>Cần hỏi: ${esc(q)}</li>`).join("")}
+      ${k.timeout_s ? `<li>Mỗi lần chờ tối đa ${k.timeout_s} giây</li>` : ""}</ul>` : "";
+  const notes = k.repairs.length ? `<div class="ai-notes">${k.repairs.map((r, i) => `<div class="note"><h4>AI phân tích lại sau lần ${r.attempt} · ${esc(clock(r.ts))}${r.probed ? ' · đã dò trang thật' : ' · chưa dò trang'}</h4><dl>
+      <dt>Nguyên nhân</dt><dd>${esc(r.cause)}</dd><dt>Căn cứ</dt><dd>${esc(r.evidence)}</dd><dt>Đã sửa</dt><dd>${esc(r.change)}</dd>
+      ${r.reanalysis ? `<dt>Hiểu lại case</dt><dd>${esc(r.reanalysis)}</dd>` : ""}${r.timeout_s ? `<dt>Thời gian chờ</dt><dd>${r.timeout_s} giây</dd>` : ""}${r.unchanged_reason ? `<dt>Script giữ nguyên</dt><dd>${esc(r.unchanged_reason)}</dd>` : ""}</dl></div>`).join("")}</div>` : "";
+  const analysis = (base || notes) ? `<details data-key="analysis-${esc(k.id)}" ${isOpen("analysis-" + k.id, k.repairs.length > 0)}><summary>Phân tích của AI${k.repairs.length ? ` · đã sửa ${k.repairs.length} lần` : ""}</summary>${base}${notes}</details>` : "";
+  box.innerHTML = `<h2><span class="mono">${esc(k.id)}</span> ${esc(k.title)}</h2>
+    <div><span class="status ${cls(k.status)}">${dot(k.status)}${esc(STATUS[k.status] || k.status)}</span>${k.reason ? ` <span class="muted">· ${esc(k.reason)}</span>` : ""}</div>
+    <div class="chips">${chips}</div>${hintBox(k)}${tabs}${list}${analysis}`;
+}
+
+const reportUrl = name => `/api/report?ws=${encodeURIComponent(S.sel.ws)}&id=${encodeURIComponent(S.sel.id)}&name=${encodeURIComponent(name)}&t=${TOKEN}`;
+
+/** The Excel evidence: one workbook for the run, one sheet per case. Always available (it can be rebuilt from what has run so far). */
+function reportBar(v) {
+  const main = v.reports.find(r => r.main);
+  const label = main ? "Cập nhật báo cáo Excel" : "Xuất báo cáo Excel";
+  return `<div class="reports"><button class="btn ${main ? "" : "primary"}" id="exportReport" ${S.busy ? "disabled" : ""}>${label}</button>
+    ${main ? `<a class="btn primary" href="${reportUrl(main.name)}" download>Tải file Evidence (.xlsx)</a>` : ""}</div>`;
+}
+
+function hintBox(k) {
+  if (!k.can_hint) return "";
+  const said = k.hints.map(h => `<div class="said">Bạn · ${esc(clock(h.at))}: ${esc(h.text)}</div>`).join("");
+  return `<section class="hint-box"><h3>${k.exhausted ? "Đã hết số lần sửa: AI cần gợi ý của bạn" : "Gợi ý cho AI"}</h3>
+    <div class="muted">AI sẽ đọc gợi ý này, rồi chạy lại case này với số lần sửa mới.</div>${said}
+    <textarea id="hint" data-draft="hint-${esc(k.id)}" aria-label="Gợi ý cho AI về case ${esc(k.id)}" placeholder="Ví dụ: nút Lưu nằm trong menu Hành động; dùng khách hàng Azure Interior…"></textarea>
+    <button class="btn primary" id="sendHint" ${S.busy ? "disabled" : ""}>Gửi và chạy lại</button><div class="err">${esc(S.hintError)}</div></section>`;
+}
+
+function restoreDrafts() {
+  document.querySelectorAll("textarea").forEach(el => { const key = el.dataset.draft || el.id; if (S.draft[key]) el.value = S.draft[key]; });
+}
+
+function openLightbox(i) { S.index = i; $("lb").classList.add("open"); drawLightbox(); }
+function drawLightbox() {
+  const im = S.gallery[S.index];
+  if (!im) return;
+  $("lbImg").src = img(S.raw ? im.raw : im.annotated);
+  $("lbTitle").textContent = `${S.index + 1}/${S.gallery.length} · ${im.caption}`;
+  $("lbRaw").setAttribute("aria-pressed", S.raw);
+  $("lbRaw").textContent = S.raw ? "Ảnh khoanh đỏ" : "Ảnh gốc";
+}
+
+const mapWorkspace = () => S.ws || (S.sel && S.sel.ws) || (S.workspaces.length === 1 ? S.workspaces[0].name : "");
+const mapGet = params => get("/api/sitemap?" + new URLSearchParams({ ws: M.ws, lang: M.lang, ...params })).then(data => {
+  if (data.error) throw new Error(data.error);
+  return data;
+});
+
+function workspaceTab(tab) {
+  S.tab = tab;
+  document.body.classList.toggle("site-map-active", tab === "site_map");
+  $("main").hidden = tab !== "progress";
+  $("siteMapMain").hidden = tab !== "site_map";
+  document.querySelectorAll("[data-workspace-tab]").forEach(button => {
+    const selected = button.dataset.workspaceTab === tab;
+    button.setAttribute("aria-selected", selected); button.tabIndex = selected ? 0 : -1;
+  });
+  const url = new URL(location.href);
+  if (tab === "site_map") url.searchParams.set("tab", "site_map"); else url.searchParams.delete("tab");
+  if (tab === "site_map" && mapWorkspace()) url.searchParams.set("workspace", mapWorkspace()); else url.searchParams.delete("workspace");
+  history.replaceState(null, "", url);
+  if (tab === "site_map") loadMap();
+}
+
+/*__SITE_MAP__*/
+
+async function refreshList() {
+  const [sessions, workspaces] = await Promise.all([get("/api/sessions"), get("/api/workspaces")]);
+  const list = sessions.sessions;
+  const sig = JSON.stringify([list, workspaces.workspaces]);
+  if (sig === S.histSig) return;                       // nothing new: leave the list alone
+  S.histSig = sig; S.sessions = list; S.workspaces = workspaces.workspaces || []; renderHistory();
+}
+/** True while the person is reading something they selected or typing: the page must not move under them. */
+function busyReading() {
+  const sel = window.getSelection();
+  return (document.activeElement && document.activeElement.tagName === "TEXTAREA") || (sel && !sel.isCollapsed && sel.toString().trim() !== "");
+}
+async function refreshView() {
+  if (!S.sel) return renderMain();
+  const v = await get(`/api/session?ws=${encodeURIComponent(S.sel.ws)}&id=${encodeURIComponent(S.sel.id)}`);
+  if (v.error) return;
+  const sig = JSON.stringify(v);
+  const changed = sig !== S.sig;
+  S.view = v;
+  if (!v.cases.some(c => c.id === S.caseId)) {
+    const pick = v.cases.find(c => ["FAIL", "REPAIRING", "RUNNING", "EXPLORING"].includes(c.status)) || v.cases[0];
+    S.caseId = pick ? pick.id : null; S.attempt = null;
+  }
+  if (changed && !busyReading()) { S.sig = sig; renderMain(); }        // redraw only when the data changed, and not while they are reading or typing
+  const live = v.phase !== "DONE";
+  $("dot").className = "dot" + (live ? " on" : "");
+  $("liveText").textContent = live ? `Trực tiếp · cập nhật ${new Date().toLocaleTimeString("vi-VN")}` : `Đã xong · ${v.updated}`;
+}
+function select(ws, id) { S.sel = { ws, id }; S.view = null; S.sig = ""; S.caseId = null; S.attempt = null; history.replaceState(null, "", `#${encodeURIComponent(ws)}/${encodeURIComponent(id)}`); renderHistory(); refreshView(); if (S.tab === "site_map") loadMap(); }
+
+document.addEventListener("click", async e => {
+  const t = e.target.closest("button, tr.case, [data-map-screen], [data-map-expand], [data-map-home], [data-map-focus]");
+  if (!t) return;
+  if (t.dataset.workspaceTab) return workspaceTab(t.dataset.workspaceTab);
+  if (t.id === "mapReload") return loadMap();
+  if (t.dataset.mapHome) return resetGraph();
+  if (t.dataset.mapFocus) { G.focus = t.dataset.mapFocus; G.expanded.add(G.focus); G.inspector = false; G.fit = true; return renderMap(); }
+  if (t.dataset.mapExpand) {
+    e.preventDefault();
+    const key = t.dataset.mapExpand;
+    if (!G.focus) { G.focus = key; G.expanded.add(key); }
+    else if (G.expanded.has(key)) G.expanded.delete(key); else G.expanded.add(key);
+    G.fit = true; G.searchOpen = false; return renderMap();
+  }
+  if (t.id === "mapZoomIn") return graphZoom(1.25);
+  if (t.id === "mapZoomOut") return graphZoom(1/1.25);
+  if (t.id === "mapFit") return graphFit();
+  if (t.id === "mapCollapse") { G.expanded.clear(); G.expanded.add(G.focus); G.fit = true; return renderMap(); }
+  if (t.id === "mapCloseInspector") { G.inspector = false; G.fit = true; return renderMap(); }
+  if (t.id === "mapCloseSearch") { G.searchOpen = false; return renderMap(); }
+  if (t.dataset.mapScreen) {
+    e.preventDefault();
+    return selectGraphScreen(t.dataset.mapScreen);
+  }
+  if (t.dataset.mapMode) { M.mode = t.dataset.mapMode; return renderMap(); }
+  if (t.classList.contains("hist")) return select(t.dataset.ws, t.dataset.id);
+  if (t.matches("tr.case")) { S.caseId = t.dataset.id; S.attempt = null; return renderMain(); }
+  if (t.dataset.attempt) { S.attempt = +t.dataset.attempt; return renderDetail(); }
+  if (t.dataset.g !== undefined) return openLightbox(+t.dataset.g);
+  if (t.id === "lbClose") return $("lb").classList.remove("open");
+  if (t.id === "lbPrev") { S.index = (S.index + S.gallery.length - 1) % S.gallery.length; return drawLightbox(); }
+  if (t.id === "lbNext") { S.index = (S.index + 1) % S.gallery.length; return drawLightbox(); }
+  if (t.id === "lbRaw") { S.raw = !S.raw; return drawLightbox(); }
+  const where = { ws: S.sel && S.sel.ws, id: S.sel && S.sel.id };
+  const call = {
+    exportReport: () => post("/api/report", where),
+    confirm: () => post("/api/confirm", where), stop: () => post("/api/stop", where), resume: () => post("/api/resume", where),
+    sendAnswer: () => post("/api/answer", { ...where, text: ($("answer") || {}).value || "" }),
+    sendHint: () => post("/api/hint", { ...where, case: S.caseId, text: ($("hint") || {}).value || "" }),
+  }[t.id];
+  if (call) {
+    S.busy = true; S.error = ""; S.hintError = ""; renderMain();
+    const r = await call();
+    S.busy = false;
+    if (t.id === "sendHint") { S.hintError = r.error || ""; if (!r.error) delete S.draft["hint-" + S.caseId]; } else S.error = r.error || "";
+    if (t.id === "sendAnswer" && !r.error) delete S.draft.answer;
+    await refreshView();
+    renderMain();
+    if (t.id === "exportReport" && !r.error) window.location.assign(reportUrl(r.main));        // hand the workbook over as soon as it is built
+  }
+});
+document.addEventListener("toggle", e => { const d = e.target; if (d.dataset && d.dataset.key) S.open[d.dataset.key] = d.open; }, true);
+document.addEventListener("input", e => {
+  if (e.target.tagName === "TEXTAREA") S.draft[e.target.dataset.draft || e.target.id] = e.target.value;
+  if (e.target.id === "mapQuery") M.q = e.target.value;
+  if (e.target.id === "mapMatch") M.match = e.target.value;
+});
+document.addEventListener("submit", e => {
+  if (e.target.id === "mapSearchForm") { e.preventDefault(); G.searchOpen = true; return loadMap(); }
+  if (e.target.id === "mapDetailForm") { e.preventDefault(); return loadMapScreen(); }
+});
+document.addEventListener("change", e => {
+  if (e.target.id === "mapWorkspace") { S.ws = e.target.value; renderHistory(); return workspaceTab("site_map"); }
+  if (e.target.id === "mapLanguage") { M.lang = e.target.value; return loadMap(); }
+  if (e.target.id === "mapKind") { M.kind = e.target.value; G.searchOpen = !!(M.kind || M.q); return loadMap(); }
+  if (e.target.id === "mapView") { M.view = e.target.value; return loadMapScreen(); }
+  if (e.target.id === "mapRequired") { M.required = e.target.checked; return loadMapScreen(); }
+});
+document.addEventListener("keydown", e => {
+  if (e.target.matches("[data-map-screen], [data-map-expand], [data-map-home], [data-map-focus]") && ["Enter", " "].includes(e.key)) { e.preventDefault(); e.target.dispatchEvent(new MouseEvent("click", { bubbles:true })); return; }
+  if (e.target.id === "mapDiagram") {
+    if (["+", "="].includes(e.key)) { e.preventDefault(); return graphZoom(1.25); }
+    if (e.key === "-") { e.preventDefault(); return graphZoom(1/1.25); }
+    if (e.key === "Home") { e.preventDefault(); return graphFit(); }
+    if (["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(e.key)) { e.preventDefault(); G.x += e.key === "ArrowLeft" ? 45 : e.key === "ArrowRight" ? -45 : 0; G.y += e.key === "ArrowUp" ? 45 : e.key === "ArrowDown" ? -45 : 0; return graphTransform(); }
+  }
+  if (e.key === "Escape" && S.tab === "site_map") { G.inspector = false; G.searchOpen = false; return renderMap(); }
+  if (e.target.dataset.workspaceTab && ["ArrowLeft", "ArrowRight", "Home", "End"].includes(e.key)) {
+    e.preventDefault();
+    const tab = e.key === "Home" ? "progress" : e.key === "End" ? "site_map" : e.target.dataset.workspaceTab === "progress" ? "site_map" : "progress";
+    workspaceTab(tab); $(tab === "progress" ? "tab-progress" : "tab-site-map").focus(); return;
+  }
+  if (e.key === "Enter" && e.target.matches("tr.case")) return e.target.click();
+  if (!$("lb").classList.contains("open")) return;
+  if (e.key === "Escape") $("lb").classList.remove("open");
+  else if (e.key === "ArrowLeft") $("lbPrev").click();
+  else if (e.key === "ArrowRight") $("lbNext").click();
+  else if (e.key.toLowerCase() === "r") $("lbRaw").click();
+});
+$("wsFilter").onchange = e => { S.ws = e.target.value; renderHistory(); if (S.tab === "site_map") workspaceTab("site_map"); };
+
+(async function start() {
+  await refreshList();
+  const params = new URLSearchParams(location.search);
+  if (S.workspaces.some(w => w.name === params.get("workspace"))) S.ws = params.get("workspace");
+  const hash = location.hash.slice(1).split("/").map(decodeURIComponent);
+  const first = (hash.length === 2 && S.sessions.find(s => s.workspace === hash[0] && s.session === hash[1])) || (BOOT.select && S.sessions.find(s => s.workspace === BOOT.select[0] && s.session === BOOT.select[1])) || S.sessions.find(s => !S.ws || s.workspace === S.ws);
+  if (first) select(first.workspace, first.session); else { renderMain(); $("liveText").textContent = "chưa có phiên test"; }
+  renderHistory();
+  if (params.get("tab") === "site_map") workspaceTab("site_map");
+  setInterval(() => { if (!$("lb").classList.contains("open")) refreshView(); }, 1500);
+  setInterval(refreshList, 6000);
+})();
+</script>
+</body>
+</html>

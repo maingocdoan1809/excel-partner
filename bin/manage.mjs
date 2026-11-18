@@ -30,7 +30,7 @@ export function controlRequest(dataDir, role, action, timeoutMs = 5000) {
             const valid = role === "addin" ? data.name === "excel-ai-addin-bridge" : data.service === "agent-gateway";
             done(valid ? { running: true, controlled: role === "gateway" || data.controlSupported === true,
               busy: role === "addin" ? data.busy === true || Array.isArray(data.sessions) && data.sessions.some(session => session.activeRequestId || session.pendingTools > 0) : (data.busySessions ?? data.sessions ?? 0) > 0 } : { error: "SERVICE_IDENTITY_MISMATCH" });
-          } else done(response.statusCode === 200 ? { ok: true } : { error: response.statusCode === 409 ? "SERVICE_BUSY" : "SERVICE_CONTROL_UNAVAILABLE" });
+          } else done(response.statusCode === 200 ? { ok: true } : { error: response.statusCode === 409 ? "SERVICE_BUSY" : "SERVICE_CONTROL_UNAVAILABLE", status: response.statusCode });
         } catch { done({ error: "SERVICE_RESPONSE_INVALID" }); }
       });
     });

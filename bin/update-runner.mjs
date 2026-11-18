@@ -10,7 +10,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { setTimeout as sleep } from "node:timers/promises";
-import { installedVersion, packageNameOf, stopPackageProcesses, updatePackage, writeUpdateStatus } from "./update.mjs";
+import { installedVersion, packageNameOf, stopBridgeForUpdate, stopPackageProcesses, updatePackage, writeUpdateStatus } from "./update.mjs";
 
 const root = process.env.EP_ROOT;
 const dataDir = process.env.EP_DATA;
@@ -22,6 +22,8 @@ const spec = process.env.EP_SPEC || `${packageNameOf(root)}@latest`;
 const from = process.env.EP_FROM || null;
 const startedAt = new Date().toISOString();
 const status = (patch) => writeUpdateStatus(dataDir, { from, spec, startedAt, ...patch });
+// When each step began (ms since the update started), kept in the status file so a slow update shows where the time went.
+const began = Date.now(), steps = {};
 
 const STEP_TEXT = {
   stopping: "Stopping the bridge",
@@ -49,20 +51,23 @@ try {
     nodePath: process.execPath,
     wasRunning: true,
     spec,
-    report: (step) => status({ state: "running", step, message: STEP_TEXT[step] ?? step }),
-    stop: async () => {
-      // The bridge launched this runner, so it is one of the ancestors the process sweep deliberately spares.
-      // Stop that known service explicitly before sweeping the remaining package processes.
-      const stopped = spawnSync(process.execPath, [path.join(root, "bin", "office-partner.mjs"), "stop"], { cwd: dataDir, stdio: "inherit", windowsHide: true });
-      if (stopped.error || stopped.status !== 0) throw new Error("Could not stop the bridge. Run office-partner stop, then retry the update.");
-      stopPackageProcesses({ root });
-    },
+    report: (step) => { steps[step] ??= Date.now() - began; status({ state: "running", step, message: STEP_TEXT[step] ?? step, stepStartMs: { ...steps } }); },
+    // The bridge launched this runner, so it is one of the ancestors the process sweep deliberately spares: stop that
+    // known service explicitly, and if that cannot be done gently, stop the package's processes instead.
+    stop: () => stopBridgeForUpdate({
+      gentle: async () => {
+        const stopped = spawnSync(process.execPath, [path.join(root, "bin", "office-partner.mjs"), "stop"], { cwd: dataDir, stdio: ["inherit", "inherit", "pipe"], encoding: "utf8", windowsHide: true });
+        if (stopped.stderr) process.stderr.write(stopped.stderr);
+        if (stopped.error || stopped.status !== 0) throw new Error(String(stopped.stderr ?? "").trim().split(/\r?\n/).pop() || `exit ${stopped.status ?? "unknown"}`);
+      },
+      sweep: () => stopPackageProcesses({ root }),
+    }),
   });
   if (process.env.EP_GATEWAY === "1") {
     gatewayAttempted = true;
     startGateway(result.installedRoot);
   }
-  status({ state: "done", step: "done", message: "Updated", to: result.version ?? installedVersion(result.installedRoot), finishedAt: new Date().toISOString() });
+  status({ state: "done", step: "done", message: "Updated", totalMs: Date.now() - began, to: result.version ?? installedVersion(result.installedRoot), finishedAt: new Date().toISOString() });
   removeOwnFolder();
 } catch (error) {
   let message = error instanceof Error ? error.message : String(error);

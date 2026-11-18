@@ -6,7 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import runtimeStore from "./runtime-store.cjs";
-import { packageNameOf, stopPackageProcesses, updatePackage } from "./update.mjs";
+import { packageNameOf, stopBridgeForUpdate, stopPackageProcesses, updatePackage } from "./update.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const dataDir = runtimeStore.home();
@@ -130,7 +130,7 @@ async function stop() {
         }
         fail("Bridge shutdown timed out. Use office-partner doctor before retrying.");
       }
-      if (shutdown.error === "SERVICE_BUSY" || status.controlled) fail(shutdown.error ?? "SERVICE_CONTROL_UNAVAILABLE");
+      if (shutdown.error === "SERVICE_BUSY" || status.controlled) fail(`${shutdown.error ?? "SERVICE_CONTROL_UNAVAILABLE"}${shutdown.status ? ` (HTTP ${shutdown.status})` : ""}`);
       if (!pid) fail("Legacy bridge has no process record. Stop it from its original installation.");
     }
   if (pid) {
@@ -404,7 +404,7 @@ async function main() {
           await updatePackage({
             root, dataDir, nodePath: process.execPath, wasRunning: Boolean(livePid()), spec: /\.tgz$/i.test(spec) ? path.resolve(spec) : spec,
             // Also stop what the bridge started (relay, helper scripts): any of them can keep npm from replacing the folder.
-            stop: async () => { await stop(); stopPackageProcesses({ root }); },
+            stop: () => stopBridgeForUpdate({ gentle: stop, sweep: () => stopPackageProcesses({ root }) }),
           });
         }
         finally {

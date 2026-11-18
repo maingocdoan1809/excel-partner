@@ -193,3 +193,15 @@ describe("the last chat of an open file", () => {
    expect(w.store.latestForDocument("C:\books\c.xlsx")).toBeNull();
  });
 });
+describe("history without the SQLite driver", () => {
+ it("keeps chats in localStorage and shows no error when the bridge reports HISTORY_DRIVER_UNAVAILABLE", async () => {
+   const w = fixture(); w.api.historyStats.mockRejectedValue(Object.assign(new Error("no driver"), { code: "HISTORY_DRIVER_UNAVAILABLE" }));
+   await expect(w.store.connect()).resolves.toBeUndefined();
+   w.store.save(session()); await w.store.flush();
+   expect(w.notice).not.toHaveBeenCalled(); expect(w.api.historySave).not.toHaveBeenCalled();
+   expect(JSON.parse(localStorage.getItem("excelPartner.sessions.v1")!)).toHaveLength(1);
+   const reloaded = new DurableHistory(() => w.api, () => "excel", localStorage, w.notice);
+   expect(reloaded.list()).toHaveLength(1);
+   await w.store.delete("chat"); expect(JSON.parse(localStorage.getItem("excelPartner.sessions.v1")!)).toHaveLength(0);
+ });
+});

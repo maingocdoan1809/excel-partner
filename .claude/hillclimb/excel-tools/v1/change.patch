@@ -1,0 +1,4 @@
+--- a/shared/src/tool-definitions.ts (insert_rows description)
++++ b/shared/src/tool-definitions.ts (insert_rows description)
+-"WRITE. Insert blank rows above or below a row reference."
++"WRITE. Insert `count` (1-1000) blank rows above or below the row named by `at` (a row number or cell reference such as `5` or `A5`; whole rows, not a range). `position` is `above` (default) or `below`."

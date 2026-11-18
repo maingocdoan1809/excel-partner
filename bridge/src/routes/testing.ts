@@ -2,10 +2,12 @@ import type http from "node:http";
 import { connectedSession, readBody, sendJson } from "../http-util.js";
 import type { WorkbookSessions } from "../workbook-sessions.js";
 import { type FolderKind, type TestingAdmin, TestingAdminError } from "../testing-admin.js";
+import { type OdooTest, OdooTestError } from "../odoo-test.js";
 
 export interface TestingRouteDeps {
   sessions: WorkbookSessions;
   admin: TestingAdmin;
+  odooTest: OdooTest;
 }
 
 /** Sign-ins, notes and regression scripts for the testing workflow: what the `office-partner login/knowledge/scripts` commands do, for buttons. */
@@ -40,6 +42,11 @@ export class TestingRoutes {
       }
       if (action === "sign-in-finish") return sendJson(res, 200, await admin.finishSignIn());
       if (action === "sign-in-cancel") return sendJson(res, 200, { cancelled: admin.cancelSignIn() });
+      if (action === "odoo-test") {
+        const page = text("page");
+        if (page !== "init" && page !== "dashboard") throw new TestingAdminError("Choose init or dashboard.");
+        return sendJson(res, 200, await this.deps.odooTest.open(page));
+      }
       if (action === "open-folder") {
         const kind = text("kind");
         if (kind !== "sessions" && kind !== "knowledge" && kind !== "scripts") throw new TestingAdminError("Choose sessions, knowledge or scripts.");
@@ -47,7 +54,7 @@ export class TestingRoutes {
       }
       throw new TestingAdminError("Unknown action.");
     } catch (error) {
-      if (error instanceof TestingAdminError || error instanceof SyntaxError) return sendJson(res, 400, { error: error.message });
+      if (error instanceof TestingAdminError || error instanceof OdooTestError || error instanceof SyntaxError) return sendJson(res, 400, { error: error.message });
       throw error;
     }
   }

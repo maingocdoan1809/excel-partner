@@ -91,6 +91,20 @@ describe("the testing panel", () => {
     expect(ctx.el("testing-status").textContent).toContain("Saved sign-in 'tester'");
   });
 
+  it("opens the Odoo Test form and dashboard, and shows why when the skill is missing", async () => {
+    const ctx = setup();
+    await ctx.panel.refresh();
+    (document.querySelector("[data-odoo-test=init]") as HTMLButtonElement).click();
+    await flush();
+    expect(ctx.client.testingAction).toHaveBeenLastCalledWith({ action: "odoo-test", page: "init" });
+    expect(ctx.el("testing-status").textContent).toContain("Opening in your browser");
+    ctx.client.testingAction.mockRejectedValueOnce(new Error("The odoo-test skill is not installed."));
+    (document.querySelector("[data-odoo-test=dashboard]") as HTMLButtonElement).click();
+    await flush();
+    expect(ctx.client.testingAction).toHaveBeenLastCalledWith({ action: "odoo-test", page: "dashboard" });
+    expect(ctx.el("testing-status").textContent).toContain("not installed");
+  });
+
   it("shows a window that is already open when the panel is reopened", async () => {
     const reopened = setup(overview({ pendingSignIn: { name: "admin", url: "https://staging.example.com" } }));
     await reopened.panel.refresh();

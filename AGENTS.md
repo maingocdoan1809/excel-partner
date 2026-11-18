@@ -26,6 +26,7 @@ npx vitest run tests/peer.test.ts          # one file
 npx vitest run tests/peer.test.ts -t "name" # one test
 npm run dev                # pane (esbuild watch) + bridge (tsx watch) from the working copy; 8765 if the installed bridge is stopped, else 8777
 npm run pack:release       # build the release .tgz into release/
+npm run build:msi          # thin per-user MSI (needs the WiX 5.0.2 CLI); payload only: node scripts/build-msi-payload.mjs
 ```
 
 Validation before reporting done: `npm run typecheck`, `npm run build`, `npm test` (CI runs these on windows-latest with Node 22.12/22/24, then `pack:release`).
@@ -60,7 +61,7 @@ The architecture test also fails if:
 
 `providers/src/types.ts` (`ProviderAdapter`) is the single contract: detect, list models/commands, start/send/cancel/close session, `capabilities`, `startLogin`/`loginAccounts`, `logout`, `verifyReady`, `install`/`uninstall`. `BaseCliAdapter` (`base.ts`) is the shared implementation; each provider lives in `providers/src/<id>/` (`adapter.ts` plus its own helpers). `registry.ts` creates adapters; `profiled.ts` wraps an adapter with the managed runtime profile from `bin/`. `mock.ts` is the adapter used by tests.
 
-Managed CLIs: `bin/runtime-manifest.json` is the one data file of per-provider install facts; `bin/runtime-store.cjs` / `runtime-manager.mjs` install them into runtime folders under the data folder (id depends only on provider/package/version/platform); nothing is copied or hashed. One CLI per provider; `setup` (which `update` runs after npm replaces the package) brings the selected providers' CLIs to the versions the release names, and a failed CLI install never blocks a product update. `bin/*.mjs` are copied to a temp folder and run detached by the updater (`bridge/src/updater.ts`), so they must stay self-contained.
+Managed CLIs: `bin/runtime-manifest.json` is the one data file of install facts: per-provider CLI versions, plus the pinned Node.js and SQLite binary (with SHA-256) the MSI uses (`installer/msi/`, `scripts/build-msi*.mjs`, `scripts/msi/`); `bin/runtime-store.cjs` / `runtime-manager.mjs` install them into runtime folders under the data folder (id depends only on provider/package/version/platform); that install copies and hashes nothing. One CLI per provider; `setup` (which `update` runs after npm replaces the package) brings the selected providers' CLIs to the versions the release names, and a failed CLI install never blocks a product update. `bin/*.mjs` are copied to a temp folder and run detached by the updater (`bridge/src/updater.ts`), so they must stay self-contained.
 
 ### Office tool call flow
 
@@ -88,6 +89,6 @@ Panes for different open files can read each other (`read_connected_file`) or ha
 
 ## Environment notes
 
-- Source files are CRLF (autocrlf). The Bash tool can mangle quoting inside heredocs; for multi-line helper scripts, write a file and run it with `node`. No Python on this machine.
+- Source files are CRLF (autocrlf). The Bash tool can mangle quoting inside heredocs; for multi-line helper scripts, write a file and run it with `node` (or `python`: Python 3.12 is installed). The `skills/odoo-test` skill is Python; test it from its own venv: `skills/odoo-test/.venv/Scripts/python.exe -m pytest` (run in `skills/odoo-test`).
 - Installed product data: `%LOCALAPPDATA%\Excel Partner` (config, cert, logs, `runtime-state.json`). Stop only processes you started, by PID or port.
 - `bin/doctor-checks.mjs` intentionally keeps its own per-provider auth probing (its tests inject a fake runner); known duplication, leave it.

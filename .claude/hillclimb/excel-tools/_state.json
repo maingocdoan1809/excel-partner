@@ -1,0 +1,13 @@
+{
+  "metrics": [
+    { "id": "pass", "label": "Pass", "kind": "binary" },
+    { "id": "tool", "label": "Tool", "kind": "binary" },
+    { "id": "state", "label": "Workbook state", "kind": "binary" },
+    { "id": "reply", "label": "Reply", "kind": "binary" }
+  ],
+  "perf_fields": [
+    { "id": "tool_calls", "label": "Tool calls" },
+    { "id": "latency_s", "label": "Seconds", "unit": "s" },
+    { "id": "out_tokens", "label": "Output tokens" }
+  ]
+}

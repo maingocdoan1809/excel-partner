@@ -44,6 +44,8 @@ THIRD_PARTY_NOTICES.md
 .claude/hillclimb/**/trajectory/
 .claude/hillclimb/**/*.log
 
-# Python bytecode from running the bundled test kit
+# Python bytecode from running the bundled test kit and the odoo-test skill
 __pycache__/
 *.pyc
+.pytest_cache/
+skills/odoo-test/.venv/
