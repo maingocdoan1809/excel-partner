@@ -23,6 +23,7 @@ export interface ChatHistoryStore {
 }
 interface Pending extends HistorySave { host: SessionHost; recoveryId?: string }
 const OUTBOX = "excelPartner.historyOutbox.v1";
+const SESSIONS_KEY = "excelPartner.sessions.v1";
 /** How long a request waits for a bridge that answers HISTORY_RESTARTING (it is handing over to a new release). */
 export const HISTORY_RESTART_WAIT_MS = 30_000;
 const restarting = (error: unknown) => (error as { code?: string })?.code === "HISTORY_RESTARTING";
@@ -36,6 +37,8 @@ export class DurableHistory implements ChatHistoryStore {
  private inFlight?: Pending;
  private generation = 0;
  private ready = false;
+ /** The bridge has no usable SQLite driver: chats live in localStorage only (SESSIONS_KEY), without any error shown. */
+ private local = false;
  private listed = false;
  private migrationNotice?: string;
  private connecting?: Promise<void>;
@@ -131,6 +134,7 @@ export class DurableHistory implements ChatHistoryStore {
      await this.flush().catch(() => {});
      this.retryDelay = 1000;
    } catch (error) {
+     if ((error as { code?: string })?.code === "HISTORY_DRIVER_UNAVAILABLE") { this.useLocalOnly(); return; }
      this.notify(`History is not fully saved or available: ${String(error instanceof Error ? error.message : error)}`);
      // Nothing else would try again until the pane reconnects, so keep trying with a growing pause.
      if (!this.retryTimer) {
@@ -139,6 +143,20 @@ export class DurableHistory implements ChatHistoryStore {
      }
      throw error;
    }
+ }
+ /** SQLite is optional: without it the browser copy is the store. Unsaved queue entries are folded into it. */
+ private useLocalOnly() {
+   this.local = true; this.ready = true; this.listed = false; this.queue = []; this.outbox();
+   if (this.retryTimer) { clearTimeout(this.retryTimer); this.retryTimer = undefined; }
+   this.persistLocal();
+ }
+ private persistLocal() {
+   try {
+     const raw = JSON.parse(this.storage.getItem(SESSIONS_KEY) ?? "[]") as StoredSession[];
+     const others = Array.isArray(raw) ? raw.filter(s => (s.host ?? inferHost(s)) !== this.host()) : [];
+     const mine = [...this.records.values()].filter(s => s.host === this.host() && s.messages.some(m => m.kind === "user"));
+     this.storage.setItem(SESSIONS_KEY, JSON.stringify([...others, ...mine])); this.total = mine.length;
+   } catch { this.notify("Browser storage is full or blocked, so this chat could not be saved."); }
  }
  list(): SessionSummary[] {
    if (this.listed) return this.summaries;
@@ -158,6 +176,7 @@ export class DurableHistory implements ChatHistoryStore {
  latestForDocument(documentKey: string) { return this.list().filter(s => s.documentKey === documentKey && s.messageCount > 0).sort((a, b) => b.updatedAt - a.updatedAt)[0] ?? null; }
  latest(maxAgeMs: number) { const s = [...this.records.values()].filter(s => s.host === this.host()).sort((a,b) => b.updatedAt-a.updatedAt)[0]; return s && Date.now()-s.updatedAt<=maxAgeMs ? structuredClone(s) : null; }
  async refresh(more = false) {
+   if (this.local) return;
    const page = await this.api.historyList(more ? this.summaries.length : 0, 40);
    if (!Array.isArray(page.items)) throw new Error("Invalid history response");
    this.summaries = more ? [...this.summaries, ...page.items.filter(s => !this.summaries.some(old => old.id === s.id))] : page.items;
@@ -167,6 +186,7 @@ export class DurableHistory implements ChatHistoryStore {
  }
  loadPage(id: string, offset = 0, limit = 100) { return this.api.historyPage(id, offset, limit); }
  async load(id: string) {
+   if (this.local) return this.get(id);
    const pending = this.queue.filter(p => p.host === this.host() && p.session.id === id).slice(-1)[0];
    if (pending) return structuredClone(pending.session);
    let first;
@@ -195,6 +215,7 @@ export class DurableHistory implements ChatHistoryStore {
    if (this.signatures.get(key) === signature) return;
    this.signatures.set(key, signature);
    this.records.set(key, copy);
+   if (this.local) { this.persistLocal(); return; }
    const last = this.queue.filter(p => p.host === this.host() && p.session.id === copy.id).slice(-1)[0];
    if (last && last !== this.inFlight && !this.sources.has(last.operationId)) { last.session = copy; last.operationId = crypto.randomUUID(); }
    else {
@@ -208,7 +229,7 @@ export class DurableHistory implements ChatHistoryStore {
  async flush(keepalive = false): Promise<void> {
    if (this.retryTimer) { clearTimeout(this.retryTimer); this.retryTimer = undefined; }
    if (this.running) return this.running;
-   if (!this.ready) return;
+   if (!this.ready || this.local) return;
    return this.running = this.drain(keepalive).finally(() => { this.running = undefined; this.inFlight = undefined; });
  }
  private async drain(keepalive: boolean) {
@@ -304,6 +325,7 @@ export class DurableHistory implements ChatHistoryStore {
    } catch { this.notify("Saved history was deleted, but an old browser backup could not be updated. Clear that backup before sharing this profile."); }
  }
  async delete(id: string) {
+   if (this.local) { this.records.delete(`${this.host()}:${id}`); this.signatures.delete(`${this.host()}:${id}`); this.persistLocal(); return; }
    await this.running?.catch(() => {}); const stats = await this.api.historyDelete(id); this.removeLegacy(id);
    for (const item of this.queue) if (item.host === this.host() && item.session.id === id) this.forgetRecovery(item.operationId);
    this.queue = this.queue.filter(p => p.host !== this.host() || p.session.id !== id); this.records.delete(`${this.host()}:${id}`); this.signatures.delete(`${this.host()}:${id}`); this.revisions.delete(id); this.outbox();
@@ -314,6 +336,7 @@ export class DurableHistory implements ChatHistoryStore {
    await this.refresh().catch(() => this.notify("Chat deleted. The list will refresh when the connection is available."));
  }
  async clear() {
+   if (this.local) { for (const [key, s] of this.records) if (s.host === this.host()) this.records.delete(key); this.signatures.clear(); this.persistLocal(); return; }
    await this.running?.catch(() => {}); const stats = await this.api.historyDelete(); this.removeLegacy(); this.generation = stats.generation;
    for (const item of this.queue) if (item.host === this.host()) this.forgetRecovery(item.operationId);
    this.queue = this.queue.filter(p => p.host !== this.host()); for (const [id,s] of this.records) if (s.host === this.host()) this.records.delete(id);
