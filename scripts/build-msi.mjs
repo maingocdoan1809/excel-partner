@@ -20,8 +20,8 @@ if (version.error || version.status !== 0) throw new Error(`The WiX CLI was not 
 if (!version.stdout.trim().startsWith(WIX_VERSION)) throw new Error(`WiX ${version.stdout.trim()} is installed; this installer is built with ${WIX_VERSION} (dotnet tool update --global wix --version ${WIX_VERSION}).`);
 
 const msi = path.join(root, "release", `${info.name}-${info.version}-${arch}.msi`);
-// ICE38/ICE64/ICE91 ask for a registry key path per file in the user profile; the package has thousands of files and one install-folder record.
-const args = ["build", "-arch", arch, "-ext", "WixToolset.Util.wixext", "-sice", "ICE38", "-sice", "ICE64", "-sice", "ICE91",
+// `wix build` does not run ICE validation (that is the separate `wix msi validate`), so the per-user-file ICE38/ICE64/ICE91 warnings never appear here.
+const args = ["build", "-arch", arch, "-ext", "WixToolset.Util.wixext",
   "-d", `Version=${info.msiVersion}`, "-d", `PayloadDir=${path.join(outDir, "payload")}`, "-o", msi, path.join(root, "installer", "msi", "OfficePartner.wxs")];
 const result = spawnSync("wix", args, { stdio: "inherit", shell: process.platform === "win32" });
 if (result.error || result.status !== 0) throw new Error("wix build failed.");
