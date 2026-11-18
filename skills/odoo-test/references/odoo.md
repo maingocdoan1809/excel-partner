@@ -6,7 +6,7 @@ Odoo is not a generic web app. Read this when a step surprises you.
 - The landing page differs by version: `/web` (16-17), `/odoo` (18). `oqa connect` records the real one in knowledge (`kind:login`); do not assume.
 - A database selector (`/web/database/selector`) comes first on multi-database servers: the workspace needs its `db`.
 - Two-factor (`input[name=totp_token]`) stops a script. Ask the user (`oqa connect --headed`) or use a test account without it.
-- The client is a single page: `o.ready()` (done by every helper) waits for `.o_web_client` and the loading indicator; never sleep.
+- The client is a single page: `o.ready()` (done by every helper) waits for `.o_web_client`, the loading indicator and spinners, then until the screen stops changing (~0.4 s), so late-rendering records and widgets are there; never sleep. `oqa try` waits the same way before it prints the page. A slow screen: raise the case's `timeout_s`.
 
 ## Where things are
 | You want | Look for | Helper |

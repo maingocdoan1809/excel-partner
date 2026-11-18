@@ -33,7 +33,7 @@ def unwritten(path: Path):
     return path.read_text(encoding="utf-8").count(".todo(") if path.exists() else 0
 
 
-CHECK_CALLS = ("check", "equals")
+CHECK_CALLS = ("check", "equals", "db")             # s.db confirms the expected rows and frames them: it is a check and a highlight in one
 
 
 def script_sha(path: Path):
@@ -88,7 +88,7 @@ def _is_check(x):
 
 
 def _is_highlight(x):
-    return isinstance(x, ast.Call) and isinstance(x.func, ast.Attribute) and x.func.attr == "hl" and bool(x.args)
+    return isinstance(x, ast.Call) and isinstance(x.func, ast.Attribute) and x.func.attr in ("hl", "db") and bool(x.args)
 
 
 def unchecked_steps(path: Path):
@@ -118,7 +118,12 @@ def header(info, item, sha):
 def render(info, item, sha):
     lines = header(info, item, sha) + ["", ""]
     for step in item["steps"]:
-        lines += [f"def step_{step['n']}(t, s):", "    o = t.o", f"    # {step['n']}. {step['action']}   ->   {step['expected']}",
+        db = step.get("db")
+        lines += [f"def step_{step['n']}(t, s):", "    o = t.o", "    page = t.page", f"    # {step['n']}. {step['action']}   ->   {step['expected']}"]
+        if db:
+            lines += [f"    # database evidence: `oqa try {info['id']} --step {step['n']} --db` runs the analysis' query in pgAdmin and frames the rows (s.db(sql, expect, mark))",
+                      f"    # query: {' '.join(str(db.get('sql', '')).split())}"]
+        lines += [
                   "    # s.hl(\"<selector>\")   name the element this step is about FIRST: a failing step is framed too",
                   "    # s.check(<what the page shows that proves the expected result>)   every step needs at least one check (s.check, s.equals, o.expect_*, assert)",
                   "    s.todo()", "", ""]

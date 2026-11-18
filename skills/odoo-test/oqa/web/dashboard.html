@@ -36,6 +36,12 @@
   .dot { width:8px; height:8px; border-radius:50%; background:var(--planned); }
   .dot.on { background:var(--pass); animation:pulse 1.8s ease-in-out infinite; }
   @keyframes pulse { 50% { opacity:.35; } }
+  @keyframes spin { to { transform:rotate(360deg); } }
+  .spin { display:inline-block; width:11px; height:11px; margin-right:8px; border:2px solid var(--line); border-top-color:var(--c); border-radius:50%; animation:spin .9s linear infinite; vertical-align:-1px; }
+  .step .n .spin { margin:0; }
+  .step.s-RUNNING, .step.s-TRYING { background:linear-gradient(90deg, color-mix(in srgb, var(--c) 9%, transparent), transparent 60%); }
+  .live-note { color:var(--c); font-weight:500; margin-top:6px; }
+  @media (prefers-reduced-motion: reduce) { .spin { animation:pulse 1.8s ease-in-out infinite; border-top-color:var(--c); } }
   @media (prefers-reduced-motion: reduce) { .dot.on { animation:none; } }
 
   .layout { display:grid; grid-template-columns:320px minmax(0,1fr); height:calc(100% - 64px); }
@@ -56,6 +62,7 @@
   .bar i { display:block; min-width:4px; }
   .s-PASS { --c:var(--pass); } .s-FAIL { --c:var(--fail); } .s-PENDING { --c:var(--pending); } .s-BLOCKED, .s-STOPPED, .s-INTERRUPTED { --c:var(--blocked); }
   .s-RUNNING { --c:var(--running); } .s-REPAIRING { --c:var(--repairing); } .s-PLANNED, .s-HELD, .s-NEW, .s-NOT { --c:var(--planned); }
+  .s-EXPLORING, .s-TRYING { --c:var(--repairing); } .s-BUILT { --c:var(--pending); } .s-VERIFIED { --c:var(--pass); }
   .bar i, .sq { background:var(--c); }
   .sq { display:inline-block; width:8px; height:8px; border-radius:50%; margin-right:8px; vertical-align:baseline; }
 
@@ -165,12 +172,14 @@
 const TOKEN = "__TOKEN__";
 const BOOT = __BOOT__;
 const PHASE = { ANALYZE: "Phân tích", CONNECT: "Kết nối", CONFIRM: "Xác nhận", EXECUTE: "Thực thi", REPORT: "Báo cáo", DONE: "Xong" };
-const STATUS = { INTERRUPTED: "Bị bỏ dở", STOPPED: "Đã dừng", PASS: "PASS", FAIL: "FAIL", PENDING: "PENDING", BLOCKED: "BLOCKED", RUNNING: "Đang chạy", REPAIRING: "Đang sửa lỗi", PLANNED: "Chờ chạy", HELD: "Cần xử lý trước", NEW: "Mới", "NOT EXECUTED": "Chưa chạy" };
-const ORDER = ["PASS", "FAIL", "REPAIRING", "RUNNING", "INTERRUPTED", "STOPPED", "PENDING", "BLOCKED", "PLANNED", "HELD", "NEW", "NOT EXECUTED"];
+const STATUS = { INTERRUPTED: "Bị bỏ dở", STOPPED: "Đã dừng", PASS: "PASS", FAIL: "FAIL", PENDING: "PENDING", BLOCKED: "BLOCKED", RUNNING: "Đang chạy", REPAIRING: "Đang sửa lỗi", EXPLORING: "Đang xác thực", PLANNED: "Chờ xác thực", BUILT: "Chờ chạy", VERIFIED: "Đã xác thực", TRYING: "Đang thử", HELD: "Cần xử lý trước", NEW: "Mới", "NOT EXECUTED": "Chưa chạy" };
+const ORDER = ["PASS", "FAIL", "REPAIRING", "RUNNING", "EXPLORING", "BUILT", "INTERRUPTED", "STOPPED", "PENDING", "BLOCKED", "PLANNED", "HELD", "NEW", "NOT EXECUTED"];
 const S = { sig: "", histSig: "", open: {}, draft: {}, hintError: "", sessions: [], ws: "", sel: null, view: null, caseId: null, attempt: null, raw: false, gallery: [], index: 0, error: "", busy: false };
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const cls = s => "s-" + String(s).split(" ")[0];
+const LIVE = ["RUNNING", "REPAIRING", "EXPLORING", "TRYING"];          // the server only sends these while something is really working (see view.py)
+const dot = s => LIVE.includes(s) ? '<i class="spin"></i>' : '<i class="sq"></i>';
 const get = path => fetch(path + (path.includes("?") ? "&" : "?") + "t=" + TOKEN).then(r => r.json());
 const post = (path, body) => fetch(path + "?t=" + TOKEN, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }).then(r => r.json());
 const img = (path) => `/api/image?ws=${encodeURIComponent(S.sel.ws)}&id=${encodeURIComponent(S.sel.id)}&path=${encodeURIComponent(path)}&t=${TOKEN}`;
@@ -230,7 +239,7 @@ function drawMain() {
       <details data-key="strategy" ${isOpen("strategy", true)}><summary>Chiến lược</summary><pre class="strategy">${esc(v.strategy)}</pre></details><div style="margin-top:10px"><button class="btn primary" id="confirm" ${S.busy ? "disabled" : ""}>Xác nhận và bắt đầu test</button></div><div class="err">${esc(S.error)}</div></section>`;
   const rows = v.cases.map(k => `<tr class="case ${cls(k.status)}" tabindex="0" data-id="${esc(k.id)}" aria-selected="${k.id === S.caseId}">
       <td class="mono">${esc(k.id)}</td><td><div class="title">${esc(k.title)}</div></td><td>${esc(k.profile) || '<span class="muted">-</span>'}</td><td>${ticks(k)}</td>
-      <td>${k.attempts.length || '<span class="muted">-</span>'}</td><td><span class="status"><i class="sq"></i>${esc(STATUS[k.status] || k.status)}</span></td></tr>`).join("");
+      <td>${k.attempts.length || '<span class="muted">-</span>'}</td><td><span class="status">${dot(k.status)}${esc(STATUS[k.status] || k.status)}</span></td></tr>`).join("");
   $("main").innerHTML = `
     <div class="head"><h1>${esc(v.file.split(/[\\/]/).pop())}</h1>${v.phase === "EXECUTE" && v.can_stop ? `<button class="btn danger" id="stop" ${S.busy ? "disabled" : ""}>Dừng test</button>` : ""}</div>
     <div class="meta"><span>Workspace <b>${esc(v.workspace)}</b></span><span class="mono">${esc(v.session)}</span><span>Bắt đầu ${esc(v.created)}</span><span>${(v.connect && v.connect.version) ? "Odoo " + esc(v.connect.version) : ""}</span><span>${v.knowledge} mục tri thức</span></div>
@@ -259,7 +268,9 @@ function drawDetail(box) {
   const v = S.view, k = v && v.cases.find(x => x.id === S.caseId);
   if (!k) { box.innerHTML = '<p class="muted">Chọn một case để xem từng bước và ảnh bằng chứng.</p>'; return; }
   const att = k.attempts.find(a => a.n === S.attempt) || k.attempts[k.attempts.length - 1];
-  const steps = att ? att.steps : k.planned.map(p => ({ ...p, status: "PENDING", actual: "", images: [] }));
+  const ex = k.explore || { verified: [], trying: null };
+  const steps = att ? att.steps : k.planned.map(p => ({ ...p, images: [], actual: "",
+    status: ex.trying && ex.trying.step === p.n ? "TRYING" : ex.verified.includes(p.n) ? "VERIFIED" : "PENDING", mode: ex.trying && ex.trying.step === p.n ? ex.trying.mode : "" }));
   S.gallery = steps.flatMap(s => s.images.map(im => ({ ...im, caption: `Bước ${s.n}: ${s.caption}` })));
   const chips = [k.profile && `Profile ${k.profile}`, k.depends_on.length && `Tiếp từ ${k.depends_on.join(", ")}`, k.clarity && `Rõ ràng ${k.clarity}/5`, k.sufficiency && `Đủ dữ kiện ${k.sufficiency}/5`, `dòng ${k.row}`].filter(Boolean)
     .map(t => `<span class="tag">${esc(t)}</span>`).join("");
@@ -267,8 +278,8 @@ function drawDetail(box) {
   let g = -1;
   const list = steps.map(s => {
     const first = s.images[0];
-    const thumb = first ? `<button class="thumb ${s.status === "FAIL" ? "fail" : ""}" data-g="${(g += s.images.length) - s.images.length + 1}" style="background-image:url('${img(first.annotated)}')" aria-label="Phóng to ảnh bước ${s.n}"><span>${s.images.length > 1 ? s.images.length + " ảnh" : "xem"}</span></button>` : `<div class="noimg">${s.status === "PENDING" ? "chưa chạy" : "không có ảnh"}</div>`;
-    return `<div class="step ${cls(s.status)}"><div class="n">${s.n}</div><div><div class="cap">${esc(s.caption)}</div><div class="exp">Mong đợi: ${esc(s.expected)}${s.checks != null && s.status !== "PENDING" ? ` <span class="tag">${s.checks} kiểm tra</span>` : ""}${s.carried ? ' <span class="tag">giữ từ lần trước</span>' : ""}</div>
+    const thumb = first ? `<button class="thumb ${s.status === "FAIL" ? "fail" : ""}" data-g="${(g += s.images.length) - s.images.length + 1}" style="background-image:url('${img(first.annotated)}')" aria-label="Phóng to ảnh bước ${s.n}"><span>${s.images.length > 1 ? s.images.length + " ảnh" : "xem"}</span></button>` : `<div class="noimg">${{ PENDING: att ? "chưa chạy" : "chờ xác thực", RUNNING: "đang chạy…", TRYING: "đang thử…", VERIFIED: "đã thử trên trang thật" }[s.status] || "không có ảnh"}</div>`;
+    return `<div class="step ${cls(s.status)}"><div class="n">${LIVE.includes(s.status) ? dot(s.status) : s.n}</div><div><div class="cap">${esc(s.caption)}</div>${s.status === "RUNNING" ? `<div class="live-note">Đang chạy bước này…</div>` : s.status === "TRYING" ? `<div class="live-note">${s.mode === "replay" ? "Đang đưa trang tới bước này…" : "Đang thử trên trang thật…"}</div>` : ""}<div class="exp">Mong đợi: ${esc(s.expected)}${s.checks != null && s.status !== "PENDING" ? ` <span class="tag">${s.checks} kiểm tra</span>` : ""}${s.carried ? ' <span class="tag">giữ từ lần trước</span>' : ""}</div>
       ${s.actual && s.status !== "PENDING" ? `<div class="act">${s.status === "PASS" ? "Thực tế: " : ""}${esc(s.actual)}</div>` : ""}</div>${thumb}</div>`;
   }).join("");
   const base = (k.edge_cases.length || k.edge_none || k.data_needs.length || k.questions.length || k.timeout_s) ? `<ul>
@@ -280,7 +291,7 @@ function drawDetail(box) {
       ${r.reanalysis ? `<dt>Hiểu lại case</dt><dd>${esc(r.reanalysis)}</dd>` : ""}${r.timeout_s ? `<dt>Thời gian chờ</dt><dd>${r.timeout_s} giây</dd>` : ""}${r.unchanged_reason ? `<dt>Script giữ nguyên</dt><dd>${esc(r.unchanged_reason)}</dd>` : ""}</dl></div>`).join("")}</div>` : "";
   const analysis = (base || notes) ? `<details data-key="analysis-${esc(k.id)}" ${isOpen("analysis-" + k.id, k.repairs.length > 0)}><summary>Phân tích của AI${k.repairs.length ? ` · đã sửa ${k.repairs.length} lần` : ""}</summary>${base}${notes}</details>` : "";
   box.innerHTML = `<h2><span class="mono">${esc(k.id)}</span> ${esc(k.title)}</h2>
-    <div><span class="status ${cls(k.status)}"><i class="sq"></i>${esc(STATUS[k.status] || k.status)}</span>${k.reason ? ` <span class="muted">· ${esc(k.reason)}</span>` : ""}</div>
+    <div><span class="status ${cls(k.status)}">${dot(k.status)}${esc(STATUS[k.status] || k.status)}</span>${k.reason ? ` <span class="muted">· ${esc(k.reason)}</span>` : ""}</div>
     <div class="chips">${chips}</div>${hintBox(k)}${tabs}${list}${analysis}`;
 }
 
@@ -336,7 +347,7 @@ async function refreshView() {
   const changed = sig !== S.sig;
   S.view = v;
   if (!v.cases.some(c => c.id === S.caseId)) {
-    const pick = v.cases.find(c => ["FAIL", "REPAIRING", "RUNNING"].includes(c.status)) || v.cases[0];
+    const pick = v.cases.find(c => ["FAIL", "REPAIRING", "RUNNING", "EXPLORING"].includes(c.status)) || v.cases[0];
     S.caseId = pick ? pick.id : null; S.attempt = null;
   }
   if (changed && !busyReading()) { S.sig = sig; renderMain(); }        // redraw only when the data changed, and not while they are reading or typing

@@ -17,6 +17,7 @@ def launch(headless=True):
             contexts.append(context)
             return context, context.new_page()
 
+        new_page.playwright = pw                         # the running Playwright, for what else must attach to a window (pgAdmin)
         try:
             yield new_page
         finally:

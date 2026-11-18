@@ -14,6 +14,7 @@ from pathlib import Path
 from . import connect, diagnose, evidence, events, knowledge, memory, probe, recipe
 from .browser import launch
 from .odoo_ui import Odoo
+from .pgadmin import PgAdmin, PgAdminError
 from .scaffold import HEADER, STEP_FUNCTION, case_sha, script_path, script_sha, step_hashes, unchecked_steps, unhighlighted_steps, unwritten
 from .state import MAX_REPAIRS, GateError, Session
 from .store import SchemaError, read_json
@@ -47,7 +48,7 @@ class Step:
     """`with t.step(n) as s:` — `s.hl(...)` names what the picture is about; leaving the block photographs it and records PASS or FAIL."""
 
     def __init__(self, t, n):
-        self.t, self.n, self.targets, self.note = t, n, [], ""
+        self.t, self.n, self.targets, self.note, self._db = t, n, [], "", None
         spec = t.spec[n - 1]
         self.caption, self.expected = spec["action"], spec["expected"]
 
@@ -57,6 +58,22 @@ class Step:
 
     def actual(self, text):
         self.note = text
+
+    def db(self, sql, expect, mark=None):
+        """Confirm data in the DATABASE through pgAdmin (the user's open window): run `sql` (one read-only query that returns the rows to confirm), check that every row of
+        `expect` ([{column: value}]) is in the result, and make the picture of this step pgAdmin's Query Tool with those rows framed (only the columns in `mark` when given)."""
+        try:
+            pg = self.t.runner.pg()
+            result = pg.query(sql, expect, mark)
+            folder = self.t.evidence_dir
+            folder.mkdir(parents=True, exist_ok=True)
+            raw = pg.shoot(folder / f"s{self.n}_raw.png")
+        except PgAdminError as error:
+            raise StepFailed(f"pgAdmin: {error}") from error
+        self._db = {"raw": raw, "boxes": result["boxes"]}
+        self.note = f"pgAdmin shows {len(expect)} expected row(s) ({result['total']} row(s) in the result)"
+        self.check(not result["missing"], f"pgAdmin does not show {result['missing']}; its columns are {result['columns']}, its first rows {result['rows'][:5]}")
+        return result
 
     def todo(self):
         raise StepFailed(f"step {self.n} is not written yet: fill in the script")
@@ -112,6 +129,12 @@ class Step:
         folder = t.evidence_dir
         folder.mkdir(parents=True, exist_ok=True)
         raw, annotated = folder / f"s{self.n}_raw.png", folder / f"s{self.n}_annotated.png"
+        if self._db:                                                       # the picture is pgAdmin's, taken by s.db with the rows already located in it
+            from PIL import Image
+            width, height = Image.open(raw).size
+            boxes = [b for b in (_clip({"x": x, "y": y, "width": w, "height": h}, width, height) for x, y, w, h in self._db["boxes"]) if b] or ([(0, 0, width, height)] if status == "FAIL" else [])
+            evidence.annotate(raw, boxes, f"Step {self.n}/{len(t.spec)} {status}: {self.caption}", annotated, ok=status == "PASS")
+            return {"raw": raw, "annotated": annotated, "boxed": bool(boxes)}
         boxes = self._boxes(failed=status == "FAIL")
         t.page.screenshot(path=str(raw), animations="disabled")
         evidence.annotate(raw, boxes, f"Step {self.n}/{len(t.spec)} {status}: {self.caption}", annotated, ok=status == "PASS")
@@ -247,9 +270,20 @@ class Runner:
         self.session, self.ws, self.store, self.headless = session, ws, store, headless
         self.analysis = {c["id"]: c for c in read_json(session.dir / "analysis.json")["cases"]}
         self.pages, self.last, self.last_profile = {}, None, None
+        self._pg, self.playwright = None, None
         self.memory = {}
 
+    def pg(self):
+        """pgAdmin, attached to on first use and kept: the window the user opened (see pgadmin.py). Raises PgAdminError saying what to do when it is not there."""
+        if self._pg is None:
+            settings = self.ws.get("pgadmin") or {}
+            if not (settings.get("server") and settings.get("database")):
+                raise PgAdminError("the workspace has no pgAdmin settings (server group / server / database)")
+            self._pg = PgAdmin(settings, self.playwright)
+        return self._pg
+
     def _page(self, new_page, case_analysis, keep_screen=False):
+        self.playwright = getattr(new_page, "playwright", None)
         profile = next(p for p in self.ws["profiles"] if p["name"] == case_analysis["profile"])
         if profile["name"] not in self.pages:
             self.pages[profile["name"]] = new_page(connect.storage_path(self.session, profile["name"]))[1]
@@ -286,6 +320,7 @@ class Runner:
         """What the page shows now, in few lines: where it is, what it says, and the controls (all of them when filtered, the first few otherwise)."""
         page = ex["t"].page
         try:
+            ex["t"].o.ready()                       # a page still loading would show missing controls: look only once it has settled
             diag = diagnose.read(page)
             return {"url": page.url, "title": page.title(), "toasts": ex["t"].o.toasts()[:3], "page_says": diag["summary"],
                     "controls": page.evaluate(probe.JS, [needle, probe.SHOWN if needle else 25])}
@@ -303,6 +338,8 @@ class Runner:
         t = T(self, case, 0, item["steps"], profile["name"], page, self._timeout(case, item), data={})
         ex = self.exploring = {"case": case, "t": t, "envs": {}, "step": 0}
         done = recipe.steps_of(recipe.load(self.session, case))
+        if to > 1:
+            events.append(self.session.dir, "try_started", case=case, step=to, mode="replay")      # taking the page to step `to` by replaying the verified pieces
         for n in range(1, to):
             if n not in done:
                 raise GateError(f"step {n} has nothing verified yet, so the page cannot be taken to step {to}: try step {n} first (oqa try {case} --step {n} --code ...)")
@@ -334,6 +371,7 @@ class Runner:
             raise GateError(f"The page is already past step {step}: go back with `oqa explore {case} --to {step}` (it replays what is verified).")
         t, started = ex["t"], time.monotonic()
         t.checks = 0
+        events.append(self.session.dir, "try_started", case=case, step=step)          # the dashboard shows "trying step N" only between this and the explore event below
         try:
             self._exec(self._env(ex, step), code)
         except Exception as error:

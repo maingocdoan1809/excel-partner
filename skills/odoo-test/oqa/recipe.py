@@ -48,7 +48,7 @@ def build(session: Session, case, item, title, header_lines):
     out = []
     for step in item["steps"]:
         n = step["n"]
-        out += [f"def step_{n}(t, s):", "    o = t.o", f"    # {n}. {step['action']}   ->   {step['expected']}"]
+        out += [f"def step_{n}(t, s):", "    o = t.o", "    page = t.page", f"    # {n}. {step['action']}   ->   {step['expected']}"]
         if n in data:
             for piece in data[n]:
                 out += ["    " + line if line.strip() else "" for line in piece.splitlines()]

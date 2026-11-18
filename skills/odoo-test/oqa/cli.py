@@ -227,6 +227,12 @@ def cmd_try(args):
     session.require("EXECUTE")
     _case_in_strategy(session, args.case)
     code = args.code
+    if args.db:                                  # the query and the rows come from the analysis, verbatim: nothing to get wrong by retyping
+        item = next((c for c in read_json(session.dir / "analysis.json")["cases"] if c["id"] == args.case), {})
+        db = next((x.get("db") for x in item.get("steps") or [] if x.get("n") == args.step), None)
+        if not db:
+            raise GateError(f"step {args.step} of {args.case} has no `db` in the analysis: nothing to run in pgAdmin.")
+        code = f"s.db({db['sql']!r}, expect={db['expect']!r}, mark={db.get('mark')!r})"
     if args.file:
         code = sys.stdin.read() if args.file == "-" else Path(args.file).read_text(encoding="utf-8")
     if not args.undo and not (code or "").strip():
@@ -259,6 +265,7 @@ def cmd_build(args):
     steps = recipe.steps_of(recipe.load(session, args.case))
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(recipe.seal(recipe.build(session, args.case, item, info["title"], scaffold.header(info, item, scaffold.case_sha(item)))), encoding="utf-8")
+    events.append(session.dir, "built", case=args.case, steps=len(steps))
     missing = [s["n"] for s in item["steps"] if s["n"] not in steps]
     weak = scaffold.unchecked_steps(target) + [n for n in scaffold.unhighlighted_steps(target) if n not in scaffold.unchecked_steps(target)]
     lines = [f"Built {target.name}: {len(steps)} of {len(item['steps'])} step(s) from code that ran on the real page."]
@@ -290,6 +297,45 @@ def cmd_finish(args):
     session = Session.open(args.ws, args.session)
     session.declare(args.case, args.status, args.reason)
     return {"case": args.case, "status": args.status}, f"{args.case} recorded as {args.status}. Next: " + session.summary()["next"]
+
+
+def _pgadmin_settings(args):
+    try:
+        ws = workspace.load(paths.resolve_workspace(args.ws))
+    except Exception:
+        ws = {}
+    cfg = dict(ws.get("pgadmin") or {})
+    cfg.update({k: v for k, v in (("group", args.group), ("server", args.server), ("database", args.database)) if v})
+    return cfg
+
+
+def cmd_dbcheck(args):
+    """Run one SELECT in the pgAdmin the user has open and photograph the Query Tool (with `--expect` rows framed): the same thing `s.db` does in a case step, to try it first."""
+    from .pgadmin import PgAdmin, PgAdminError, shortcut
+    if args.make_shortcut:
+        try:
+            return shortcut()
+        except PgAdminError as error:
+            raise GateError(f"pgAdmin: {error}")
+    out = Path(args.out).resolve()
+    out.parent.mkdir(parents=True, exist_ok=True)
+    expect = json.loads(args.expect) if args.expect else None
+    try:
+        from playwright.sync_api import sync_playwright
+        with sync_playwright() as pw:
+            pg = PgAdmin(_pgadmin_settings(args), pw)
+            try:
+                result = pg.query(args.sql, expect, args.mark.split(",") if args.mark else None)
+                pg.shoot(out)
+            finally:
+                pg.close()
+    except PgAdminError as error:
+        raise GateError(f"pgAdmin: {error}")
+    head = f"{result['total']} row(s) in {result['seconds']}s, columns: {', '.join(result['columns'])}"
+    lines = [head] + ["  " + " | ".join(r) for r in result["rows"][: args.show]]
+    if expect:
+        lines.append(f"expected rows framed: {len(expect) - len(result['missing'])} of {len(expect)}" + (f"; NOT on screen: {result['missing']}" if result["missing"] else ""))
+    return {**result, "picture": str(out)}, "\n".join(lines + [f"picture: {out}"])
 
 
 def cmd_probe(args):
@@ -545,6 +591,7 @@ def build_parser():
     p.add_argument("--step", type=int, required=True)
     p.add_argument("--code", help="python for the step: t, o (helpers), s (s.hl, s.check, s.equals), page, t.data are in scope")
     p.add_argument("--file", help="read the code from a file (- for standard input)")
+    p.add_argument("--db", action="store_true", help="the step's database evidence: run the query and expected rows of its `db` in the analysis, in the open pgAdmin")
     p.add_argument("--filter", help="list only the controls whose description contains this")
     p.add_argument("--reset", action="store_true", help="forget the verified pieces of this step and start it over with this code")
     p.add_argument("--undo", action="store_true", help="drop the last verified piece of this step")
@@ -567,6 +614,16 @@ def build_parser():
     p.add_argument("--reanalysis", help="how you now read the case; required when the same failure came twice")
     p.add_argument("--timeout", type=int, help="seconds one wait may last on this case's pages from now on (the page is slow, not wrong)")
     p.add_argument("--unchanged", help="when the script is unchanged: what else you changed (data created through the UI, a setting)")
+    p = add("dbcheck", cmd_dbcheck, "run one SELECT in the pgAdmin you have open and photograph the result (settings: the workspace's pgadmin block; flags override)")
+    p.add_argument("--sql", default="select 1 as ok")
+    p.add_argument("--group", help="server group in pgAdmin's tree, for example Servers")
+    p.add_argument("--server")
+    p.add_argument("--database")
+    p.add_argument("--expect", help='rows to confirm and frame, as JSON: [{"id": "7", "name": "Azure"}]')
+    p.add_argument("--mark", help="comma-separated columns to frame (default: the columns of --expect)")
+    p.add_argument("--out", default="dbcheck.png")
+    p.add_argument("--show", type=int, default=5, help="rows to print")
+    p.add_argument("--make-shortcut", action="store_true", help="put the shortcut 'pgAdmin (oqa)' on the Desktop: pgAdmin4.exe with the DevTools port oqa attaches to")
     p = add("probe", cmd_probe, "list what can be clicked and filled on a page (to find a selector)")
     p.add_argument("--case", help="the case this probe is for (shows in its repair log); with --failed, the case whose failed step to read")
     p.add_argument("--failed", action="store_true", help="read the page where the latest failed step stopped (saved when it failed; no browser is opened)")

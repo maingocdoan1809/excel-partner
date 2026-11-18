@@ -7,6 +7,12 @@ import time
 from . import diagnose
 
 TIMEOUT = 8000
+QUIET_MS = 400
+BUSY = ".o_loading_indicator:not(.d-none), .o_blockUI, .o_loading:not(.d-none), .fa-spin, .o_view_loading, .placeholder-glow"
+BUSY_FREE = "() => ![...document.querySelectorAll(%r)].some(e => { const b = e.getBoundingClientRect(); return b.width > 0 && b.height > 0; })" % BUSY
+SIGNATURE = """() => { const root = document.querySelector('.o_action_manager') || document.body;
+  const busy = [...document.querySelectorAll(%r)].filter(e => { const b = e.getBoundingClientRect(); return b.width > 0 && b.height > 0; }).length;
+  return [root.querySelectorAll('button, input, select, textarea, .o_field_widget, .o_data_row').length, root.innerText.length, busy]; }""" % BUSY
 
 
 class Odoo:
@@ -18,15 +24,34 @@ class Odoo:
 
     # --- waiting and moving around -----------------------------------------------------
     def ready(self):
-        """The web client is up and not busy."""
+        """The web client is up, not busy, and what it shows has stopped changing (records loaded, widgets rendered). Used by every helper and by `oqa try`,
+        so exploring and running agree on when a page is "done". It never raises on a page that keeps moving: it returns after at most the case's timeout."""
         p = self.page
         p.wait_for_selector(".o_web_client", state="visible")
-        p.wait_for_function("() => !document.querySelector('.o_loading_indicator:not(.d-none), .o_blockUI, .o_loading:not(.d-none)')")
+        p.wait_for_function(BUSY_FREE)
         try:
             p.wait_for_load_state("networkidle", timeout=3000)       # the menus and the first view arrive after the shell; long polling may keep it from ever idling
         except Exception:
             pass
+        self._quiet()
         return self
+
+    def _quiet(self):
+        """Wait until the screen's shape (controls, text length, spinners) is the same for QUIET_MS in a row, or the case's timeout passes."""
+        p, deadline = self.page, time.monotonic() + self.timeout / 1000
+        last, since = None, time.monotonic()
+        while time.monotonic() < deadline:
+            try:
+                now = p.evaluate(SIGNATURE)
+            except Exception:                                        # the page navigated under us: look again
+                last = None
+                p.wait_for_timeout(100)
+                continue
+            if now != last:
+                last, since = now, time.monotonic()
+            elif now[2] == 0 and (time.monotonic() - since) * 1000 >= QUIET_MS:
+                return
+            p.wait_for_timeout(100)
 
     def goto(self, path):
         self.page.goto(path if path.startswith("http") else self.base + path)

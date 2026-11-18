@@ -1,7 +1,10 @@
 """`oqa dashboard`: pick a session from the history and watch its cases and steps, with the picture of every step. Read-only, except the two things only
 the user does: approve the strategy and answer the assistant's question."""
 import json
+import re
+import unicodedata
 from pathlib import Path
+from urllib.parse import quote
 
 from . import paths, report, view, workspace
 from .localserver import LocalApp, font_faces
@@ -10,6 +13,15 @@ from .store import SchemaError
 
 PAGE = Path(__file__).with_name("web") / "dashboard.html"
 
+
+def _attachment(name):
+    """Content-Disposition for a download. A name with accents is sent twice: an ASCII one (the extension is kept) for old clients, and the real one as RFC 5987 UTF-8,
+    so a browser never has to guess the bytes of a header and drop the `.xlsx` with them."""
+    ascii_name = unicodedata.normalize("NFKD", name.replace("đ", "d").replace("Đ", "D")).encode("ascii", "ignore").decode("ascii")
+    ascii_name = re.sub(r"[^\w.-]+", "_", ascii_name) or "file"
+    if not ascii_name.lower().endswith(Path(name).suffix.lower()):
+        ascii_name += Path(name).suffix
+    return f"attachment; filename=\"{ascii_name}\"; filename*=UTF-8''{quote(name)}"
 
 class Dashboard(LocalApp):
     def __init__(self, select=None, timeout=4 * 3600):
@@ -42,7 +54,7 @@ class Dashboard(LocalApp):
         if root not in target.parents or target.suffix.lower() not in (".xlsx", ".md") or not target.is_file():
             return 404, {"error": "no such file"}
         kind = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" if target.suffix.lower() == ".xlsx" else "text/markdown"
-        return 200, target.read_bytes(), kind, {"Content-Disposition": f'attachment; filename="{target.name}"'}
+        return 200, target.read_bytes(), kind, {"Content-Disposition": _attachment(target.name)}
 
     def handle(self, method, path, query, body):
         try:

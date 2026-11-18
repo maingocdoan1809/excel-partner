@@ -15,6 +15,8 @@ Kinds and their required fields (every event also has `ts` and `kind`):
   attempt_finished case, attempt, status PASS|FAIL, reason [failed_step, script_sha]     one run of a case; the case may be repaired and run again
   repair           case, attempt, cause, evidence, change [reanalysis, probed, script_sha, timeout_s, unchanged_reason]
                    the assistant's note after a failed run: what it found, how it knows, what it changed, how it now reads the case. A rerun needs one.
+  try_started      case, step [mode]                                           the assistant is running code for a step on the real page RIGHT NOW (closed by the `explore` event that follows)
+  built            case, steps                                                 the script was built from the verified steps: the case waits to be run
   probe            url, count [case, filter]                                  the assistant looked at the real page (oqa probe)
   explore          case, step, ok [code, url, error]                           the assistant tried code for a step on the real page (oqa try)
   case_finished    case, status, attempts [reason]                           the case's final result
@@ -41,6 +43,8 @@ KINDS = {
     "step": ("case", "attempt", "n", "status", "caption", "expected", "actual", "images"),
     "attempt_finished": ("case", "attempt", "status", "reason"),
     "repair": ("case", "attempt", "cause", "evidence", "change"),
+    "try_started": ("case", "step"),
+    "built": ("case", "steps"),
     "probe": ("url", "count"),
     "explore": ("case", "step", "ok"),
     "case_finished": ("case", "status", "attempts"),

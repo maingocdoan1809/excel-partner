@@ -10,7 +10,11 @@ analysis.json = {schema_version, cases: [ {
     edge_cases     [text]                                what can differ between environments; or `edge_cases_none_reason`
     depends_on     [case id]                             cases whose end state this one starts from
     reuse          text                                  what it takes over from them (optional)
-    steps          [{n, action, expected}]               the strategy for the case, not the one-line description in the workbook
+    steps          [{n, action, expected [, db]}]        the strategy for the case, not the one-line description in the workbook
+    db_evidence    {needed: bool, reason}                only when the workspace has a pgAdmin (workspace.json "pgadmin"): does the case need a picture of the data in the
+                                                         database? If so, at least one step carries `db` = {sql, expect: [{column: value}], mark: [column] (optional), why}:
+                                                         ONE read-only query that returns the rows to confirm FIRST, and the values they must show. That step's picture is
+                                                         pgAdmin with those rows framed.
     timeout_s      int 5-120 (optional)                  how long one wait may last on this case's pages; default 8. A slow screen, a heavy report
     questions / reason                                   needs_user: what to ask; blocked: why
 } ]}
@@ -20,6 +24,7 @@ import hashlib
 import json
 
 from . import SCHEMA_VERSION, memory
+from .pgadmin import PgAdminError, check_expect, check_select
 from .store import SchemaError
 
 VERDICTS = ("ready", "needs_user", "blocked")
@@ -41,11 +46,43 @@ def template(cases_doc, workspace):
             "steps": [{"n": i, "action": line, "expected": ""} for i, line in enumerate(case["steps"], 1)],
             "_title": case["title"], "_expected": case["expected"],
         })
+        if (workspace.get("pgadmin") or {}).get("server"):          # the question must be answered for every case: "no" is an answer, silence is not
+            items[-1]["db_evidence"] = {"needed": None, "reason": ""}
     return {"schema_version": SCHEMA_VERSION, "cases": items}
 
 
 def _score(value):
     return isinstance(value, int) and not isinstance(value, bool) and 1 <= value <= 5
+
+
+def _db_problems(at, c, workspace):
+    """Steps that read the database through pgAdmin: only where pgAdmin is configured, and each one a single read-only query with the rows it must show."""
+    pg = workspace.get("pgadmin") or {}
+    configured = bool(pg.get("server") and pg.get("database"))
+    steps = [s for s in c.get("steps") or [] if isinstance(s, dict) and s.get("db") is not None]
+    out = []
+    if steps and not configured:
+        return [f"{at}: a step reads the database through pgAdmin, but the workspace has no pgAdmin settings (server group / server / database): ask the user, or take the step out"]
+    if not configured:
+        return out
+    evidence = c.get("db_evidence")
+    if not isinstance(evidence, dict) or not isinstance(evidence.get("needed"), bool) or not str(evidence.get("reason", "")).strip():
+        out.append(f"{at}: db_evidence must say {{needed: true|false, reason}}: does this case need a picture of data in the database?")
+    elif evidence["needed"] and not steps:
+        out.append(f"{at}: db_evidence.needed is true, so a step needs `db` ({{sql, expect}}): the query and the rows to confirm")
+    elif not evidence["needed"] and steps:
+        out.append(f"{at}: a step has `db` but db_evidence.needed is false")
+    for s in steps:
+        db = s["db"]
+        try:
+            check_select(db.get("sql") if isinstance(db, dict) else "")
+            check_expect(db.get("expect") if isinstance(db, dict) else None)
+        except PgAdminError as error:
+            out.append(f"{at} step {s.get('n')}: db: {error}")
+            continue
+        if db.get("mark") is not None and not (isinstance(db["mark"], list) and all(isinstance(m, str) for m in db["mark"])):
+            out.append(f"{at} step {s.get('n')}: db.mark is a list of column names")
+    return out
 
 
 def validate(analysis, cases_doc, workspace):
@@ -89,6 +126,7 @@ def validate(analysis, cases_doc, workspace):
             for position, step in enumerate(steps, 1):
                 if not isinstance(step, dict) or step.get("n") != position or not str(step.get("action", "")).strip() or not str(step.get("expected", "")).strip():
                     problems.append(f"{at}: step {position} needs n={position}, an action and an expected result")
+        problems += _db_problems(at, c, workspace)
         if "timeout_s" in c and not (isinstance(c["timeout_s"], int) and not isinstance(c["timeout_s"], bool) and MIN_TIMEOUT <= c["timeout_s"] <= MAX_TIMEOUT):
             problems.append(f"{at}: timeout_s must be a whole number of seconds from {MIN_TIMEOUT} to {MAX_TIMEOUT}")
         for dep in c.get("depends_on") or []:
