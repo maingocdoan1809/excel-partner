@@ -29,6 +29,7 @@
   .mono { font-family:var(--mono); font-size:13px; white-space:nowrap; }
   .muted { color:var(--muted); }
   h1, h2, h3 { color:var(--ink); }
+  [hidden] { display:none !important; }
 
   .top { height:64px; display:flex; align-items:center; gap:14px; padding:0 32px; background:var(--bg); border-bottom:1px solid var(--line); }
   .top b { font:400 22px/1 var(--display); letter-spacing:-.3px; color:var(--ink); }
@@ -131,6 +132,9 @@
   .tabs { display:flex; gap:0; margin:6px 0 14px; border-bottom:1px solid var(--line); }
   .tabs button { background:none; border:0; border-bottom:2px solid transparent; padding:10px 16px; cursor:pointer; color:var(--muted); font-weight:500; }
   .tabs button[aria-selected=true] { color:var(--ink); border-color:var(--accent); }
+  .workspace-tabs { margin:0; border:0; }
+  .workspace-tabs button { white-space:nowrap; }
+  /*__SITE_MAP_CSS__*/
   .step { display:grid; grid-template-columns:28px minmax(0,1fr) 148px; gap:14px; padding:18px 0; border-bottom:1px solid var(--line-soft); }
   .step:last-child { border-bottom:0; }
   .step .n { color:var(--c); font-weight:500; font-family:var(--mono); }
@@ -154,13 +158,17 @@
 </style>
 </head>
 <body>
-<div class="top"><b>Odoo Test</b><span class="muted">tiến độ</span><div class="live" aria-live="polite"><span class="dot" id="dot"></span><span id="liveText">đang tải…</span></div></div>
+<div class="top"><b>Odoo Test</b><nav class="tabs workspace-tabs" role="tablist" aria-label="Workspace">
+  <button id="tab-progress" role="tab" data-workspace-tab="progress" aria-selected="true" aria-controls="main">Tiến độ test</button>
+  <button id="tab-site-map" role="tab" data-workspace-tab="site_map" aria-selected="false" aria-controls="siteMapMain" tabindex="-1">site_map</button>
+</nav><div class="live" aria-live="polite"><span class="dot" id="dot"></span><span id="liveText">đang tải…</span></div></div>
 <div class="layout">
   <aside class="rail">
     <header><h2>Lịch sử test</h2><select id="wsFilter" aria-label="Lọc theo workspace"></select></header>
     <div id="history"></div>
   </aside>
-  <main id="main"></main>
+  <main id="main" role="tabpanel" aria-labelledby="tab-progress"></main>
+  <main id="siteMapMain" role="tabpanel" aria-labelledby="tab-site-map" hidden></main>
 </div>
 <div class="lightbox" id="lb" role="dialog" aria-modal="true" aria-label="Ảnh bằng chứng">
   <div class="lb-bar"><span class="grow" id="lbTitle"></span>
@@ -175,6 +183,8 @@ const PHASE = { ANALYZE: "Phân tích", CONNECT: "Kết nối", CONFIRM: "Xác n
 const STATUS = { INTERRUPTED: "Bị bỏ dở", STOPPED: "Đã dừng", PASS: "PASS", FAIL: "FAIL", PENDING: "PENDING", BLOCKED: "BLOCKED", RUNNING: "Đang chạy", REPAIRING: "Đang sửa lỗi", EXPLORING: "Đang xác thực", PLANNED: "Chờ xác thực", BUILT: "Chờ chạy", VERIFIED: "Đã xác thực", TRYING: "Đang thử", HELD: "Cần xử lý trước", NEW: "Mới", "NOT EXECUTED": "Chưa chạy" };
 const ORDER = ["PASS", "FAIL", "REPAIRING", "RUNNING", "EXPLORING", "BUILT", "INTERRUPTED", "STOPPED", "PENDING", "BLOCKED", "PLANNED", "HELD", "NEW", "NOT EXECUTED"];
 const S = { sig: "", histSig: "", open: {}, draft: {}, hintError: "", sessions: [], ws: "", sel: null, view: null, caseId: null, attempt: null, raw: false, gallery: [], index: 0, error: "", busy: false };
+S.workspaces = []; S.tab = "progress";
+const M = { ws: "", lang: "", q: "", kind: "", key: "", mode: "buttons", view: "", match: "", required: false, data: null, results: null, screen: null, loading: false, error: "", request: 0, detailRequest: 0 };
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const cls = s => "s-" + String(s).split(" ")[0];
@@ -203,7 +213,7 @@ const isOpen = (key, fallback) => ((key in S.open ? S.open[key] : fallback) ? "o
 function renderHistory() { keepScroll(drawHistory); }
 
 function drawHistory() {
-  const names = [...new Set(S.sessions.map(s => s.workspace))];
+  const names = [...new Set([...S.workspaces.map(w => w.name), ...S.sessions.map(s => s.workspace)])];
   $("wsFilter").innerHTML = '<option value="">Tất cả workspace</option>' + names.map(n => `<option ${n === S.ws ? "selected" : ""}>${esc(n)}</option>`).join("");
   const list = S.sessions.filter(s => !S.ws || s.workspace === S.ws);
   $("history").innerHTML = list.map(s => {
@@ -328,11 +338,36 @@ function drawLightbox() {
   $("lbRaw").textContent = S.raw ? "Ảnh khoanh đỏ" : "Ảnh gốc";
 }
 
+const mapWorkspace = () => S.ws || (S.sel && S.sel.ws) || (S.workspaces.length === 1 ? S.workspaces[0].name : "");
+const mapGet = params => get("/api/sitemap?" + new URLSearchParams({ ws: M.ws, lang: M.lang, ...params })).then(data => {
+  if (data.error) throw new Error(data.error);
+  return data;
+});
+
+function workspaceTab(tab) {
+  S.tab = tab;
+  document.body.classList.toggle("site-map-active", tab === "site_map");
+  $("main").hidden = tab !== "progress";
+  $("siteMapMain").hidden = tab !== "site_map";
+  document.querySelectorAll("[data-workspace-tab]").forEach(button => {
+    const selected = button.dataset.workspaceTab === tab;
+    button.setAttribute("aria-selected", selected); button.tabIndex = selected ? 0 : -1;
+  });
+  const url = new URL(location.href);
+  if (tab === "site_map") url.searchParams.set("tab", "site_map"); else url.searchParams.delete("tab");
+  if (tab === "site_map" && mapWorkspace()) url.searchParams.set("workspace", mapWorkspace()); else url.searchParams.delete("workspace");
+  history.replaceState(null, "", url);
+  if (tab === "site_map") loadMap();
+}
+
+/*__SITE_MAP__*/
+
 async function refreshList() {
-  const list = (await get("/api/sessions")).sessions;
-  const sig = JSON.stringify(list);
+  const [sessions, workspaces] = await Promise.all([get("/api/sessions"), get("/api/workspaces")]);
+  const list = sessions.sessions;
+  const sig = JSON.stringify([list, workspaces.workspaces]);
   if (sig === S.histSig) return;                       // nothing new: leave the list alone
-  S.histSig = sig; S.sessions = list; renderHistory();
+  S.histSig = sig; S.sessions = list; S.workspaces = workspaces.workspaces || []; renderHistory();
 }
 /** True while the person is reading something they selected or typing: the page must not move under them. */
 function busyReading() {
@@ -355,11 +390,33 @@ async function refreshView() {
   $("dot").className = "dot" + (live ? " on" : "");
   $("liveText").textContent = live ? `Trực tiếp · cập nhật ${new Date().toLocaleTimeString("vi-VN")}` : `Đã xong · ${v.updated}`;
 }
-function select(ws, id) { S.sel = { ws, id }; S.view = null; S.sig = ""; S.caseId = null; S.attempt = null; history.replaceState(null, "", `#${encodeURIComponent(ws)}/${encodeURIComponent(id)}`); renderHistory(); refreshView(); }
+function select(ws, id) { S.sel = { ws, id }; S.view = null; S.sig = ""; S.caseId = null; S.attempt = null; history.replaceState(null, "", `#${encodeURIComponent(ws)}/${encodeURIComponent(id)}`); renderHistory(); refreshView(); if (S.tab === "site_map") loadMap(); }
 
 document.addEventListener("click", async e => {
-  const t = e.target.closest("button, tr.case");
+  const t = e.target.closest("button, tr.case, [data-map-screen], [data-map-expand], [data-map-home], [data-map-focus]");
   if (!t) return;
+  if (t.dataset.workspaceTab) return workspaceTab(t.dataset.workspaceTab);
+  if (t.id === "mapReload") return loadMap();
+  if (t.dataset.mapHome) return resetGraph();
+  if (t.dataset.mapFocus) { G.focus = t.dataset.mapFocus; G.expanded.add(G.focus); G.inspector = false; G.fit = true; return renderMap(); }
+  if (t.dataset.mapExpand) {
+    e.preventDefault();
+    const key = t.dataset.mapExpand;
+    if (!G.focus) { G.focus = key; G.expanded.add(key); }
+    else if (G.expanded.has(key)) G.expanded.delete(key); else G.expanded.add(key);
+    G.fit = true; G.searchOpen = false; return renderMap();
+  }
+  if (t.id === "mapZoomIn") return graphZoom(1.25);
+  if (t.id === "mapZoomOut") return graphZoom(1/1.25);
+  if (t.id === "mapFit") return graphFit();
+  if (t.id === "mapCollapse") { G.expanded.clear(); G.expanded.add(G.focus); G.fit = true; return renderMap(); }
+  if (t.id === "mapCloseInspector") { G.inspector = false; G.fit = true; return renderMap(); }
+  if (t.id === "mapCloseSearch") { G.searchOpen = false; return renderMap(); }
+  if (t.dataset.mapScreen) {
+    e.preventDefault();
+    return selectGraphScreen(t.dataset.mapScreen);
+  }
+  if (t.dataset.mapMode) { M.mode = t.dataset.mapMode; return renderMap(); }
   if (t.classList.contains("hist")) return select(t.dataset.ws, t.dataset.id);
   if (t.matches("tr.case")) { S.caseId = t.dataset.id; S.attempt = null; return renderMain(); }
   if (t.dataset.attempt) { S.attempt = +t.dataset.attempt; return renderDetail(); }
@@ -387,8 +444,36 @@ document.addEventListener("click", async e => {
   }
 });
 document.addEventListener("toggle", e => { const d = e.target; if (d.dataset && d.dataset.key) S.open[d.dataset.key] = d.open; }, true);
-document.addEventListener("input", e => { if (e.target.tagName === "TEXTAREA") S.draft[e.target.dataset.draft || e.target.id] = e.target.value; });
+document.addEventListener("input", e => {
+  if (e.target.tagName === "TEXTAREA") S.draft[e.target.dataset.draft || e.target.id] = e.target.value;
+  if (e.target.id === "mapQuery") M.q = e.target.value;
+  if (e.target.id === "mapMatch") M.match = e.target.value;
+});
+document.addEventListener("submit", e => {
+  if (e.target.id === "mapSearchForm") { e.preventDefault(); G.searchOpen = true; return loadMap(); }
+  if (e.target.id === "mapDetailForm") { e.preventDefault(); return loadMapScreen(); }
+});
+document.addEventListener("change", e => {
+  if (e.target.id === "mapWorkspace") { S.ws = e.target.value; renderHistory(); return workspaceTab("site_map"); }
+  if (e.target.id === "mapLanguage") { M.lang = e.target.value; return loadMap(); }
+  if (e.target.id === "mapKind") { M.kind = e.target.value; G.searchOpen = !!(M.kind || M.q); return loadMap(); }
+  if (e.target.id === "mapView") { M.view = e.target.value; return loadMapScreen(); }
+  if (e.target.id === "mapRequired") { M.required = e.target.checked; return loadMapScreen(); }
+});
 document.addEventListener("keydown", e => {
+  if (e.target.matches("[data-map-screen], [data-map-expand], [data-map-home], [data-map-focus]") && ["Enter", " "].includes(e.key)) { e.preventDefault(); e.target.dispatchEvent(new MouseEvent("click", { bubbles:true })); return; }
+  if (e.target.id === "mapDiagram") {
+    if (["+", "="].includes(e.key)) { e.preventDefault(); return graphZoom(1.25); }
+    if (e.key === "-") { e.preventDefault(); return graphZoom(1/1.25); }
+    if (e.key === "Home") { e.preventDefault(); return graphFit(); }
+    if (["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(e.key)) { e.preventDefault(); G.x += e.key === "ArrowLeft" ? 45 : e.key === "ArrowRight" ? -45 : 0; G.y += e.key === "ArrowUp" ? 45 : e.key === "ArrowDown" ? -45 : 0; return graphTransform(); }
+  }
+  if (e.key === "Escape" && S.tab === "site_map") { G.inspector = false; G.searchOpen = false; return renderMap(); }
+  if (e.target.dataset.workspaceTab && ["ArrowLeft", "ArrowRight", "Home", "End"].includes(e.key)) {
+    e.preventDefault();
+    const tab = e.key === "Home" ? "progress" : e.key === "End" ? "site_map" : e.target.dataset.workspaceTab === "progress" ? "site_map" : "progress";
+    workspaceTab(tab); $(tab === "progress" ? "tab-progress" : "tab-site-map").focus(); return;
+  }
   if (e.key === "Enter" && e.target.matches("tr.case")) return e.target.click();
   if (!$("lb").classList.contains("open")) return;
   if (e.key === "Escape") $("lb").classList.remove("open");
@@ -396,13 +481,17 @@ document.addEventListener("keydown", e => {
   else if (e.key === "ArrowRight") $("lbNext").click();
   else if (e.key.toLowerCase() === "r") $("lbRaw").click();
 });
-$("wsFilter").onchange = e => { S.ws = e.target.value; renderHistory(); };
+$("wsFilter").onchange = e => { S.ws = e.target.value; renderHistory(); if (S.tab === "site_map") workspaceTab("site_map"); };
 
 (async function start() {
   await refreshList();
+  const params = new URLSearchParams(location.search);
+  if (S.workspaces.some(w => w.name === params.get("workspace"))) S.ws = params.get("workspace");
   const hash = location.hash.slice(1).split("/").map(decodeURIComponent);
-  const first = (hash.length === 2 && S.sessions.find(s => s.workspace === hash[0] && s.session === hash[1])) || (BOOT.select && S.sessions.find(s => s.workspace === BOOT.select[0] && s.session === BOOT.select[1])) || S.sessions[0];
+  const first = (hash.length === 2 && S.sessions.find(s => s.workspace === hash[0] && s.session === hash[1])) || (BOOT.select && S.sessions.find(s => s.workspace === BOOT.select[0] && s.session === BOOT.select[1])) || S.sessions.find(s => !S.ws || s.workspace === S.ws);
   if (first) select(first.workspace, first.session); else { renderMain(); $("liveText").textContent = "chưa có phiên test"; }
+  renderHistory();
+  if (params.get("tab") === "site_map") workspaceTab("site_map");
   setInterval(() => { if (!$("lb").classList.contains("open")) refreshView(); }, 1500);
   setInterval(refreshList, 6000);
 })();

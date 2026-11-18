@@ -114,8 +114,8 @@ def test_case_statuses_follow_the_events(session, tmp_path):
 
 
 def test_asking_for_the_dashboard_again_reuses_the_running_one_on_the_right_session(session, up, monkeypatch, capsys):
-    from oqa import cli, paths
-    write_json(paths.home() / "dashboard.json", {"url": f"{up.base}/?t={up.app.token}", "pid": 0})
+    from oqa import build_id, cli, paths
+    write_json(paths.home() / "dashboard.json", {"url": f"{up.base}/?t={up.app.token}", "pid": 0, "build": build_id()})
     opened = []
     monkeypatch.setattr(cli.webbrowser, "open", opened.append)
     assert cli.main(["dashboard", "--ws", "demo", "--session", session.id]) == 0

@@ -27,11 +27,30 @@ Never a password: each profile's password is in the credential store under the k
 
 ## sitemap.json
 
-`{schema_version, meta:{generated, profile, odoo_version, menus, actions, views, object_buttons, truncated}, nodes:{key: node}, edges:[{from, to, kind, label?, name?}], unresolved:[{where, why}]}`.
+`{schema_version, meta:{generated, profile, odoo_version, menus, actions, views, object_buttons, truncated, languages?, default_language?, missing_languages?}, nodes:{key: node}, edges:[{from, to, kind, label?, name?, labels?}], unresolved:[{where, why, message?, values?, language?}]}`.
 Read from Odoo's menus, actions and view definitions through read-only calls (nothing is clicked); it shows what the profile named in `meta` may see.
 Node keys: `menu:<id>` · `window|server|client|url|report:<id>` (actions) · `view:<model>:<type>:<id>`. A view node carries `buttons:[{label, name, type: action|object|open|edit, invisible?, stat?}]` and `disabled:[create|edit|delete|duplicate]` (what the view switches off: no New button, read only) and `fields:[{name, label, type, required, readonly, relation?, options?, invisible?, widget?}]` (`required` / `readonly` are true, false or the expression of the view when it depends on other fields; `options` are `value=label` of a selection).
 Edge kinds: `menu` (parent to child), `opens` (menu to action), `shows` (action to view), `row` (list or kanban to the form of the model), `button` (view to the action a `type="action"` button opens).
 A `type="object"` button calls a method: where it leads is unknown until it is run, so it has no edge (it is counted in `meta.object_buttons`). Asked through `oqa sitemap find|buttons|path` or the MCP server `oqa mcp` (tools `sitemap_find`, `sitemap_buttons`, `sitemap_fields`, `sitemap_path`; `oqa mcp --config` prints its `.mcp.json` entry).
+
+The builder reads active `en_US` and `ja_JP` translations using a per-call `context.lang`; it never changes the user's language or activates languages. `--languages en,ja` explicitly requires both to be active; without this option the builder uses whichever are active and reports missing languages in `meta.missing_languages`. At least one must be active.
+Nodes, fields, buttons and labelled edges carry `labels:{en_US: text, ja_JP: text}` for available translations. Selection fields also carry `options_by_language:{code:[value=label]}`. The original `label` / `options` stay in the first built language (`meta.default_language`); technical keys, names, selectors and graph counts do not vary by display language.
+Find, screen resolution and `--match` search every stored translation and selection label, with Unicode NFKC normalization (including fullwidth Latin and halfwidth kana) and case folding. CLI `--lang en|ja` and MCP `lang` choose both the labels and explanatory text of the response; by default use the workspace's English/Japanese setting (Vietnamese workspaces retain the existing English sitemap output). Missing label translations fall back to the original label. Older schema-1 maps remain readable; rebuild them to collect translated labels. Structured unresolved messages are translated for display; original Odoo error details are preserved.
+
+Examples:
+
+```sh
+python oqa.py sitemap build --languages en,ja --lang ja --ws demo
+python oqa.py sitemap find 注文 --lang en --ws demo
+python oqa.py sitemap buttons Orders --match 確認 --lang ja --ws demo
+python oqa.py sitemap fields 注文 --required --lang ja --ws demo
+python oqa.py sitemap path "Cancel order" --lang ja --ws demo
+```
+
+MCP example: `sitemap_fields` with `{"screen":"Orders","match":"顧客","lang":"ja"}`. A search can use either language regardless of the output language. Labels are taken from Odoo's installed translations; untranslated Odoo terms retain Odoo's fallback text.
+
+The progress dashboard has a workspace-level `site_map` tab. It reads the saved map (no Odoo connection or session is required) and draws an interactive SVG graph: workspace → root menus → menus → actions → views, with button and row transitions when a view is expanded. Drag to pan, scroll or use +/− to zoom, fit the graph, open/close branches, or return to the overview. A minimap shows the current viewport. Search locates a screen on the graph and highlights its known route. Menus whose parents are unavailable are kept in an explicit "Other menus" group; that display grouping never invents an Odoo navigation route. The inspector shows buttons/fields as cards and navigation as numbered steps in English/Japanese. Workspace changes clear the selected screen and filters; switching back to progress keeps the selected case. Reload refreshes the saved map after a rebuild. Workspaces without a map show an empty state.
+Authenticated dashboard routes: `GET /api/workspaces` lists workspace names/languages and map availability; `GET /api/sitemap?ws=<name>&lang=en|ja&what=show|find|screen` returns summary plus compact topology (node labels, IDs, counts and edges; no field/button definitions), search results (`q`, optional `kind`, at most 60), or screen detail (`screen`, optional `view`, `match`, `required=true`). Screen details include bounded structured `controls`, `route`, `route_edges`, and `reachable`, alongside the existing CLI text. These routes use the dashboard's local token and Host/Origin checks. A direct dashboard URL can use `tab=site_map&workspace=<name>`.
 
 ## state.json
 

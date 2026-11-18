@@ -17,6 +17,7 @@ from . import VERSION, build_id, analysis, connect, memory, dashboard_server, do
 from .secrets import SecretStoreUnavailable, default_store
 from .state import MAX_REPAIRS, GateError, Session
 from .store import SchemaError, read_json, write_json
+from .sitemap_i18n import text as sitemap_text
 
 REFUSED = (GateError, SchemaError, paths.PathError, knowledge.KnowledgeError, SecretStoreUnavailable, connect.LoginFailed, sitemap.SitemapError)
 
@@ -442,22 +443,24 @@ def cmd_sitemap(args):
     if args.what == "build":
         from .odoo_ui import Odoo
         session, ws = _session_and_workspace(args)
+        lang = sitemap.output_language(args.lang or ws.get("language"))
         with probe.signed_in(session, ws, default_store(), args.profile, headless=not args.headed) as page:
             o = Odoo(page, ws["url"], ws.get("test_prefix") or "ZZ_AUTOTEST_")
-            data = sitemap.build(o.rpc, args.profile or ws["profiles"][0]["name"], page.evaluate(connect.VERSION_JS) or "")
+            data = sitemap.build(o.rpc, args.profile or ws["profiles"][0]["name"], page.evaluate(connect.VERSION_JS) or "", languages=args.languages, lang=lang)
         file = sitemap.save(ws["name"], data)
         m = data["meta"]
         return {"file": str(file), "meta": m, "unresolved": data["unresolved"]}, "\n".join(
-            [f"Sitemap written to {file}", sitemap.header(data), f"{m['object_buttons']} buttons call a method (where they lead is only known by running them); {len(data['unresolved'])} things could not be read."]
-            + [f"  {u['where']}: {u['why']}" for u in data["unresolved"][:10]])
+            [sitemap_text(lang, "Sitemap written to {file}", file=file), sitemap.header(data, lang), sitemap_text(lang, "{buttons} buttons call a method (where they lead is only known by running them); {unresolved} things could not be read.", buttons=m['object_buttons'], unresolved=len(data['unresolved']))]
+            + [f"  {u['where']}: {sitemap.unresolved_text(u, lang)}" for u in data["unresolved"][:10]])
     ws = paths.resolve_workspace(args.ws)
-    data = sitemap.load(ws)
+    lang = sitemap.output_language(args.lang or workspace.load(ws).get("language"))
+    data = sitemap.load(ws, lang)
     if args.what == "show":
-        return {"meta": data["meta"], "unresolved": data["unresolved"]}, sitemap.header(data)
+        return {"meta": data["meta"], "unresolved": data["unresolved"]}, sitemap.header(data, lang)
     if not args.target:
         raise GateError(f"Say what to look for: oqa sitemap {args.what} <words>")
-    text = {"find": lambda: sitemap.text_find(data, args.target, args.limit or 12, args.kind), "buttons": lambda: sitemap.text_buttons(data, args.target, args.view, args.match, args.limit or 30),
-            "fields": lambda: sitemap.text_fields(data, args.target, args.view, args.match, args.required, args.limit or 40), "path": lambda: sitemap.text_path(data, args.source, args.target)}[args.what]()
+    text = {"find": lambda: sitemap.text_find(data, args.target, args.limit or 12, args.kind, lang=lang), "buttons": lambda: sitemap.text_buttons(data, args.target, args.view, args.match, args.limit or 30, lang=lang),
+            "fields": lambda: sitemap.text_fields(data, args.target, args.view, args.match, args.required, args.limit or 40, lang=lang), "path": lambda: sitemap.text_path(data, args.source, args.target, lang=lang)}[args.what]()
     return {"text": text}, text
 
 
@@ -665,6 +668,8 @@ def build_parser():
     p.add_argument("--match", default="", help="buttons / fields: only those whose label or name contains this")
     p.add_argument("--required", action="store_true", help="fields: only the fields that are, or can be, required")
     p.add_argument("--limit", type=int, default=0, help="most lines to print (find 12, buttons 30, fields 40)")
+    p.add_argument("--languages", help="build: comma-separated active Odoo languages en_US,ja_JP (default: both when active)")
+    p.add_argument("--lang", choices=["en", "ja", "en_US", "ja_JP"], help="response language (default: workspace language, English for Vietnamese workspaces)")
     p.add_argument("--profile")
     p.add_argument("--headed", action="store_true")
     p = add("mcp", cmd_mcp, "serve the sitemap to the assistant as an MCP server (stdio); --config prints the .mcp.json entry")

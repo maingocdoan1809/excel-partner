@@ -11,11 +11,13 @@ edge kinds: menu (parent -> child) · opens (menu -> action) · shows (action ->
 `build` takes any `rpc(model, method, args, kwargs)` (the signed-in `Odoo.rpc`); everything else reads the saved file, so the CLI and the MCP server share it."""
 import json
 import re
+import unicodedata
 import xml.etree.ElementTree as ET
 from collections import deque
 from datetime import datetime, timezone
 
 from .paths import workspace_dir
+from .sitemap_i18n import text as _t
 
 SCHEMA = 1
 MAX_NODES = 8000
@@ -23,6 +25,7 @@ STALE_DAYS = 30
 KINDS = {"ir.actions.act_window": "window", "ir.actions.server": "server", "ir.actions.client": "client", "ir.actions.act_url": "url", "ir.actions.report": "report"}
 ACTION_FIELDS = {"window": ["name", "res_model", "views", "view_mode", "target"], "server": ["name", "model_name"], "client": ["name", "tag"], "url": ["name", "url"], "report": ["name", "model"]}
 OPEN_ROW = ("open", "edit")                          # kanban cards: `<a type="open">` opens the record
+LANGUAGES = {"en": "en_US", "ja": "ja_JP"}
 
 
 class SitemapError(Exception):
@@ -42,13 +45,13 @@ def save(ws, data):
     return path
 
 
-def load(ws):
+def load(ws, lang="en"):
     path = file_of(ws)
     if not path.exists():
-        raise SitemapError("No sitemap for this workspace yet: run `oqa sitemap build` (it reads the menus and views, it clicks nothing).")
+        raise SitemapError(_t(output_language(lang), "No sitemap for this workspace yet: run `oqa sitemap build` (it reads the menus and views, it clicks nothing)."))
     data = json.loads(path.read_text(encoding="utf-8"))
     if data.get("schema_version", 0) > SCHEMA:
-        raise SitemapError("This sitemap was written by a newer odoo-test: update the skill.")
+        raise SitemapError(_t(output_language(lang), "This sitemap was written by a newer odoo-test: update the skill."))
     return data
 
 
@@ -58,7 +61,7 @@ def _short(text, size=80):
     return text if len(text) <= size else text[:size - 1] + "…"
 
 
-def buttons_of_arch(arch):
+def buttons_of_arch(arch, info=None):
     """The clickable controls of a view definition that act: [{label, name, type, [invisible], [stat]}]; None when the definition is not readable XML."""
     try:
         root = ET.fromstring(arch.strip())
@@ -69,7 +72,12 @@ def buttons_of_arch(arch):
         kind = element.get("type")
         if element.tag not in ("button", "a") or kind not in ("action", "object") + OPEN_ROW:
             continue
-        item = {"name": element.get("name") or "", "type": kind, "label": _short(element.get("string") or "".join(element.itertext()) or element.get("title") or element.get("name"), 60)}
+        label = element.get("string") or " ".join(" ".join(element.itertext()).split())
+        if not label:
+            # Stat buttons often put their label on a child statinfo field, not the button.
+            label = " / ".join(field.get("string") or ((info or {}).get(field.get("name")) or {}).get("string") or ""
+                               for field in element.iter("field")).strip(" / ")
+        item = {"name": element.get("name") or "", "type": kind, "label": _short(label or element.get("title") or element.get("name"), 60)}
         if element.get("invisible"):
             item["invisible"] = _short(element.get("invisible"))
         if "oe_stat_button" in (element.get("class") or ""):
@@ -134,8 +142,72 @@ def _action_ref(name, by_name):
     return by_name.get(name)
 
 
-def build(rpc, profile="", version=""):
+def build(rpc, profile="", version="", languages=None, context=None, lang="en"):
+    """Read active English/Japanese translations without changing the user's language.
+
+    Explicit languages must be active in Odoo; by default use whichever of English/Japanese
+    are active. The graph stays keyed by technical IDs, with translations attached to labels.
+    """
+    lang = output_language(lang)
+    requested = list(LANGUAGES.values()) if languages is None else (languages.split(",") if isinstance(languages, str) else list(languages))
+    requested = list(dict.fromkeys(LANGUAGES.get(code.strip(), code.strip()) for code in requested))
+    if not requested or any(code not in LANGUAGES.values() for code in requested):
+        raise SitemapError(_t(lang, "Sitemap languages must be en_US / ja_JP (or en / ja)."))
+    active = {row["code"] for row in rpc("res.lang", "search_read", [[["active", "=", True]]], {"fields": ["code"], "context": dict(context or {})})}
+    missing = [code for code in requested if code not in active]
+    if languages is not None and missing:
+        raise SitemapError(_t(lang, "Activate these languages in Odoo before building the sitemap: {languages}", languages=", ".join(missing)))
+    available = [code for code in requested if code in active]
+    if not available:
+        raise SitemapError(_t(lang, "Activate English (en_US) or Japanese (ja_JP) in Odoo before building the sitemap."))
+    data = None
+    for code in available:
+        def localized_rpc(model, method, args=None, kwargs=None):
+            kw = dict(kwargs or {})
+            kw["context"] = {**(context or {}), **kw.get("context", {}), "lang": code}
+            return rpc(model, method, args, kw)
+        translated = _build(localized_rpc, profile, version)
+        if data is None:
+            data = translated
+        _merge_language(data, translated, code)
+        if translated is not data:
+            data["unresolved"].extend({**item, "language": code} for item in translated["unresolved"])
+    data["meta"].update(languages=available, default_language=available[0], missing_languages=missing)
+    return data
+
+
+def _merge_language(data, translated, code):
+    def labels(target, source):
+        target.setdefault("labels", {})[code] = source["label"]
+        if "options" in source:
+            target.setdefault("options_by_language", {})[code] = source["options"]
+
+    for key, node in data["nodes"].items():
+        other = translated["nodes"].get(key)
+        if other is None:
+            continue
+        labels(node, other)
+        for collection in ("buttons", "fields"):
+            # Repeated fields/buttons may have different labels: align their occurrences.
+            by_identity = {}
+            for item in other.get(collection, []):
+                by_identity.setdefault((item["name"], item.get("type")), deque()).append(item)
+            for item in node.get(collection, []):
+                matches = by_identity.get((item["name"], item.get("type")))
+                if matches:
+                    labels(item, matches.popleft())
+    by_edge = {(e["from"], e["to"], e["kind"], e.get("name")): e for e in translated["edges"]}
+    for edge in data["edges"]:
+        other = by_edge.get((edge["from"], edge["to"], edge["kind"], edge.get("name")))
+        if other and "label" in other:
+            labels(edge, other)
+
+
+def _build(rpc, profile="", version=""):
     nodes, edges, unresolved = {}, [], []
+
+    def issue(where, template, **values):
+        unresolved.append({"where": where, "why": template.format(**values), "message": template, "values": values})
 
     def edge(source, target, kind, **extra):
         edges.append({"from": source, "to": target, "kind": kind, **{k: v for k, v in extra.items() if v}})
@@ -146,7 +218,7 @@ def build(rpc, profile="", version=""):
             by_id[(row["model"], row["res_id"])] = f"{row['module']}.{row['name']}"
             by_name[f"{row['module']}.{row['name']}"] = (row["model"], row["res_id"])
     except AssertionError as error:
-        unresolved.append({"where": "external ids", "why": f"not readable with this profile, so menus and actions have no external id and `%(module.name)d` buttons cannot be followed: {error}"})
+        issue("external ids", "not readable with this profile, so menus and actions have no external id and `%(module.name)d` buttons cannot be followed: {error}", error=str(error))
 
     menus = rpc("ir.ui.menu", "search_read", [[]], {"fields": ["name", "parent_id", "action", "sequence"], "order": "sequence,id"})
     menu_by_id = {m["id"]: m for m in menus}
@@ -210,7 +282,7 @@ def build(rpc, profile="", version=""):
             answer = rpc(model, "get_views", [], {"views": wanted, "options": {}})
             got = answer["views"]
         except AssertionError as error:
-            unresolved.append({"where": key, "why": f"the views of {model} could not be read: {_short(error, 160)}"})
+            issue(key, "the views of {model} could not be read: {error}", model=model, error=_short(error, 160))
             return
         nodes[key]["views"] = sorted(got)
         known = (answer.get("models") or {}).get(model) or {}
@@ -222,9 +294,9 @@ def build(rpc, profile="", version=""):
             edge(key, view_key, "shows")
             if view_key in nodes:
                 continue
-            found = buttons_of_arch(info.get("arch") or "")
+            found = buttons_of_arch(info.get("arch") or "", known)
             if found is None:
-                unresolved.append({"where": view_key, "why": "the view definition is not readable XML"})
+                issue(view_key, "the view definition is not readable XML")
                 found = []
             nodes[view_key] = {"kind": "view", "type": kind, "model": model, "label": f"{model} {kind}", "buttons": found, "fields": fields_of_arch(info.get("arch") or "", known), "disabled": disabled_of_arch(info.get("arch") or "")}
             for button in found:
@@ -233,7 +305,7 @@ def build(rpc, profile="", version=""):
                 elif button["type"] == "action":
                     ref = _action_ref(button["name"], by_name)
                     if ref is None or (ref[0] is not None and ref[0] not in KINDS):
-                        unresolved.append({"where": view_key, "why": f"button '{button['label']}' points at action '{button['name']}', which is not a known action"})
+                        issue(view_key, "button '{label}' points at action '{name}', which is not a known action", label=button['label'], name=button['name'])
                     elif ref[0] is None:
                         waiting.append((view_key, button, ref[1]))
                         pending.setdefault(None, set()).add(ref[1])
@@ -257,10 +329,10 @@ def build(rpc, profile="", version=""):
     truncated = bool(pending)
     for view_key, button, number in waiting:
         if number not in number_key:
-            unresolved.append({"where": view_key, "why": f"button '{button['label']}' points at action number {number}, which could not be read"})
+            issue(view_key, "button '{label}' points at action number {number}, which could not be read", label=button['label'], number=number)
     for e in [e for e in edges if e["to"] not in nodes]:
         edges.remove(e)
-        unresolved.append({"where": e["from"], "why": f"leads to {e['to']}, which could not be read"})
+        issue(e["from"], "leads to {target}, which could not be read", target=e['to'])
     kinds = [n["kind"] for n in nodes.values()]
     return {"schema_version": SCHEMA,
             "meta": {"generated": datetime.now(timezone.utc).isoformat(timespec="seconds"), "profile": profile, "odoo_version": version,
@@ -269,6 +341,12 @@ def build(rpc, profile="", version=""):
 
 
 # --- reading ------------------------------------------------------------------------
+def unresolved_text(item, lang="en"):
+    if "message" not in item:
+        return item["why"]
+    return _t(output_language(lang), item["message"], **item.get("values", {}))
+
+
 def age_days(data):
     try:
         return (datetime.now(timezone.utc) - datetime.fromisoformat(data["meta"]["generated"])).days
@@ -276,19 +354,56 @@ def age_days(data):
         return 0
 
 
-def header(data):
+def output_language(lang):
+    """The workspace's Vietnamese default keeps the existing English sitemap output."""
+    if not lang or lang == "vi":
+        return "en"
+    code = str(lang).replace("-", "_").split("_")[0]
+    if code not in LANGUAGES:
+        raise SitemapError("Sitemap output language must be en or ja.")
+    return code
+
+
+def localized(data, lang):
+    """A display copy: keep all aliases searchable and leave the saved graph untouched."""
+    code = LANGUAGES[output_language(lang)]
+
+    def item(value):
+        return {**value, **({"label": value["labels"].get(code, value["label"])} if value.get("labels") else {}),
+                **({"options": value["options_by_language"].get(code, value.get("options", []))} if value.get("options_by_language") else {})}
+
+    return {**data, "nodes": {key: {**item(node), **{kind: [item(v) for v in node[kind]] for kind in ("buttons", "fields") if kind in node}}
+                              for key, node in data["nodes"].items()}, "edges": [item(edge) for edge in data["edges"]]}
+
+
+def header(data, lang="en"):
+    lang = output_language(lang)
     m = data["meta"]
     old = age_days(data)
-    return (f"sitemap of {m.get('profile') or '?'} on Odoo {m.get('odoo_version') or '?'}, built {m['generated'][:10]}: {m['menus']} menus, {m['actions']} actions, {m['views']} views"
-            + (f". It is {old} days old: if a module was installed since, run `oqa sitemap build` again." if old >= STALE_DAYS else "")
-            + (". Not complete: the crawl stopped at its size limit." if m.get("truncated") else ""))
+    return (_t(lang, "sitemap of {profile} on Odoo {version}, built {date}: {menus} menus, {actions} actions, {views} views",
+               profile=m.get("profile") or "?", version=m.get("odoo_version") or "?", date=m["generated"][:10], menus=m["menus"], actions=m["actions"], views=m["views"])
+            + (_t(lang, ". It is {days} days old: if a module was installed since, run `oqa sitemap build` again.", days=old) if old >= STALE_DAYS else "")
+            + (_t(lang, ". Not complete: the crawl stopped at its size limit.") if m.get("truncated") else "")
+            + (_t(lang, ". Label languages: {languages}", languages=", ".join(m["languages"])) if m.get("languages") else "")
+            + (_t(lang, ". Languages not active in Odoo: {languages}", languages=", ".join(m["missing_languages"])) if m.get("missing_languages") else ""))
 
 
 def _words(text):
-    return re.findall(r"\w+", str(text).lower())
+    return re.findall(r"\w+", _normalized(text))
 
 
-def find(data, text, limit=12, kind=""):
+def _normalized(text):
+    return unicodedata.normalize("NFKC", str(text)).casefold()
+
+
+def _search_text(item):
+    return _normalized(" ".join(str(item.get(k) or "") for k in ("label", "name", "model", "xmlid"))
+                       + " " + " ".join((item.get("labels") or {}).values())
+                       + " " + " ".join(item.get("options") or [])
+                       + " " + " ".join(value for options in (item.get("options_by_language") or {}).values() for value in options))
+
+
+def find(data, text, limit=12, kind="", lang="en"):
     """[(key, node, reason)] for the screens whose label, model, external id or button names contain the words of `text`, best first."""
     words = _words(text)
     if not words:
@@ -298,15 +413,23 @@ def find(data, text, limit=12, kind=""):
     for key, node in data["nodes"].items():
         if kind and node["kind"] != kind:
             continue
-        hay = " ".join(str(node.get(k, "")) for k in ("label", "model", "xmlid")).lower()
+        hay = _search_text(node)
         reason, score = "", sum(1 for w in words if w in hay)
         for button in node.get("buttons") or []:
-            if all(w in f"{button['label']} {button['name']}".lower() for w in words):      # a button counts only when it holds every word asked
-                reason, score = f"button '{button['label']}'" + (f" [name={button['name']}]" if button["name"] else ""), max(score, len(words))
+            if all(w in _search_text(button) for w in words):      # a button counts only when it holds every word asked
+                reason, score = _t(lang, "button '{label}'", label=button["label"]) + (f" [name={button['name']}]" if button["name"] else ""), max(score, len(words))
                 break
+        if not reason:
+            for field in node.get("fields") or []:
+                if all(w in _search_text(field) for w in words):
+                    reason, score = _t(lang, "field '{label}' [name={name}]", label=field["label"], name=field["name"]), max(score, len(words))
+                    break
         if score:
             scored.append((-score, order[node["kind"]], key, node, reason))
     scored.sort(key=lambda s: s[:3])
+    # Once every word matches a screen, omit partial matches that only share a module prefix.
+    if scored and -scored[0][0] == len(words):
+        scored = [item for item in scored if -item[0] == len(words)]
     return [(key, node, reason) for _, _, key, node, reason in scored[:limit]]
 
 
@@ -336,14 +459,14 @@ def views_of(data, key):
     return [e["to"] for e in out.get(key, []) if e["kind"] == "shows"]
 
 
-def path(data, source, target):
+def path(data, source, target, lang="en"):
     """The shortest way from the screen `source` (any menu root when empty) to `target`: [edge], or None."""
     goal = resolve(data, target)
     if goal is None:
-        raise SitemapError(f"nothing in the sitemap matches '{target}'")
+        raise SitemapError(_t(lang, "nothing in the sitemap matches '{text}'", text=target))
     start = resolve(data, source) if source else None
     if source and start is None:
-        raise SitemapError(f"nothing in the sitemap matches '{source}'")
+        raise SitemapError(_t(lang, "nothing in the sitemap matches '{text}'", text=source))
     out = _out(data)
     children = {e["to"] for e in data["edges"] if e["kind"] == "menu"}
     roots = [start] if start else [k for k, n in data["nodes"].items() if n["kind"] == "menu" and k not in children]
@@ -369,17 +492,19 @@ def selector_of(kind, name, view_type=""):
     return f"th[data-name='{name}']" if view_type == "list" else f".o_field_widget[name='{name}']"
 
 
-def describe(key, node):
+def describe(key, node, lang="en"):
     if node["kind"] == "menu":
-        return f"menu {node['label']}" + (f"  [{node['xmlid']}]" if node.get("xmlid") else "")
+        return _t(lang, "menu {label}", label=node["label"]) + (f"  [{node['xmlid']}]" if node.get("xmlid") else "")
     if node["kind"] == "action":
-        return f"{node['type']} action \"{node['label']}\"" + (f" on {node['model']}" if node.get("model") else "") + (" (a dialog)" if node.get("target") == "new" else "") + (f"  [{node['xmlid']}]" if node.get("xmlid") else "")
-    return f"{node['type']} view of {node['model']}"
+        return (_t(lang, '{type} action "{label}"', type=node["type"], label=node["label"])
+                + (_t(lang, " on {model}", model=node["model"]) if node.get("model") else "")
+                + (_t(lang, " (a dialog)") if node.get("target") == "new" else "") + (f"  [{node['xmlid']}]" if node.get("xmlid") else ""))
+    return _t(lang, "{type} view of {model}", type=node["type"], model=node["model"])
 
 
-def _cut(lines, limit, hint):
+def _cut(lines, limit, hint, lang="en"):
     """At most `limit` lines, and when some are left out, say how to narrow the question instead of printing them."""
-    return lines if len(lines) <= limit else lines[:limit] + [f"    ... {len(lines) - limit} more not shown: narrow with {hint}"]
+    return lines if len(lines) <= limit else lines[:limit] + [_t(lang, "    ... {count} more not shown: narrow with {hint}", count=len(lines) - limit, hint=hint)]
 
 
 def _views(data, key, view=""):
@@ -387,78 +512,88 @@ def _views(data, key, view=""):
     return [v for v in views_of(data, key) if not view or data["nodes"][v]["type"] == view]
 
 
-def _head(data, key, node, view_key, extra=""):
+def _head(data, key, node, view_key, extra="", lang="en"):
     view = data["nodes"][view_key]
-    return f"  {describe(view_key, view)}  ({view_key})" + (f"  NOT possible here: {', '.join(view['disabled'])}" if view.get("disabled") else "") + extra
+    return f"  {describe(view_key, view, lang)}  ({view_key})" + (_t(lang, "  NOT possible here: {disabled}", disabled=", ".join(view["disabled"])) if view.get("disabled") else "") + extra
 
 
-def text_find(data, text, limit=12, kind=""):
-    found = find(data, text, limit, kind)
-    lines = [f"{key}  {describe(key, node)}" + (f"  <- {reason}" if reason else "") for key, node, reason in found]
-    return "\n".join([header(data), *(lines or [f"nothing matches '{text}'" + (f" among {kind}s" if kind else "") + ". Try fewer or other words (a menu name, a model, a button label)."])])
+def text_find(data, text, limit=12, kind="", lang="en"):
+    lang = output_language(lang)
+    data = localized(data, lang)
+    found = find(data, text, limit, kind, lang)
+    lines = [f"{key}  {describe(key, node, lang)}" + (f"  <- {reason}" if reason else "") for key, node, reason in found]
+    return "\n".join([header(data, lang), *(lines or [_t(lang, "nothing matches '{text}'{scope}. Try fewer or other words (a menu name, a model, a button label).",
+                                                       text=text, scope=_t(lang, " among {kind}s", kind=kind) if kind else "")])])
 
 
-def text_buttons(data, screen, view="", match="", limit=30):
+def text_buttons(data, screen, view="", match="", limit=30, lang="en"):
     """The buttons of a screen's views, where each leads. `view`: only that view type; `match`: only buttons whose label or name contains it."""
+    lang = output_language(lang)
+    data = localized(data, lang)
     key = resolve(data, screen)
     if key is None:
-        return f"nothing in the sitemap matches '{screen}'"
+        return _t(lang, "nothing in the sitemap matches '{text}'", text=screen)
     out, node = _out(data), data["nodes"][key]
-    lines = [f"{key}  {describe(key, node)}" + (f"  {selector_of('menu', node['xmlid'])}" if node.get("xmlid") and key.startswith("menu:") else "")]
+    lines = [f"{key}  {describe(key, node, lang)}" + (f"  {selector_of('menu', node['xmlid'])}" if node.get("xmlid") and key.startswith("menu:") else "")]
     for view_key in _views(data, key, view):
         vnode = data["nodes"][view_key]
-        lines.append(_head(data, key, node, view_key))
+        lines.append(_head(data, key, node, view_key, lang=lang))
         goes = {e.get("name"): e["to"] for e in out.get(view_key, []) if e["kind"] == "button"}
         rows = []
         for b in vnode["buttons"]:
-            if b["type"] in OPEN_ROW or (match and match.lower() not in f"{b['label']} {b['name']}".lower()):
+            if b["type"] in OPEN_ROW or (match and not all(w in _search_text(b) for w in _words(match))):
                 continue
-            where = (f"-> {describe(goes[b['name']], data['nodes'][goes[b['name']]])}" if b["name"] in goes else
-                     "-> unknown until it is run (it calls a method)" if b["type"] == "object" else "-> not resolved")
-            rows.append(f"    {'stat ' if b.get('stat') else ''}button \"{b['label']}\" [name={b['name']}] {selector_of('button', b['name'])}" + (f" shown only if: not ({b['invisible']})" if b.get("invisible") else "") + f" {where}")
-        lines += _cut(rows, limit, "--match <word> or --view <type>")
+            where = (f"-> {describe(goes[b['name']], data['nodes'][goes[b['name']]], lang)}" if b["name"] in goes else
+                     _t(lang, "-> unknown until it is run (it calls a method)") if b["type"] == "object" else _t(lang, "-> not resolved"))
+            rows.append(_t(lang, '    {stat}button "{label}" [name={name}] {selector}', stat=_t(lang, "stat ") if b.get("stat") else "", label=b["label"], name=b["name"], selector=selector_of('button', b['name']))
+                        + (_t(lang, " shown only if: not ({condition})", condition=b["invisible"]) if b.get("invisible") else "") + f" {where}")
+        lines += _cut(rows, limit, "--match <word> or --view <type>", lang)
         if not match:
-            lines += [f"    clicking a row -> {describe(e['to'], data['nodes'][e['to']])}" for e in out.get(view_key, []) if e["kind"] == "row"]
+            lines += [_t(lang, "    clicking a row -> {target}", target=describe(e['to'], data['nodes'][e['to']], lang)) for e in out.get(view_key, []) if e["kind"] == "row"]
     return "\n".join(lines)
 
 
-def text_fields(data, screen, view="", match="", required=False, limit=40):
+def text_fields(data, screen, view="", match="", required=False, limit=40, lang="en"):
     """The fields of a screen, with a selector to start from, required / read only and the values of a selection. By default only the form (the list repeats it);
     `view`: another view type; `match`: only fields whose name or label contains it; `required`: only fields that are (or can be) required. A field shown twice is listed once."""
+    lang = output_language(lang)
+    data = localized(data, lang)
     key = resolve(data, screen)
     if key is None:
-        return f"nothing in the sitemap matches '{screen}'"
+        return _t(lang, "nothing in the sitemap matches '{text}'", text=screen)
     node = data["nodes"][key]
     views = _views(data, key, view)
     if not view and any(data["nodes"][v]["type"] == "form" for v in views):
         views = [v for v in views if data["nodes"][v]["type"] == "form"]
-    lines = [f"{key}  {describe(key, node)}"]
+    lines = [f"{key}  {describe(key, node, lang)}"]
     for view_key in views:
         vnode = data["nodes"][view_key]
-        lines.append(_head(data, key, node, view_key))
+        lines.append(_head(data, key, node, view_key, lang=lang))
         rows, seen = [], set()
         for f in vnode.get("fields") or []:
-            if f["name"] in seen or (match and match.lower() not in f"{f['name']} {f['label']}".lower()) or (required and not f["required"]):
+            if f["name"] in seen or (match and not all(w in _search_text(f) for w in _words(match))) or (required and not f["required"]):
                 continue
             seen.add(f["name"])
-            flags = [w for w, on in (("required", f["required"]), ("readonly", f["readonly"])) if on is True] + [f"{w} if: {on}" for w, on in (("required", f["required"]), ("readonly", f["readonly"])) if isinstance(on, str)]
-            rows.append(f"    {f['name']} \"{f['label']}\" {f['type']}" + (f" -> {f['relation']}" if f.get("relation") else "") + (f" [{', '.join(flags)}]" if flags else "")
-                        + (f" shown only if: not ({f['invisible']})" if f.get("invisible") else "") + (f" widget={f['widget']}" if f.get("widget") else "") + f"  {selector_of('field', f['name'], vnode['type'])}"
-                        + (f"  options: {', '.join(f['options'])}" if f.get("options") else ""))
-        lines += _cut(rows, limit, "--match <word>, --required or --view <type>")
+            flags = [_t(lang, w) for w, on in (("required", f["required"]), ("readonly", f["readonly"])) if on is True] + [_t(lang, "{flag} if: {condition}", flag=_t(lang, w), condition=on) for w, on in (("required", f["required"]), ("readonly", f["readonly"])) if isinstance(on, str)]
+            rows.append(_t(lang, '    {name} "{label}" {type}', name=f["name"], label=f["label"], type=f["type"]) + (f" -> {f['relation']}" if f.get("relation") else "") + (f" [{', '.join(flags)}]" if flags else "")
+                        + (_t(lang, " shown only if: not ({condition})", condition=f["invisible"]) if f.get("invisible") else "") + (f" widget={f['widget']}" if f.get("widget") else "") + f"  {selector_of('field', f['name'], vnode['type'])}"
+                        + (_t(lang, "  options: {options}", options=", ".join(f["options"])) if f.get("options") else ""))
+        lines += _cut(rows, limit, "--match <word>, --required or --view <type>", lang)
     return "\n".join(lines)
 
 
-def text_path(data, source, target):
-    way = path(data, source, target)
+def text_path(data, source, target, lang="en"):
+    lang = output_language(lang)
+    data = localized(data, lang)
+    way = path(data, source, target, lang)
     goal = resolve(data, target)
     if way is None:
-        return f"no way found to {describe(goal, data['nodes'][goal])} from {source or 'any menu'}: it may be reached only by a button that calls a method."
+        return _t(lang, "no way found to {target} from {source}: it may be reached only by a button that calls a method.", target=describe(goal, data['nodes'][goal], lang), source=source or _t(lang, 'any menu'))
     first = way[0]["from"] if way else goal
-    lines = [f"1. start at {describe(first, data['nodes'][first])}"]
+    lines = [_t(lang, "1. start at {target}", target=describe(first, data['nodes'][first], lang))]
     for number, e in enumerate(way, 2):
         node = data["nodes"][e["to"]]
-        how = {"menu": "open the submenu" + (f" {selector_of('menu', node['xmlid'])}" if node.get("xmlid") else ""), "opens": "it opens", "shows": "it shows", "row": "click a row",
-               "button": f"click the button \"{e.get('label', '')}\" {selector_of('button', e.get('name', ''))}"}[e["kind"]]
-        lines.append(f"{number}. {how}: {describe(e['to'], data['nodes'][e['to']])}")
+        how = {"menu": _t(lang, "open the submenu") + (f" {selector_of('menu', node['xmlid'])}" if node.get("xmlid") else ""), "opens": _t(lang, "it opens"), "shows": _t(lang, "it shows"), "row": _t(lang, "click a row"),
+               "button": _t(lang, 'click the button "{label}" {selector}', label=e.get('label', ''), selector=selector_of('button', e.get('name', '')))}[e["kind"]]
+        lines.append(f"{number}. {how}: {describe(e['to'], data['nodes'][e['to']], lang)}")
     return "\n".join(lines)

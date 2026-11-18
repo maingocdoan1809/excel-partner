@@ -3,7 +3,7 @@ how to get from one screen to another. It only reads `knowledge/sitemap.json` (b
 import json
 import sys
 
-from . import paths, sitemap
+from . import paths, sitemap, workspace
 
 PROTOCOL = "2024-11-05"
 TOOLS = [
@@ -16,19 +16,23 @@ TOOLS = [
     {"name": "sitemap_path", "description": "The shortest way from one screen to another: menu, action, view, button. Leave `source` empty to start from the menus.",
      "inputSchema": {"type": "object", "properties": {"source": {"type": "string"}, "target": {"type": "string"}}, "required": ["target"]}},
 ]
+for tool in TOOLS:
+    tool["inputSchema"]["properties"]["lang"] = {"type": "string", "enum": ["en", "ja", "en_US", "ja_JP"], "description": "Response language; defaults to the workspace language. Odoo labels remain searchable in both English and Japanese."}
 
 
 def call(ws, name, arguments):
     """The text a tool answers (shared with `oqa sitemap find|buttons|path`); raises SitemapError / PathError when it cannot."""
-    data = sitemap.load(paths.resolve_workspace(ws))
+    ws = paths.resolve_workspace(ws)
+    lang = sitemap.output_language(arguments.get("lang") or workspace.load(ws).get("language"))
+    data = sitemap.load(ws, lang)
     if name == "sitemap_find":
-        return sitemap.text_find(data, arguments["text"], int(arguments.get("limit") or 12), arguments.get("kind") or "")
+        return sitemap.text_find(data, arguments["text"], int(arguments.get("limit") or 12), arguments.get("kind") or "", lang=lang)
     if name == "sitemap_buttons":
-        return sitemap.text_buttons(data, arguments["screen"], arguments.get("view") or "", arguments.get("match") or "", int(arguments.get("limit") or 30))
+        return sitemap.text_buttons(data, arguments["screen"], arguments.get("view") or "", arguments.get("match") or "", int(arguments.get("limit") or 30), lang=lang)
     if name == "sitemap_fields":
-        return sitemap.text_fields(data, arguments["screen"], arguments.get("view") or "", arguments.get("match") or "", bool(arguments.get("required")), int(arguments.get("limit") or 40))
+        return sitemap.text_fields(data, arguments["screen"], arguments.get("view") or "", arguments.get("match") or "", bool(arguments.get("required")), int(arguments.get("limit") or 40), lang=lang)
     if name == "sitemap_path":
-        return sitemap.text_path(data, arguments.get("source") or "", arguments["target"])
+        return sitemap.text_path(data, arguments.get("source") or "", arguments["target"], lang=lang)
     raise sitemap.SitemapError(f"no such tool: {name}")
 
 

@@ -26,6 +26,8 @@ class FakeRpc:
 
     def __call__(self, model, method, args=None, kwargs=None):
         self.calls.append((model, method))
+        if (model, method) == ("res.lang", "search_read"):
+            return [{"code": "en_US"}]
         if (model, method) == ("ir.model.data", "search_read"):
             return [{"module": "sale", "name": "menu_orders", "model": "ir.ui.menu", "res_id": 2},
                     {"module": "sale", "name": "action_orders", "model": "ir.actions.act_window", "res_id": 10},
