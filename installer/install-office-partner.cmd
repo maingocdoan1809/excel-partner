@@ -17,8 +17,19 @@ shift
 goto args
 :run
 set "OP_SELF=%~f0"
-powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "$t=[IO.File]::ReadAllText($env:OP_SELF); $i=$t.LastIndexOf('#'+'#PS-BEGIN##'); Invoke-Expression $t.Substring($i)"
+rem The PowerShell part is written to a plain script file and run with -File (no Invoke-Expression of text read from
+rem this file, which antivirus programs treat as suspicious). The first writable folder wins.
+set "OP_PS="
+for /f "usebackq delims=" %%P in (`powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "$t=[IO.File]::ReadAllText($env:OP_SELF); $i=$t.LastIndexOf('#'+'#PS-BEGIN##'); foreach($d in @((Join-Path $env:LOCALAPPDATA 'Excel Partner'),$env:USERPROFILE,$env:TEMP)){ try { New-Item -ItemType Directory -Path $d -Force | Out-Null; $f=Join-Path $d 'install-office-partner.ps1'; [IO.File]::WriteAllText($f,$t.Substring($i)); $f; break } catch {} }"`) do set "OP_PS=%%P"
+if not defined OP_PS (
+  echo ERROR: Could not write the installer script. A security program may block new files in your user folders. Save this file to the Desktop and run it again, or ask IT to allow %%LOCALAPPDATA%%\Excel Partner.
+  set "code=1"
+  goto done
+)
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%OP_PS%"
 set "code=%errorlevel%"
+del "%OP_PS%" >nul 2>&1
+:done
 if not defined OP_QUIET (echo. & pause)
 exit /b %code%
 ##PS-BEGIN##
@@ -67,6 +78,18 @@ function Test-NodeVersion([string] $value) {
   return ($major -eq 22 -and $minor -ge 12) -or ($major -gt 22 -and $major -lt 26)
 }
 
+# A security program scans each new file and can deny access for a moment: try again a few times before giving up.
+function Invoke-Retry([string] $what, [scriptblock] $action, [int] $attempts = 4) {
+  for ($try = 1; $try -le $attempts; $try++) {
+    try { & $action; return }
+    catch {
+      if ($try -eq $attempts) { Fail "$what failed: $($_.Exception.Message). A security program is probably blocking it; ask IT to allow %LOCALAPPDATA%\Programs\nodejs, %APPDATA%\npm and %LOCALAPPDATA%\Excel Partner, then run the installer again." 10 }
+      Write-Host "$what was denied (attempt $try of $attempts). Waiting for the security scan, then trying again..." -ForegroundColor Yellow
+      Start-Sleep -Seconds (2 * $try)
+    }
+  }
+}
+
 function Get-InstalledNode {
   $candidates = @((Get-Command node.exe -ErrorAction SilentlyContinue).Source, (Join-Path $nodeHome 'node.exe')) | Where-Object { $_ -and (Test-Path -LiteralPath $_) }
   foreach ($candidate in $candidates) {
@@ -81,8 +104,12 @@ function Install-PortableNode {
   if (-not (Test-NodeVersion $NodeVersion)) { Fail "OP_NODE_VERSION $NodeVersion is not supported (22.12 or later, before 26)." 10 }
   $arch = if ($env:PROCESSOR_ARCHITECTURE -eq 'ARM64') { 'arm64' } else { 'x64' }
   $name = "node-v$NodeVersion-win-$arch"
-  $work = Join-Path $env:TEMP "office-partner-node-$([guid]::NewGuid().ToString('N'))"
-  New-Item -ItemType Directory -Path $work -Force | Out-Null
+  # A security program can block new files in %TEMP%; the data folder is the second choice.
+  $work = $null
+  foreach ($base in @($env:TEMP, $dataDir)) {
+    try { $candidate = Join-Path $base "office-partner-node-$([guid]::NewGuid().ToString('N'))"; New-Item -ItemType Directory -Path $candidate -Force | Out-Null; $work = $candidate; break } catch { Write-Host "Cannot write in ${base}: $($_.Exception.Message)" -ForegroundColor Yellow }
+  }
+  if (-not $work) { Fail 'No folder allows new files. A security program is blocking the installer: ask IT to allow %LOCALAPPDATA%\Excel Partner and %TEMP%, then run it again.' 10 }
   try {
     $zip = Join-Path $work "$name.zip"
     try {
@@ -92,10 +119,10 @@ function Install-PortableNode {
     $expected = ($sums -split "`n" | Where-Object { $_ -match "\s$([regex]::Escape("$name.zip"))\s*$" } | Select-Object -First 1) -replace '\s.*$', ''
     $actual = (Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash
     if (-not $expected -or $expected.ToLower() -ne $actual.ToLower()) { Fail 'The downloaded Node.js does not match its SHA256 checksum. Nothing was installed.' 10 }
-    Expand-Archive -LiteralPath $zip -DestinationPath $work -Force
-    if (Test-Path -LiteralPath $nodeHome) { Remove-Item -LiteralPath $nodeHome -Recurse -Force }
+    Invoke-Retry 'Unpacking Node.js' { Expand-Archive -LiteralPath $zip -DestinationPath $work -Force }
+    Invoke-Retry 'Replacing the old Node.js folder' { if (Test-Path -LiteralPath $nodeHome) { Remove-Item -LiteralPath $nodeHome -Recurse -Force } }
     New-Item -ItemType Directory -Path (Split-Path $nodeHome) -Force | Out-Null
-    Move-Item -LiteralPath (Join-Path $work $name) -Destination $nodeHome
+    Invoke-Retry 'Moving Node.js into place' { Move-Item -LiteralPath (Join-Path $work $name) -Destination $nodeHome }
     Set-Content -LiteralPath (Join-Path $nodeHome '.installed-by-office-partner') -Value $NodeVersion
   } finally { Remove-Item -LiteralPath $work -Recurse -Force -ErrorAction SilentlyContinue }
 }
@@ -165,11 +192,30 @@ Write-Host "Node.js $(& $node --version), npm $(& $npm --version)"
 if (-not $Version) { Write-Host 'No version given (/version or OP_VERSION): installing the latest release. Pin a version for managed rollouts.' -ForegroundColor Yellow }
 $spec = if ($Version) { "office-partner@$Version" } else { 'office-partner@latest' }
 $registryArgs = if ($Registry) { @('--registry', $Registry) } else { @() }
+$prefixHint = '%APPDATA%\npm'
 $existing = Test-Path -LiteralPath (Join-Path $dataDir 'deployment.json')
 
 Step "Installing $spec"
-& $npm install -g $spec @registryArgs
-if ($LASTEXITCODE -ne 0) { Fail "npm install failed (exit $LASTEXITCODE). Check the network or the company proxy (npm config set proxy ...)." 20 }
+$npmLog = Join-Path $dataDir 'npm-install.log'
+function Invoke-NpmInstall([string[]] $extra) {
+  & $npm install -g $spec @registryArgs @extra 2>&1 | Tee-Object -FilePath $npmLog | Out-Host
+  return $LASTEXITCODE
+}
+$code = Invoke-NpmInstall @()
+if ($code -ne 0 -and (Select-String -LiteralPath $npmLog -Pattern 'node-gyp|gyp ERR|prebuild|cnoke|install script' -Quiet) -and -not (Select-String -LiteralPath $npmLog -Pattern 'EBUSY|EPERM|EACCES' -Quiet)) {
+  Write-Host 'A native module could not be prepared on this computer. Installing again without install scripts; Office Partner works without it (chat history is then kept in the browser).' -ForegroundColor Yellow
+  $code = Invoke-NpmInstall @('--ignore-scripts')
+}
+if ($code -ne 0 -and (Select-String -LiteralPath $npmLog -Pattern 'EBUSY|EPERM|EACCES' -Quiet)) {
+  Write-Host 'Access was denied while npm wrote files. Waiting for the security scan, then trying once more...' -ForegroundColor Yellow
+  Start-Sleep -Seconds 5
+  $code = Invoke-NpmInstall @()
+}
+if ($code -ne 0) {
+  $denied = Select-String -LiteralPath $npmLog -Pattern 'EBUSY|EPERM|EACCES' -Quiet
+  if ($denied) { Fail "npm could not write its files (access denied). A security program is probably blocking them; ask IT to allow $prefixHint and %LOCALAPPDATA%\Excel Partner, then run the installer again. Details: $npmLog" 20 }
+  Fail "npm install failed (exit $code). Check the network or the company proxy (npm config set proxy ...). Details: $npmLog" 20
+}
 $prefix = (& $npm prefix -g).Trim()
 Add-UserPath $prefix
 $command = Join-Path $prefix 'office-partner.cmd'
@@ -191,6 +237,15 @@ if ($LASTEXITCODE -ne 0) {
   Fail "office-partner setup failed (exit $LASTEXITCODE)." 30
 }
 & $command status
+
+# Say plainly what this computer can and cannot do, so nobody has to read a log to find out.
+Push-Location (Join-Path $prefix 'node_modules\office-partner')
+& $node -e "require('better-sqlite3')" 2>$null
+$sqlite = $LASTEXITCODE -eq 0
+Pop-Location
+if (-not $sqlite) { Write-Host 'Note: the SQLite component is not available on this computer, so chat history is kept in the browser instead. Everything else works.' -ForegroundColor Yellow }
+$officeApps = @('excel.exe', 'winword.exe', 'powerpnt.exe') | Where-Object { (Test-Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\$_") -or (Test-Path "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\$_") }
+if (-not $officeApps) { Write-Host 'Note: Word, Excel or PowerPoint was not found on this computer. Office Partner is installed, but it only appears inside those apps.' -ForegroundColor Yellow }
 
 Write-Host ""
 Write-Host 'Office Partner is installed.' -ForegroundColor Green

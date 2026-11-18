@@ -92,8 +92,25 @@ export function stopPackageProcesses({ root, keep = [], packageName = packageNam
   return { stopped: Number.isFinite(stopped) ? stopped : 0 };
 }
 
+/**
+ * Stops the bridge before files are replaced. The gentle stop (asking the bridge to shut down) can fail for reasons that
+ * do not matter here, such as a control token that no longer matches the running bridge; the process sweep that follows
+ * stops everything in the package folder anyway. Only a bridge that is still answering a user is a reason to give up.
+ */
+export async function stopBridgeForUpdate({ gentle, sweep, warn = (message) => console.warn(message) }) {
+  try { await gentle(); }
+  catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    if (/still working|SERVICE_BUSY/i.test(reason)) throw error;
+    warn(`The bridge did not stop gently (${reason}). Stopping its processes instead.`);
+  }
+  sweep();
+}
+
 /** What npm says when something has the folder open or a file is in the way. Anything else (offline, no such version) cannot be cured by trying again. */
 const NPM_LOCK_ERROR = /\b(EBUSY|EPERM|EACCES|ENOTEMPTY|EEXIST|ELOCKED)\b|resource busy|locked|operation not permitted/i;
+/** A native module whose install script could not download or build (blocked download, no compiler, antivirus). Optional ones are skipped by npm itself; for the rest the scripts are skipped on a last try. */
+const NPM_SCRIPT_ERROR = /node-gyp|gyp ERR|prebuild|cnoke|install script|better-sqlite3|koffi/i;
 const INSTALL_ATTEMPTS = 3;
 const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -150,6 +167,12 @@ export async function updatePackage({ root, dataDir, nodePath, stop, wasRunning,
     if (installed.error || installed.status === 0 || !NPM_LOCK_ERROR.test(errors)) break;
   }
   const cli = path.join(installedRoot, "bin", "office-partner.mjs");
+  if (!installed.error && installed.status !== 0 && NPM_SCRIPT_ERROR.test(String(installed.stderr ?? "")) && !NPM_LOCK_ERROR.test(String(installed.stderr ?? ""))) {
+    console.log("A native module could not be prepared on this computer. Installing again without install scripts; Office Partner keeps working without it (chat history is then kept in the browser).");
+    installed = run("npm.cmd", [...installArgs, "--ignore-scripts"], { ...npmOptions, stdio: ["inherit", "inherit", "pipe"], encoding: "utf8" });
+    const retryErrors = String(installed.stderr ?? "");
+    if (retryErrors) process.stderr.write(retryErrors);
+  }
   if (installed.error || installed.status !== 0) {
     report("recovering");
     if (wasRunning) {
