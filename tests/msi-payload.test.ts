@@ -111,4 +111,49 @@ describe("MSI files", () => {
     expect(fs.readFileSync("scripts/build-msi.mjs", "utf8")).toContain('WIX_VERSION = "5.0.2"');
     expect(fs.readFileSync(".github/workflows/msi.yml", "utf8")).toContain("--version 5.0.2");
   });
+
+  it("asks which parts to install (add-in, gateway, or both) and shows the result of the setup", () => {
+    const wxs = fs.readFileSync("installer/msi/OfficePartner.wxs", "utf8");
+    expect(wxs).toContain('Id="WixUI_FeatureTree"');
+    expect(wxs).toContain('<Feature Id="AddIn"');
+    expect(wxs).toContain('<Feature Id="Gateway"');
+    // The gateway is offered, not forced: level 2 keeps it unchecked until the person ticks it.
+    expect(wxs).toMatch(/<Feature Id="Gateway"[^>]*Level="2"/);
+    // The choice reaches the setup script as registry markers, so ADDLOCAL and the wizard take the same path.
+    expect(wxs).toContain('Name="AddIn"');
+    expect(wxs).toContain('Name="Gateway"');
+    const build = fs.readFileSync("scripts/build-msi.mjs", "utf8");
+    expect(build).toContain("WixToolset.UI.wixext");
+    expect(build).toContain("OfficePartner.en-us.wxl");
+    const bootstrap = fs.readFileSync("installer/msi/bootstrap.ps1", "utf8");
+    expect(bootstrap).toContain("'status'");
+    expect(bootstrap).toContain("Get-Targets");
+    expect(bootstrap).toContain("Show-InstallStatusLater");
+  });
+
+  it("starts PowerShell with no console window at all", () => {
+    const wxs = fs.readFileSync("installer/msi/OfficePartner.wxs", "utf8");
+    // A custom action that runs powershell.exe directly opens a console window, and on Windows 11 that window is a
+    // Windows Terminal one that -WindowStyle Hidden does not suppress. The install step runs through a GUI-subsystem
+    // launcher that starts PowerShell with CREATE_NO_WINDOW; the three short steps use QuietExec, which does the same
+    // from inside msiexec. No step runs PowerShell by itself.
+    const commands = [...wxs.matchAll(/ExeCommand="([^"]*)"/g)].map((match) => match[1] ?? "");
+    expect(commands.length).toBeGreaterThanOrEqual(2);
+    for (const command of commands) expect(command.startsWith("&quot;[INSTALLFOLDER]run-hidden.exe&quot;")).toBe(true);
+    expect(wxs.match(/DllEntry="WixQuietExec"/g)).toHaveLength(3);
+    // The install step must be deferred: it runs the files that InstallFiles copies, and every immediate action of
+    // InstallExecuteSequence runs before the deferred script does.
+    expect(wxs).toMatch(/<CustomAction Id="Install"[^>]*Execute="deferred"/);
+    const launcher = fs.readFileSync("installer/msi/run-hidden.cs", "utf8");
+    expect(launcher).toContain("CreateNoWindow = true");
+    expect(launcher).toContain("UseShellExecute = false");
+    const build = fs.readFileSync("scripts/build-msi.mjs", "utf8");
+    expect(build).toContain("/target:winexe");
+    expect(build).toContain("LauncherDir=");
+    // Child processes (the CLI, the status window) start without a console too: Process.Start with CreateNoWindow, never
+    // Start-Process -WindowStyle Hidden, which still lets Windows Terminal show a window on Windows 11.
+    const bootstrap = fs.readFileSync("installer/msi/bootstrap.ps1", "utf8");
+    expect(bootstrap).toContain("CreateNoWindow = $true");
+    expect(bootstrap).not.toContain("Start-Process");
+  });
 });

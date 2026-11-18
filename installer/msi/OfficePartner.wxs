@@ -4,12 +4,31 @@
   It installs the package into %APPDATA%\npm\node_modules\office-partner, where `npm install -g` would put it, so `office-partner update` keeps working.
   Node.js and the Copilot CLI are not inside: installer/msi/bootstrap.ps1 downloads the exact versions pinned in bin/runtime-manifest.json.
   Public properties (msiexec ... PROVIDERS=copilot NOSIDELOAD=1 /qn): PROVIDERS (default copilot), NOSIDELOAD (deploy the manifest from Microsoft 365 instead).
+  The wizard offers two independent parts (checked in the Customize page, one, both, or neither):
+    AddIn   the task pane, its bridge and the add-in registration (default on)
+    Gateway the Anthropic-compatible API on https://localhost:8766 (default off)
+  Silent deployments pick them the usual MSI way: ADDLOCAL=Files,AddIn,Gateway (or ADDLOCAL=Files only for the gateway).
 -->
-<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs" xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs" xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util" xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
   <Package Name="Office Partner" Manufacturer="Office Partner" Version="$(Version)" UpgradeCode="552e7bb6-e522-4ea5-8264-96392d389aed"
            Scope="perUser" InstallerVersion="500" Compressed="yes">
-    <MajorUpgrade DowngradeErrorMessage="A newer version of Office Partner is already installed." Schedule="afterInstallInitialize" />
+    <MajorUpgrade DowngradeErrorMessage="A newer version of Office Partner is already installed." AllowSameVersionUpgrades="yes" Schedule="afterInstallInitialize" />
     <MediaTemplate EmbedCab="yes" CompressionLevel="high" />
+
+    <!-- The wizard a person sees when they double-click the .msi: Welcome, the licence, the Customize page with the two
+         check boxes, the progress bar and the "Completed" page. Silent deployments (/qn, Intune) get no UI and use the
+         feature levels above as defaults. -->
+    <ui:WixUI Id="WixUI_FeatureTree" />
+    <WixVariable Id="WixUILicenseRtf" Value="$(LicenseRtf)" />
+
+    <!-- What the progress bar says while the long step (Node.js and the chosen CLI are downloaded) runs. -->
+    <UI>
+      <ProgressText Action="StopBridge" Message="Stopping the running Office Partner bridge" />
+      <ProgressText Action="PrepareInstall" Message="Clearing files an older Office Partner left behind" />
+      <ProgressText Action="Install" Message="Installing Node.js and setting up the selected parts" />
+      <ProgressText Action="InstallNoSideload" Message="Installing Node.js and setting up the selected parts" />
+      <ProgressText Action="Uninstall" Message="Removing Office Partner" />
+    </UI>
 
     <Property Id="PROVIDERS" Value="copilot" Secure="yes" />
     <Property Id="NOSIDELOAD" Secure="yes" />
@@ -33,35 +52,97 @@
     <ComponentGroup Id="CommandShim" Directory="NpmDir">
       <Files Include="$(PayloadDir)\office-partner.cmd" />
     </ComponentGroup>
+    <!-- A GUI-subsystem launcher built from installer/msi/run-hidden.cs, used by the install step below. It is not part of
+         the npm payload (so `office-partner update` never sees it as a stray file) and sits next to the installed files. -->
+    <ComponentGroup Id="Launcher" Directory="INSTALLFOLDER">
+      <Files Include="$(LauncherDir)\run-hidden.exe" />
+    </ComponentGroup>
     <ComponentGroup Id="Cleanup" Directory="INSTALLFOLDER">
       <Component Id="InstallDirRecord" Guid="0f6c3a52-5d0e-4a39-9a43-3c1a6f7d2b11">
         <RegistryValue Root="HKCU" Key="Software\Office Partner" Name="InstallDir" Type="string" Value="[INSTALLFOLDER]" KeyPath="yes" />
         <util:RemoveFolderEx On="uninstall" Property="PACKAGEDIR" />
       </Component>
+      <!-- Marks that this installer wrote the two markers below, so the bootstrap script can tell "the person chose one
+           part" from "an older installer that had no choice". -->
+      <Component Id="SelectionRecord" Guid="e2b8d4f1-3a6c-4b95-8d27-6f1c4e9a0b53">
+        <RegistryValue Root="HKCU" Key="Software\Office Partner" Name="Selected" Type="integer" Value="1" KeyPath="yes" />
+      </Component>
+    </ComponentGroup>
+    <!-- One marker per part the person ticked. The bootstrap script reads it after the registry values are written, so a
+         silent install (ADDLOCAL=...) and the wizard end up doing exactly the same thing. -->
+    <ComponentGroup Id="AddInChoice" Directory="INSTALLFOLDER">
+      <Component Id="AddInSelected" Guid="7b3f2c8e-1d4a-4e6b-9c3f-2a5d8e7f1b02">
+        <RegistryValue Root="HKCU" Key="Software\Office Partner" Name="AddIn" Type="integer" Value="1" KeyPath="yes" />
+      </Component>
+    </ComponentGroup>
+    <ComponentGroup Id="GatewayChoice" Directory="INSTALLFOLDER">
+      <Component Id="GatewaySelected" Guid="c4e19a57-86b2-4f0d-b7e1-5d93c2a6f8b4">
+        <RegistryValue Root="HKCU" Key="Software\Office Partner" Name="Gateway" Type="integer" Value="1" KeyPath="yes" />
+      </Component>
     </ComponentGroup>
 
-    <!-- PowerShell runs as the signed-in user. Failing the install step rolls the copied files back. -->
-    <CustomAction Id="Install" Directory="INSTALLFOLDER" Execute="deferred" Impersonate="yes" Return="check"
-                  ExeCommand="powershell.exe -NoProfile -ExecutionPolicy Bypass -File &quot;[INSTALLFOLDER]installer\bootstrap.ps1&quot; -Action install -Providers &quot;[PROVIDERS]&quot;" />
-    <CustomAction Id="InstallNoSideload" Directory="INSTALLFOLDER" Execute="deferred" Impersonate="yes" Return="check"
-                  ExeCommand="powershell.exe -NoProfile -ExecutionPolicy Bypass -File &quot;[INSTALLFOLDER]installer\bootstrap.ps1&quot; -Action install -Providers &quot;[PROVIDERS]&quot; -NoSideload" />
-    <CustomAction Id="StopBridge" Directory="INSTALLFOLDER" Execute="immediate" Return="ignore"
-                  ExeCommand="powershell.exe -NoProfile -ExecutionPolicy Bypass -File &quot;[INSTALLFOLDER]installer\bootstrap.ps1&quot; -Action stop" />
-    <CustomAction Id="Uninstall" Directory="INSTALLFOLDER" Execute="immediate" Return="ignore"
-                  ExeCommand="powershell.exe -NoProfile -ExecutionPolicy Bypass -File &quot;[INSTALLFOLDER]installer\bootstrap.ps1&quot; -Action uninstall" />
+    <!-- PowerShell runs as the signed-in user without a console window. Two mechanisms, because the steps differ:
+         the three short steps (stop, prepare, uninstall) go through QuietExec, a custom action DLL that lives inside
+         msiexec and starts its command with CREATE_NO_WINDOW. The install step starts the bridge and the gateway, which
+         inherit whatever handles it is given: QuietExec reads its child's output from a pipe and returns only when every
+         process holding that pipe has closed it, so the setup's own long-lived processes would keep the action open for
+         good. It runs instead through run-hidden.exe (installer/msi/run-hidden.cs, compiled into the package next to the
+         files): a GUI-subsystem program with no console of its own that starts PowerShell with CREATE_NO_WINDOW and waits
+         for it. A plain ExeCommand on powershell.exe opens a console window that -WindowStyle Hidden does not suppress on
+         Windows 11, where the console host is Windows Terminal.
+         Return="ignore": the files are the product; a setup step that cannot finish is repaired by the script itself and
+         reported in its log, never turned into a rollback the person cannot act on.
+         An immediate action hands its command line to QuietExec through WixQuietExecCmdLine (which QuietExec clears). -->
+    <Property Id="WixQuietExecCmdTimeout" Value="3600000" />
+    <!-- Stop and uninstall only ever run where an earlier copy put the script on disk. Prepare may run on a machine with
+         no earlier copy at all, so it asks cmd.exe first: the step then succeeds whichever way, and the log of a clean
+         install has no error in it. -->
+    <CustomAction Id="SetStopBridge" Property="WixQuietExecCmdLine"
+                  Value="&quot;[SystemFolder]WindowsPowerShell\v1.0\powershell.exe&quot; -NoProfile -NonInteractive -ExecutionPolicy Bypass -File &quot;[INSTALLFOLDER]installer\bootstrap.ps1&quot; -Action stop" />
+    <CustomAction Id="SetPrepareInstall" Property="WixQuietExecCmdLine"
+                  Value="&quot;[SystemFolder]cmd.exe&quot; /c if exist &quot;[INSTALLFOLDER]installer\bootstrap.ps1&quot; &quot;[SystemFolder]WindowsPowerShell\v1.0\powershell.exe&quot; -NoProfile -NonInteractive -ExecutionPolicy Bypass -File &quot;[INSTALLFOLDER]installer\bootstrap.ps1&quot; -Action prepare" />
+    <CustomAction Id="SetUninstall" Property="WixQuietExecCmdLine"
+                  Value="&quot;[SystemFolder]WindowsPowerShell\v1.0\powershell.exe&quot; -NoProfile -NonInteractive -ExecutionPolicy Bypass -File &quot;[INSTALLFOLDER]installer\bootstrap.ps1&quot; -Action uninstall" />
+    <CustomAction Id="StopBridge" BinaryRef="$(UtilCA)" DllEntry="WixQuietExec" Execute="immediate" Return="ignore" />
+    <CustomAction Id="PrepareInstall" BinaryRef="$(UtilCA)" DllEntry="WixQuietExec" Execute="immediate" Return="ignore" />
+    <CustomAction Id="Uninstall" BinaryRef="$(UtilCA)" DllEntry="WixQuietExec" Execute="immediate" Return="ignore" />
+    <CustomAction Id="Install" Directory="INSTALLFOLDER" Execute="deferred" Impersonate="yes" Return="ignore"
+                  ExeCommand="&quot;[INSTALLFOLDER]run-hidden.exe&quot; &quot;[SystemFolder]WindowsPowerShell\v1.0\powershell.exe&quot; -NoProfile -NonInteractive -ExecutionPolicy Bypass -File &quot;[INSTALLFOLDER]installer\bootstrap.ps1&quot; -Action install -Providers &quot;[PROVIDERS]&quot;" />
+    <CustomAction Id="InstallNoSideload" Directory="INSTALLFOLDER" Execute="deferred" Impersonate="yes" Return="ignore"
+                  ExeCommand="&quot;[INSTALLFOLDER]run-hidden.exe&quot; &quot;[SystemFolder]WindowsPowerShell\v1.0\powershell.exe&quot; -NoProfile -NonInteractive -ExecutionPolicy Bypass -File &quot;[INSTALLFOLDER]installer\bootstrap.ps1&quot; -Action install -Providers &quot;[PROVIDERS]&quot; -NoSideload" />
 
     <InstallExecuteSequence>
-      <!-- Before the files are replaced or removed, the bridge must let go of them. An upgrade keeps the registration and certificate. -->
-      <Custom Action="StopBridge" Before="InstallInitialize" Condition="NOT Installed OR REMOVE=&quot;ALL&quot;" />
-      <Custom Action="Uninstall" Before="InstallInitialize" Condition="REMOVE=&quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE" />
-      <Custom Action="Install" After="InstallFiles" Condition="NOT REMOVE AND NOT NOSIDELOAD" />
-      <Custom Action="InstallNoSideload" After="InstallFiles" Condition="NOT REMOVE AND NOSIDELOAD" />
+      <!-- Before the files are replaced or removed, the bridge must let go of them. Only when there is something to stop:
+           on a fresh install no script is on disk yet, so the step would only log an error. An upgrade keeps the
+           registration and certificate. -->
+      <Custom Action="SetStopBridge" Before="StopBridge" Condition="Installed OR WIX_UPGRADE_DETECTED" />
+      <Custom Action="StopBridge" Before="InstallInitialize" Condition="Installed OR WIX_UPGRADE_DETECTED" />
+      <Custom Action="SetPrepareInstall" Before="PrepareInstall" Condition="NOT Installed" />
+      <Custom Action="PrepareInstall" After="StopBridge" Condition="NOT Installed" />
+      <Custom Action="SetUninstall" Before="Uninstall" Condition="REMOVE=&quot;ALL&quot; AND NOT WIX_UPGRADE_DETECTED AND NOT UPGRADINGPRODUCTCODE" />
+      <Custom Action="Uninstall" Before="InstallInitialize" Condition="REMOVE=&quot;ALL&quot; AND NOT WIX_UPGRADE_DETECTED AND NOT UPGRADINGPRODUCTCODE" />
+      <!-- An upgrade arrives with REMOVE=ALL as well; the setup step must still run there, or the machine would keep the files
+           without a registration or a bridge. It is skipped only for a real uninstall. Deferred and sequenced before
+           InstallFinalize: it runs the files InstallFiles copies and the markers of the chosen parts, both of which exist
+           only in the deferred script (every immediate action of this sequence runs before that script starts). -->
+      <Custom Action="Install" Before="InstallFinalize" Condition="(NOT REMOVE OR WIX_UPGRADE_DETECTED) AND NOT NOSIDELOAD" />
+      <Custom Action="InstallNoSideload" Before="InstallFinalize" Condition="(NOT REMOVE OR WIX_UPGRADE_DETECTED) AND NOSIDELOAD" />
     </InstallExecuteSequence>
 
-    <Feature Id="Main" Title="Office Partner" Level="1">
+    <!-- Always installed, never shown: the files both parts need (the gateway ships inside the same package). -->
+    <Feature Id="Files" Title="Office Partner files" Level="1" Display="hidden" AllowAbsent="no">
       <ComponentGroupRef Id="PackageFiles" />
       <ComponentGroupRef Id="CommandShim" />
       <ComponentGroupRef Id="Cleanup" />
+      <ComponentGroupRef Id="Launcher" />
+    </Feature>
+    <Feature Id="AddIn" Title="Office add-in for Excel, Word and PowerPoint" Level="1" Display="expand"
+             Description="The task pane, the bridge on https://localhost:8765 and the registration Office reads. Restart Office after installing.">
+      <ComponentGroupRef Id="AddInChoice" />
+    </Feature>
+    <Feature Id="Gateway" Title="Agent Gateway (Anthropic-compatible API)" Level="2" Display="expand"
+             Description="A local API on https://localhost:8766 for Anthropic's official Claude add-ins. Not needed for this product's own task pane.">
+      <ComponentGroupRef Id="GatewayChoice" />
     </Feature>
   </Package>
 </Wix>

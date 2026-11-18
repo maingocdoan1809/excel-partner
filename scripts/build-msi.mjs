@@ -1,5 +1,5 @@
 // Turns the payload folder of scripts/build-msi-payload.mjs into release/office-partner-<version>-<arch>.msi (needs the WiX 5 CLI on Windows).
-//   dotnet tool install --global wix --version 5.0.2 && wix extension add --global WixToolset.Util.wixext/5.0.2
+//   dotnet tool install --global wix --version 5.0.2 && wix extension add --global WixToolset.Util.wixext/5.0.2 && wix extension add --global WixToolset.UI.wixext/5.0.2
 //   node scripts/build-msi-payload.mjs --arch x64 && node scripts/build-msi.mjs --arch x64
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
@@ -20,9 +20,35 @@ if (version.error || version.status !== 0) throw new Error(`The WiX CLI was not 
 if (!version.stdout.trim().startsWith(WIX_VERSION)) throw new Error(`WiX ${version.stdout.trim()} is installed; this installer is built with ${WIX_VERSION} (dotnet tool update --global wix --version ${WIX_VERSION}).`);
 
 const msi = path.join(root, "release", `${info.name}-${info.version}-${arch}.msi`);
+/** The util extension's custom action binary, which runs a command line without ever opening a console window. */
+const utilCa = { x64: "Wix4UtilCA_X64", arm64: "Wix4UtilCA_A64", x86: "Wix4UtilCA_X86" }[arch];
+if (!utilCa) throw new Error(`No util custom action binary for ${arch}.`);
+
+/**
+ * Builds the GUI-subsystem launcher the install step uses: it has no console of its own and starts PowerShell with
+ * CREATE_NO_WINDOW, so no console or Windows Terminal window appears. csc.exe ships with Windows (.NET Framework).
+ */
+function buildLauncher() {
+  const windows = process.env.WINDIR ?? "C:\\Windows";
+  const csc = [
+    path.join(windows, "Microsoft.NET", "Framework64", "v4.0.30319", "csc.exe"),
+    path.join(windows, "Microsoft.NET", "Framework", "v4.0.30319", "csc.exe"),
+  ].find((candidate) => fs.existsSync(candidate));
+  if (!csc) throw new Error("csc.exe (.NET Framework) was not found; it ships with Windows.");
+  const exe = path.join(outDir, "run-hidden.exe");
+  const compile = spawnSync(csc, ["/nologo", "/codepage:65001", "/target:winexe", "/optimize+", `/out:${exe}`, path.join(root, "installer", "msi", "run-hidden.cs")], { encoding: "utf8" });
+  if (compile.error || compile.status !== 0) throw new Error(`Compiling run-hidden.exe failed.\n${compile.stdout ?? ""}${compile.stderr ?? ""}`);
+  return exe;
+}
+const launcher = buildLauncher();
+
 // `wix build` does not run ICE validation (that is the separate `wix msi validate`), so the per-user-file ICE38/ICE64/ICE91 warnings never appear here.
-const args = ["build", "-arch", arch, "-ext", "WixToolset.Util.wixext",
-  "-d", `Version=${info.msiVersion}`, "-d", `PayloadDir=${path.join(outDir, "payload")}`, "-o", msi, path.join(root, "installer", "msi", "OfficePartner.wxs")];
+const args = ["build", "-arch", arch, "-ext", "WixToolset.Util.wixext", "-ext", "WixToolset.UI.wixext",
+  "-d", `Version=${info.msiVersion}`, "-d", `PayloadDir=${path.join(outDir, "payload")}`, "-d", `UtilCA=${utilCa}`,
+  "-d", `LauncherDir=${path.dirname(launcher)}`,
+  "-d", `LicenseRtf=${path.join(root, "installer", "msi", "license.rtf")}`,
+  "-loc", path.join(root, "installer", "msi", "OfficePartner.en-us.wxl"),
+  "-o", msi, path.join(root, "installer", "msi", "OfficePartner.wxs")];
 const result = spawnSync("wix", args, { stdio: "inherit", shell: process.platform === "win32" });
 if (result.error || result.status !== 0) throw new Error("wix build failed.");
 console.log(`\n${msi}  ${(fs.statSync(msi).size / 1048576).toFixed(1)} MB`);

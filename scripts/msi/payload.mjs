@@ -95,6 +95,8 @@ export function commandShim() {
     "",
     'IF EXIST "%LOCALAPPDATA%\\Programs\\nodejs\\node.exe" (',
     '  SET "_prog=%LOCALAPPDATA%\\Programs\\nodejs\\node.exe"',
+    ") ELSE IF EXIST \"%LOCALAPPDATA%\\Programs\\office-partner-node\\node.exe\" (",
+    '  SET "_prog=%LOCALAPPDATA%\\Programs\\office-partner-node\\node.exe"',
     ") ELSE (",
     '  SET "_prog=node"',
     "  SET PATHEXT=%PATHEXT:;.JS;=;%",
