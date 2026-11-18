@@ -10,6 +10,7 @@ export function setupHistoryStorage(getClient: () => BridgeClient, store: Durabl
   const say = (text: string) => { if (status) status.textContent = text; };
 
   async function refresh() {
+    if (store.localOnly) { if (info) info.textContent = "Saved in this browser only"; if (recoverButton) recoverButton.hidden = true; return; }
     try {
       const stats = await getClient().historyStats();
       const unsaved = store.pendingCount ? ` · ${store.pendingCount} not saved yet` : "";

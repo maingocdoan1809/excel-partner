@@ -184,7 +184,13 @@ export class DurableHistory implements ChatHistoryStore {
    this.total = page.total; this.generation = page.generation;
    // Summary refreshes cannot advance the revision of an older loaded transcript.
  }
- loadPage(id: string, offset = 0, limit = 100) { return this.api.historyPage(id, offset, limit); }
+ async loadPage(id: string, offset = 0, limit = 100): Promise<HistoryTranscript> {
+   if (!this.local) return this.api.historyPage(id, offset, limit);
+   const s = this.records.get(`${this.host()}:${id}`); if (!s) throw new Error("HISTORY_NOT_FOUND");
+   return { session: { ...structuredClone(s), messages: structuredClone(s.messages.slice(offset, offset + limit)), changes: structuredClone(s.changes.slice(offset, offset + limit)) }, revision: 0, generation: 0, totalMessages: s.messages.length, totalChanges: s.changes.length } as HistoryTranscript;
+ }
+ /** True while chats live only in this browser because the bridge has no SQLite driver. */
+ get localOnly() { return this.local; }
  async load(id: string) {
    if (this.local) return this.get(id);
    const pending = this.queue.filter(p => p.host === this.host() && p.session.id === id).slice(-1)[0];
