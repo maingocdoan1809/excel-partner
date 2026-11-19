@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { expect, it } from "vitest";
 
-it.skipIf(process.platform !== "win32")("runs the embedded MSI stop script before any bootstrap is installed", () => {
+it.skipIf(process.platform !== "win32")("runs the embedded MSI stop and purge scripts without installed files", () => {
   const work = fs.mkdtempSync(path.join(os.tmpdir(), "office-partner-msi-launcher-"));
   try {
     const result = spawnSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
@@ -14,6 +14,7 @@ it.skipIf(process.platform !== "win32")("runs the embedded MSI stop script befor
     expect(result.error).toBeUndefined();
     expect(result.status, result.stdout + result.stderr).toBe(0);
     expect(result.stdout).toContain("PASS: embedded stop works");
+    expect(result.stdout).toContain("PASS: embedded purge removes selected data only");
   } finally {
     fs.rmSync(work, { recursive: true, force: true });
   }

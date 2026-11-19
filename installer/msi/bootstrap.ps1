@@ -5,7 +5,7 @@
 #   -Action prepare    the same stop, then delete the folder an earlier copy (npm or an interrupted install) left at the install path
 #   -Action uninstall  remove the registration, startup entries, shortcut, certificate trust and the Node.js this script added
 #   -Action check      print what this machine has and change nothing
-#   -Action status     show the result of the last install in a window (started detached by -Action install, UI installs only)
+#   -Action status     show the result of the last install on demand
 # Every version and SHA-256 comes from bin/runtime-manifest.json of the package being installed: nothing here says "latest".
 # This script never fails the installation. A machine that already has an old copy, a foreign Node.js, a different npm prefix
 # or a running bridge is repaired and overwritten; anything that still cannot be finished is written to the log and to
@@ -281,7 +281,7 @@ function Invoke-Cli([string[]] $arguments) {
   $quoted = ($arguments | ForEach-Object { '"' + $_ + '"' }) -join ' '
   $shellExe = $env:ComSpec
   if (-not $shellExe -or -not (Test-Path -LiteralPath $shellExe)) { $shellExe = Join-Path $env:SystemRoot 'System32\cmd.exe' }
-  $command = "`"$quoted >> `"$logFile`" 2>&1`""
+  $command = "`"$quoted <nul >> `"$logFile`" 2>&1`""
   try {
     $start = New-Object System.Diagnostics.ProcessStartInfo
     $start.FileName = $shellExe
@@ -344,27 +344,12 @@ function Write-Status([string] $nodeExe, [bool] $setupOk) {
   Write-Log "status: setupOk=$setupOk problems=$($problems.Count)"
 }
 
-# True only when this install was started with the wizard a person is clicking through. A silent or reduced
-# install (/qn, /qb, /qr) must never open a dialog, so those always answer false.
-function Test-InteractiveInstall {
-  try {
-    foreach ($process in @(Get-CimInstance Win32_Process -Filter "Name='msiexec.exe'" -ErrorAction SilentlyContinue)) {
-      $command = "$($process.CommandLine)"
-      if ($command -notmatch '(?i)office-partner') { continue }
-      if ($command -match '(?i)/(qn|qb|qr|quiet)\b') { return $false }
-      return $true
-    }
-  } catch { }
-  return $false
-}
-
 function Test-LocalPort([int] $port) {
   $client = New-Object Net.Sockets.TcpClient
   try { $client.Connect('127.0.0.1', $port); return $client.Connected } catch { return $false } finally { $client.Dispose() }
 }
 
-# The status the person actually wants after the wizard: which parts were set up, are they answering, where is the log.
-# It reads install-status.json, so the window is started by a separate process once the wizard has finished.
+# Show which parts were set up, whether they are answering, and where the log lives.
 function Show-InstallStatus {
   try {
     Add-Type -AssemblyName System.Windows.Forms -ErrorAction Stop
@@ -399,21 +384,6 @@ function Show-InstallStatus {
     if ($problemCount -gt 0) { $lines += ''; $lines += "$problemCount step(s) reported a problem; open the log above." }
     $icon = if ($setupOk) { [System.Windows.Forms.MessageBoxIcon]::Information } else { [System.Windows.Forms.MessageBoxIcon]::Warning }
     [void][System.Windows.Forms.MessageBox]::Show(($lines -join "`r`n"), $(if ($setupOk) { 'Office Partner installed' } else { 'Office Partner: setup needs attention' }), [System.Windows.Forms.MessageBoxButtons]::OK, $icon)
-  } catch { Write-Log "status window: $($_.Exception.Message)" }
-}
-
-# Opens the window from a separate, short-lived PowerShell once the wizard has drawn its last page, so a person who
-# walks away cannot hold the installation open, and a silent install never sees a dialog.
-function Show-InstallStatusLater {
-  if (-not (Test-InteractiveInstall)) { Write-Log 'status window: skipped (silent install)'; return }
-  try {
-    $start = New-Object System.Diagnostics.ProcessStartInfo
-    $start.FileName = Join-Path $PSHOME 'powershell.exe'
-    $start.Arguments = "-NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`" -Action status"
-    $start.UseShellExecute = $false
-    $start.CreateNoWindow = $true
-    [void][System.Diagnostics.Process]::Start($start)
-    Write-Log 'status window: opened after the wizard'
   } catch { Write-Log "status window: $($_.Exception.Message)" }
 }
 
@@ -611,7 +581,7 @@ try {
     Write-Log "The files are installed, but the last step did not finish. Open 'Office Partner - Fix connection' from the Start Menu, or run: `"$node`" `"$cli`" fix"
     Write-Log "Log: $logFile"
   }
-  Show-InstallStatusLater
+  # The MSI owns completion UI. A status child can keep QuietExec alive after setup finishes.
 } catch {
   Add-Problem "unexpected: $($_.Exception.Message)"
   Write-Log $_.ScriptStackTrace

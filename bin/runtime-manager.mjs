@@ -27,7 +27,8 @@ export async function installPackage(prefix, spec, { env = process.env, run = ru
   const installEnv = { ...env };
   for (const key of Object.keys(installEnv)) if (key.toLowerCase() === "npm_config_engine_strict") delete installEnv[key];
   installEnv.NPM_CONFIG_ENGINE_STRICT = "true";
-  const result = await run(process.execPath, [npmEntrypoint(env), "install", "--global=false", "--prefix", prefix, "--save-exact", "--omit=dev", "--no-audit", "--no-fund", "--prefer-offline", spec], { env: installEnv, timeoutMs: 10 * 60_000 });
+  // Revalidate metadata for newly pinned versions, even when npm config prefers cached data.
+  const result = await run(process.execPath, [npmEntrypoint(env), "install", "--global=false", "--prefix", prefix, "--save-exact", "--omit=dev", "--no-audit", "--no-fund", "--no-prefer-offline", "--prefer-online", spec], { env: installEnv, timeoutMs: 10 * 60_000 });
   if (result.code !== 0) throw new Error(result.errorCode === "ETIMEDOUT" ? "INSTALL_TIMEOUT" : "INSTALL_FAILED");
 }
 /**

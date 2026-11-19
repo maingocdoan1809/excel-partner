@@ -15,42 +15,30 @@ const outDir = path.resolve(arg("--payload", path.join(root, "release", "msi", a
 const info = JSON.parse(fs.readFileSync(path.join(outDir, "payload-info.json"), "utf8"));
 if (info.arch !== arch) throw new Error(`The payload in ${outDir} is for ${info.arch}, not ${arch}.`);
 
-const version = spawnSync("wix", ["--version"], { encoding: "utf8", shell: process.platform === "win32" });
+const version = spawnSync("wix", ["--version"], { encoding: "utf8" });
 if (version.error || version.status !== 0) throw new Error(`The WiX CLI was not found. Install it: dotnet tool install --global wix --version ${WIX_VERSION}`);
 if (!version.stdout.trim().startsWith(WIX_VERSION)) throw new Error(`WiX ${version.stdout.trim()} is installed; this installer is built with ${WIX_VERSION} (dotnet tool update --global wix --version ${WIX_VERSION}).`);
 
-const msi = path.join(root, "release", `${info.name}-${info.version}-${arch}.msi`);
+const msi = path.resolve(arg("--out", path.join(root, "release", `${info.name}-${info.version}-${arch}.msi`)));
 /** The util extension's custom action binary, which runs a command line without ever opening a console window. */
 const utilCa = { x64: "Wix4UtilCA_X64", arm64: "Wix4UtilCA_A64", x86: "Wix4UtilCA_X86" }[arch];
 if (!utilCa) throw new Error(`No util custom action binary for ${arch}.`);
 
-/**
- * Builds the GUI-subsystem launcher the install step uses: it has no console of its own and starts PowerShell with
- * CREATE_NO_WINDOW, so no console or Windows Terminal window appears. csc.exe ships with Windows (.NET Framework).
- */
-function buildLauncher() {
-  const windows = process.env.WINDIR ?? "C:\\Windows";
-  const csc = [
-    path.join(windows, "Microsoft.NET", "Framework64", "v4.0.30319", "csc.exe"),
-    path.join(windows, "Microsoft.NET", "Framework", "v4.0.30319", "csc.exe"),
-  ].find((candidate) => fs.existsSync(candidate));
-  if (!csc) throw new Error("csc.exe (.NET Framework) was not found; it ships with Windows.");
-  const exe = path.join(outDir, "run-hidden.exe");
-  const compile = spawnSync(csc, ["/nologo", "/codepage:65001", "/target:winexe", "/optimize+", `/out:${exe}`,
-    `/resource:${path.join(root, "installer", "msi", "stop-processes.ps1")},StopProcesses`,
-    path.join(root, "installer", "msi", "run-hidden.cs")], { encoding: "utf8" });
-  if (compile.error || compile.status !== 0) throw new Error(`Compiling run-hidden.exe failed.\n${compile.stdout ?? ""}${compile.stderr ?? ""}`);
-  return exe;
-}
-const launcher = buildLauncher();
+// Stop runs before files are installed and purge runs after files are removed.
+const encodedCommand = (file, invocation) => {
+  const script = fs.readFileSync(path.join(root, "installer", "msi", file), "utf8");
+  return Buffer.from(`${script}\n${invocation}\n`, "utf16le").toString("base64");
+};
 
 // `wix build` does not run ICE validation (that is the separate `wix msi validate`), so the per-user-file ICE38/ICE64/ICE91 warnings never appear here.
 const args = ["build", "-arch", arch, "-ext", "WixToolset.Util.wixext", "-ext", "WixToolset.UI.wixext",
   "-d", `Version=${info.msiVersion}`, "-d", `PayloadDir=${path.join(outDir, "payload")}`, "-d", `UtilCA=${utilCa}`,
-  "-d", `LauncherDir=${path.dirname(launcher)}`,
+  "-d", `StopBridgeCommand=${encodedCommand("stop-processes.ps1", "Stop-ProductProcesses")}`,
+  "-d", `PurgeDataCommand=${encodedCommand("purge-data.ps1", "Remove-ProductData")}`,
+  "-d", `PurgeGatewayCommand=${encodedCommand("purge-data.ps1", "Remove-ProductData -Gateway")}`,
   "-d", `LicenseRtf=${path.join(root, "installer", "msi", "license.rtf")}`,
   "-loc", path.join(root, "installer", "msi", "OfficePartner.en-us.wxl"),
   "-o", msi, path.join(root, "installer", "msi", "OfficePartner.wxs")];
-const result = spawnSync("wix", args, { stdio: "inherit", shell: process.platform === "win32" });
+const result = spawnSync("wix", args, { stdio: "inherit" });
 if (result.error || result.status !== 0) throw new Error("wix build failed.");
 console.log(`\n${msi}  ${(fs.statSync(msi).size / 1048576).toFixed(1)} MB`);

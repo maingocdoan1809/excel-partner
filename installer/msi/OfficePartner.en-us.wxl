@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Overrides the WixUI texts this product shows on its last page (WixUI_FeatureTree). Ids match WixUI_en-us.wxl. -->
+<!-- WixUI_FeatureTree shares this completion page across install, maintenance, and uninstall. -->
 <WixLocalization Culture="en-us" xmlns="http://wixtoolset.org/schemas/v4/wxl">
-  <String Id="ExitDialogTitle" Value="Office Partner is installed" />
-  <String Id="ExitDialogDescription" Value="Restart Word, Excel and PowerPoint, then open Home &gt; Office Partner. Sign in from Settings; the sign-in of each provider stays with its own CLI." />
+  <String Id="ExitDialogTitle" Value="Office Partner Setup Wizard completed" />
+  <String Id="ExitDialogDescription" Value="Click Finish to close the wizard." />
 </WixLocalization>

@@ -32,6 +32,7 @@
 
     <Property Id="PROVIDERS" Value="copilot" Secure="yes" />
     <Property Id="NOSIDELOAD" Secure="yes" />
+    <Property Id="PURGEDATA" Secure="yes" />
     <Property Id="ARPNOREPAIR" Value="1" />
     <!-- Where the package was installed, remembered so uninstall can remove files `office-partner update` added later. -->
     <Property Id="PACKAGEDIR">
@@ -52,13 +53,6 @@
     <ComponentGroup Id="CommandShim" Directory="NpmDir">
       <Files Include="$(PayloadDir)\office-partner.cmd" />
     </ComponentGroup>
-    <!-- A GUI-subsystem launcher built from installer/msi/run-hidden.cs, used by the install step below. It is not part of
-         the npm payload (so `office-partner update` never sees it as a stray file) and sits next to the installed files. -->
-    <ComponentGroup Id="Launcher" Directory="INSTALLFOLDER">
-      <Files Include="$(LauncherDir)\run-hidden.exe" />
-    </ComponentGroup>
-    <!-- Available before InstallFiles: npm installations have no bootstrap.ps1 to stop the running bridge. -->
-    <Binary Id="StopLauncher" SourceFile="$(LauncherDir)\run-hidden.exe" />
     <ComponentGroup Id="Cleanup" Directory="INSTALLFOLDER">
       <Component Id="InstallDirRecord" Guid="0f6c3a52-5d0e-4a39-9a43-3c1a6f7d2b11">
         <RegistryValue Root="HKCU" Key="Software\Office Partner" Name="InstallDir" Type="string" Value="[INSTALLFOLDER]" KeyPath="yes" />
@@ -83,18 +77,8 @@
       </Component>
     </ComponentGroup>
 
-    <!-- PowerShell runs as the signed-in user without a console window. Two mechanisms, because the steps differ:
-         the two short steps (prepare, uninstall) go through QuietExec, a custom action DLL that lives inside
-         msiexec and starts its command with CREATE_NO_WINDOW. The install step starts the bridge and the gateway, which
-         inherit whatever handles it is given: QuietExec reads its child's output from a pipe and returns only when every
-         process holding that pipe has closed it, so the setup's own long-lived processes would keep the action open for
-         good. It runs instead through run-hidden.exe (installer/msi/run-hidden.cs, compiled into the package next to the
-         files): a GUI-subsystem program with no console of its own that starts PowerShell with CREATE_NO_WINDOW and waits
-         for it. A plain ExeCommand on powershell.exe opens a console window that -WindowStyle Hidden does not suppress on
-         Windows 11, where the console host is Windows Terminal.
-         Return="ignore": the files are the product; a setup step that cannot finish is repaired by the script itself and
-         reported in its log, never turned into a rollback the person cannot act on.
-         An immediate action hands its command line to QuietExec through WixQuietExecCmdLine (which QuietExec clears). -->
+    <!-- Use QuietExec for short operations. It waits for its output pipe to close, so run install directly:
+         bridge and gateway processes launched during setup can outlive the PowerShell custom action. -->
     <Property Id="WixQuietExecCmdTimeout" Value="3600000" />
     <!-- Uninstall only runs where an earlier copy put the script on disk. Prepare may run on a machine with
          no earlier copy at all, so it asks cmd.exe first: the step then succeeds whichever way, and the log of a clean
@@ -103,23 +87,38 @@
                   Value="&quot;[SystemFolder]cmd.exe&quot; /c if exist &quot;[INSTALLFOLDER]installer\bootstrap.ps1&quot; &quot;[SystemFolder]WindowsPowerShell\v1.0\powershell.exe&quot; -NoProfile -NonInteractive -ExecutionPolicy Bypass -File &quot;[INSTALLFOLDER]installer\bootstrap.ps1&quot; -Action prepare" />
     <CustomAction Id="SetUninstall" Property="WixQuietExecCmdLine"
                   Value="&quot;[SystemFolder]WindowsPowerShell\v1.0\powershell.exe&quot; -NoProfile -NonInteractive -ExecutionPolicy Bypass -File &quot;[INSTALLFOLDER]installer\bootstrap.ps1&quot; -Action uninstall" />
-    <CustomAction Id="StopBridge" BinaryRef="StopLauncher" Execute="immediate" Return="ignore"
-                  ExeCommand="--stop &quot;[SystemFolder]WindowsPowerShell\v1.0\powershell.exe&quot;" />
+    <CustomAction Id="SetStopBridge" Property="WixQuietExecCmdLine"
+                  Value="&quot;[SystemFolder]WindowsPowerShell\v1.0\powershell.exe&quot; -NoProfile -NonInteractive -EncodedCommand $(StopBridgeCommand)" />
+    <CustomAction Id="StopBridge" BinaryRef="$(UtilCA)" DllEntry="WixQuietExec" Execute="immediate" Return="ignore" />
     <CustomAction Id="PrepareInstall" BinaryRef="$(UtilCA)" DllEntry="WixQuietExec" Execute="immediate" Return="ignore" />
     <CustomAction Id="Uninstall" BinaryRef="$(UtilCA)" DllEntry="WixQuietExec" Execute="immediate" Return="ignore" />
+    <CustomAction Id="SetPurgeData" Property="WixQuietExecCmdLine"
+                  Value="&quot;[SystemFolder]WindowsPowerShell\v1.0\powershell.exe&quot; -NoProfile -NonInteractive -EncodedCommand $(PurgeDataCommand)" />
+    <CustomAction Id="SetPurgeDataWithGateway" Property="WixQuietExecCmdLine"
+                  Value="&quot;[SystemFolder]WindowsPowerShell\v1.0\powershell.exe&quot; -NoProfile -NonInteractive -EncodedCommand $(PurgeGatewayCommand)" />
+    <CustomAction Id="PurgeData" BinaryRef="$(UtilCA)" DllEntry="WixQuietExec" Execute="immediate" Return="check" />
+    <CustomAction Id="PurgeDataWithGateway" BinaryRef="$(UtilCA)" DllEntry="WixQuietExec" Execute="immediate" Return="check" />
     <CustomAction Id="Install" Directory="INSTALLFOLDER" Execute="deferred" Impersonate="yes" Return="ignore"
-                  ExeCommand="&quot;[INSTALLFOLDER]run-hidden.exe&quot; &quot;[SystemFolder]WindowsPowerShell\v1.0\powershell.exe&quot; -NoProfile -NonInteractive -ExecutionPolicy Bypass -File &quot;[INSTALLFOLDER]installer\bootstrap.ps1&quot; -Action install -Providers &quot;[PROVIDERS]&quot;" />
+                  ExeCommand="&quot;[SystemFolder]WindowsPowerShell\v1.0\powershell.exe&quot; -WindowStyle Hidden -NoProfile -NonInteractive -ExecutionPolicy Bypass -File &quot;[INSTALLFOLDER]installer\bootstrap.ps1&quot; -Action install -Providers &quot;[PROVIDERS]&quot;" />
     <CustomAction Id="InstallNoSideload" Directory="INSTALLFOLDER" Execute="deferred" Impersonate="yes" Return="ignore"
-                  ExeCommand="&quot;[INSTALLFOLDER]run-hidden.exe&quot; &quot;[SystemFolder]WindowsPowerShell\v1.0\powershell.exe&quot; -NoProfile -NonInteractive -ExecutionPolicy Bypass -File &quot;[INSTALLFOLDER]installer\bootstrap.ps1&quot; -Action install -Providers &quot;[PROVIDERS]&quot; -NoSideload" />
+                  ExeCommand="&quot;[SystemFolder]WindowsPowerShell\v1.0\powershell.exe&quot; -WindowStyle Hidden -NoProfile -NonInteractive -ExecutionPolicy Bypass -File &quot;[INSTALLFOLDER]installer\bootstrap.ps1&quot; -Action install -Providers &quot;[PROVIDERS]&quot; -NoSideload" />
 
     <InstallExecuteSequence>
       <!-- Release SQLite before the files-in-use scan. Run on npm-to-MSI installs too: neither Installed nor
            WIX_UPGRADE_DETECTED is set there, and no installed bootstrap script exists yet. -->
       <Custom Action="StopBridge" Before="InstallValidate" />
+      <Custom Action="SetStopBridge" Before="StopBridge" />
       <Custom Action="SetPrepareInstall" Before="PrepareInstall" Condition="NOT Installed" />
       <Custom Action="PrepareInstall" After="InstallValidate" Condition="NOT Installed" />
       <Custom Action="SetUninstall" Before="Uninstall" Condition="REMOVE=&quot;ALL&quot; AND NOT WIX_UPGRADE_DETECTED AND NOT UPGRADINGPRODUCTCODE" />
       <Custom Action="Uninstall" Before="InstallInitialize" Condition="REMOVE=&quot;ALL&quot; AND NOT WIX_UPGRADE_DETECTED AND NOT UPGRADINGPRODUCTCODE" />
+      <!-- The commands are stored in the MSI and can run after the uninstall transaction commits. -->
+      <!-- Keep XML entities in attributes so WiX emits literal quotes in the MSI condition. -->
+      <?define PurgeCondition = "Installed AND NOT WIX_UPGRADE_DETECTED AND NOT UPGRADINGPRODUCTCODE" ?>
+      <Custom Action="SetPurgeData" After="InstallFinalize" Condition="$(PurgeCondition) AND REMOVE=&quot;ALL&quot; AND PURGEDATA=&quot;1&quot; AND NOT (!Gateway = 3)" />
+      <Custom Action="PurgeData" After="SetPurgeData" Condition="$(PurgeCondition) AND REMOVE=&quot;ALL&quot; AND PURGEDATA=&quot;1&quot; AND NOT (!Gateway = 3)" />
+      <Custom Action="SetPurgeDataWithGateway" After="PurgeData" Condition="$(PurgeCondition) AND REMOVE=&quot;ALL&quot; AND PURGEDATA=&quot;1&quot; AND !Gateway = 3" />
+      <Custom Action="PurgeDataWithGateway" After="SetPurgeDataWithGateway" Condition="$(PurgeCondition) AND REMOVE=&quot;ALL&quot; AND PURGEDATA=&quot;1&quot; AND !Gateway = 3" />
       <!-- An upgrade arrives with REMOVE=ALL as well; the setup step must still run there, or the machine would keep the files
            without a registration or a bridge. It is skipped only for a real uninstall. Deferred and sequenced before
            InstallFinalize: it runs the files InstallFiles copies and the markers of the chosen parts, both of which exist
@@ -133,7 +132,6 @@
       <ComponentGroupRef Id="PackageFiles" />
       <ComponentGroupRef Id="CommandShim" />
       <ComponentGroupRef Id="Cleanup" />
-      <ComponentGroupRef Id="Launcher" />
     </Feature>
     <Feature Id="AddIn" Title="Office add-in for Excel, Word and PowerPoint" Level="1" Display="expand"
              Description="The task pane, the bridge on https://localhost:8765 and the registration Office reads. Restart Office after installing.">

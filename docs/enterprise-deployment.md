@@ -33,6 +33,18 @@ msiexec /i office-partner-0.1.26-x64.msi /qn /l*v install.log PROVIDERS=copilot 
 - Not included: Python (`run_python`, skills with scripts), Git Bash, Chromium, and the Claude, Codex and OpenCode providers (`office-partner providers install <provider>` adds one). Those features say what is missing when used.
 - The install log is `%LOCALAPPDATA%\Excel Partner\msi-install.log`.
 
+### Uninstall and erase local data
+
+Close Word, Excel and PowerPoint. Run this as the user who installed Office Partner, using the installed product's MSI or ProductCode:
+
+```bat
+msiexec /x "office-partner-<version>-x64.msi" PURGEDATA=1 /l*v uninstall.log
+```
+
+`PURGEDATA=1` permanently deletes `%LOCALAPPDATA%\Excel Partner` (chats, settings, logs and managed CLIs) and `%USERPROFILE%\.excel-partner` (including personal skills and templates). It also deletes `%LOCALAPPDATA%\Agent Gateway` if the MSI installed the Gateway feature. Back up any files you want to keep before running the command. A purge failure is logged to `%TEMP%\office-partner-msi-purge.log`.
+
+Uninstalling from Windows Settings preserves these folders. MSI upgrades also preserve them. The purge covers the listed default folders. Data relocated through environment overrides and credentials held by separately installed provider CLIs can be removed separately.
+
 ## Silent install (Intune, SCCM, scripts)
 
 Run `install-office-partner.cmd` **in the user's context** (Intune: *Install behavior = User*). Run as SYSTEM, it exits with code 60.

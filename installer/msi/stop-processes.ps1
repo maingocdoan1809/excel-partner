@@ -1,4 +1,4 @@
-# Shared by the bootstrap and the launcher embedded in the MSI. It must work before any package files exist.
+# Shared by the bootstrap and the command embedded in the MSI. It must work before any package files exist.
 $ErrorActionPreference = 'Stop'
 if (-not $dataDir) { $dataDir = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'Excel Partner' }
 if (-not $logFile) {

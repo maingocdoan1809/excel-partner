@@ -128,52 +128,50 @@ describe("MSI files", () => {
     const bootstrap = fs.readFileSync("installer/msi/bootstrap.ps1", "utf8");
     expect(bootstrap).toContain("'status'");
     expect(bootstrap).toContain("Get-Targets");
-    expect(bootstrap).toContain("Show-InstallStatusLater");
+    expect(bootstrap).not.toContain("Show-InstallStatusLater");
+    expect(bootstrap.match(/ProcessStartInfo/g)).toHaveLength(1);
   });
 
-  it("starts PowerShell with no console window at all", () => {
+  it("runs setup without the QuietExec pipe or an extra launcher", () => {
     const wxs = fs.readFileSync("installer/msi/OfficePartner.wxs", "utf8");
-    // A custom action that runs powershell.exe directly opens a console window, and on Windows 11 that window is a
-    // Windows Terminal one that -WindowStyle Hidden does not suppress. The install step runs through a GUI-subsystem
-    // launcher that starts PowerShell with CREATE_NO_WINDOW; prepare and uninstall use QuietExec, which does the same
-    // from inside msiexec. No step runs PowerShell by itself.
-    const commands = [...wxs.matchAll(/ExeCommand="([^"]*)"/g)].map((match) => match[1] ?? "");
-    expect(commands.length).toBeGreaterThanOrEqual(2);
-    for (const command of commands) {
-      expect(command.startsWith("&quot;[INSTALLFOLDER]run-hidden.exe&quot;") || command.startsWith("--stop ")).toBe(true);
+    expect(wxs).not.toContain("run-hidden.exe");
+    expect(wxs).toContain("-WindowStyle Hidden -NoProfile -NonInteractive");
+    const command = '&quot;[SystemFolder]WindowsPowerShell\\v1.0\\powershell.exe&quot; -WindowStyle Hidden -NoProfile -NonInteractive -ExecutionPolicy Bypass -File &quot;[INSTALLFOLDER]installer\\bootstrap.ps1&quot; -Action install -Providers &quot;[PROVIDERS]&quot;';
+    for (const action of ["Install", "InstallNoSideload"]) {
+      expect(wxs).toContain(`<CustomAction Id="${action}" Directory="INSTALLFOLDER" Execute="deferred" Impersonate="yes"`);
     }
-    expect(wxs.match(/DllEntry="WixQuietExec"/g)).toHaveLength(2);
-    // The install step must be deferred: it runs the files that InstallFiles copies, and every immediate action of
-    // InstallExecuteSequence runs before the deferred script does.
-    expect(wxs).toMatch(/<CustomAction Id="Install"[^>]*Execute="deferred"/);
-    const launcher = fs.readFileSync("installer/msi/run-hidden.cs", "utf8");
-    expect(launcher).toContain("CreateNoWindow = true");
-    expect(launcher).toContain("UseShellExecute = false");
-    const build = fs.readFileSync("scripts/build-msi.mjs", "utf8");
-    expect(build).toContain("/target:winexe");
-    expect(build).toContain("LauncherDir=");
-    // Child processes (the CLI, the status window) start without a console too: Process.Start with CreateNoWindow, never
-    // Start-Process -WindowStyle Hidden, which still lets Windows Terminal show a window on Windows 11.
+    expect(wxs).toContain(`ExeCommand="${command}"`);
+    expect(wxs).toContain(`ExeCommand="${command} -NoSideload"`);
     const bootstrap = fs.readFileSync("installer/msi/bootstrap.ps1", "utf8");
     expect(bootstrap).toContain("CreateNoWindow = $true");
-    expect(bootstrap).not.toContain("Start-Process");
+    expect(bootstrap).toContain('<nul >> `"$logFile`" 2>&1');
   });
 
   it("releases files before validation even for npm installations with no installed bootstrap", () => {
     const wxs = fs.readFileSync("installer/msi/OfficePartner.wxs", "utf8");
     expect(wxs).toMatch(/<Custom Action="StopBridge" Before="InstallValidate"\s*\/>/);
-    expect(wxs).toMatch(/<CustomAction Id="StopBridge" BinaryRef="StopLauncher"[^>]*ExeCommand="--stop /);
-    expect(wxs).toContain('<Binary Id="StopLauncher" SourceFile="$(LauncherDir)\\run-hidden.exe"');
-    const launcher = fs.readFileSync("installer/msi/run-hidden.cs", "utf8");
-    expect(launcher).toContain('GetManifestResourceStream("StopProcesses")');
-    expect(launcher).toContain("Stop-ProductProcesses\\r\\n");
+    expect(wxs).toContain('<Custom Action="SetStopBridge" Before="StopBridge"');
+    expect(wxs).toContain('<CustomAction Id="StopBridge" BinaryRef="$(UtilCA)" DllEntry="WixQuietExec"');
+    expect(wxs).toContain('-EncodedCommand $(StopBridgeCommand)');
     const build = fs.readFileSync("scripts/build-msi.mjs", "utf8");
-    expect(build).toContain("/resource:");
-    expect(build).toContain('"stop-processes.ps1"');
+    expect(build).toContain('encodedCommand("stop-processes.ps1", "Stop-ProductProcesses")');
     const bootstrap = fs.readFileSync("installer/msi/bootstrap.ps1", "utf8");
     expect(bootstrap).toContain(". (Join-Path $PSScriptRoot 'stop-processes.ps1')");
     expect(bootstrap).not.toContain("function Stop-ProductProcesses");
     const payload = fs.readFileSync("scripts/build-msi-payload.mjs", "utf8");
     expect(payload).toContain('["bootstrap.ps1", "stop-processes.ps1"]');
+  });
+
+  it("purges user data after a successful full uninstall only when requested", () => {
+    const wxs = fs.readFileSync("installer/msi/OfficePartner.wxs", "utf8");
+    expect(wxs).toContain('<Property Id="PURGEDATA" Secure="yes" />');
+    expect(wxs).toContain('-EncodedCommand $(PurgeDataCommand)');
+    expect(wxs).toContain('-EncodedCommand $(PurgeGatewayCommand)');
+    expect(wxs).toContain('<?define PurgeCondition = "Installed AND NOT WIX_UPGRADE_DETECTED AND NOT UPGRADINGPRODUCTCODE" ?>');
+    const guard = '$(PurgeCondition) AND REMOVE=&quot;ALL&quot; AND PURGEDATA=&quot;1&quot;';
+    expect(wxs).toContain(`<Custom Action="SetPurgeData" After="InstallFinalize" Condition="${guard} AND NOT (!Gateway = 3)"`);
+    expect(wxs).toContain(`<Custom Action="PurgeData" After="SetPurgeData" Condition="${guard} AND NOT (!Gateway = 3)"`);
+    expect(wxs).toContain(`<Custom Action="SetPurgeDataWithGateway" After="PurgeData" Condition="${guard} AND !Gateway = 3"`);
+    expect(wxs).toContain(`<Custom Action="PurgeDataWithGateway" After="SetPurgeDataWithGateway" Condition="${guard} AND !Gateway = 3"`);
   });
 });
