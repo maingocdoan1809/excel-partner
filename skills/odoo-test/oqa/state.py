@@ -11,7 +11,7 @@ import re
 import time
 from contextlib import contextmanager
 
-from . import SCHEMA_VERSION, analysis, events, memory, paths
+from . import SCHEMA_VERSION, analysis, events, memory, paths, refs
 from .store import SchemaError, locked, read_json, write_json
 
 PHASES = ("ANALYZE", "CONNECT", "CONFIRM", "EXECUTE", "REPORT", "DONE")
@@ -96,15 +96,20 @@ class Session:
         events.append(self.dir, "phase", phase=phase, text=text)
 
     # --- ANALYZE / CONNECT / CONFIRM ------------------------------------------------
-    def analysis_submitted(self):
-        """A valid analysis was saved. First time: go to CONNECT. A later correction (before confirming) drops the strategy so it is built again."""
+    def analysis_submitted(self, open_questions=None):
+        """A valid analysis was saved. First time: go to CONNECT, unless a case still needs the user: then the session stays in ANALYZE and the questions are asked now
+        (`open_questions` = the text shown to the user), because a plan built on a guess is the cause of blocked cases later. A later correction (before confirming)
+        drops the strategy so it is built again."""
         with self.update() as state:
             if state["phase"] not in ("ANALYZE", "CONNECT", "CONFIRM"):
                 raise GateError(f"The analysis can no longer change in phase {state['phase']}.")
             if state["waiting"]:
                 raise GateError("The session is waiting for the user to answer; run `oqa answer` first.")
             state["strategy_sha"] = None
-            if state["phase"] == "ANALYZE":
+            if open_questions and state["phase"] == "ANALYZE":
+                state["waiting"] = {"question": open_questions, "case": None, "asked_at": time.strftime("%Y-%m-%d %H:%M:%S")}
+                events.append(self.dir, "ask", question=open_questions)
+            elif state["phase"] == "ANALYZE":
                 self._enter(state, "CONNECT", "Analysis accepted; testing the connection")
 
     def connected(self, info):
@@ -168,7 +173,8 @@ class Session:
                     del state["results"][case]
                     if state["phase"] == "REPORT":
                         self._enter(state, "EXECUTE", f"{case} can run again after the answer")
-            events.append(self.dir, "answered", answer=text, **({"case": case} if case else {}))
+            shared = [i["path"] for i in refs.register_from_text(self, text, by="answer", case=case)]          # a path in the answer is a reference: nothing to learn, nothing to upload
+            events.append(self.dir, "answered", answer=text, **({"case": case} if case else {}), **({"files": shared} if shared else {}))
             return waiting
 
     # --- EXECUTE ------------------------------------------------------------------
@@ -327,6 +333,7 @@ class Session:
                 raise GateError(f"{case} is not in the confirmed strategy.")
             if state["results"].get(case, {}).get("status") == "PASS":
                 raise GateError(f"{case} already passed.")
+            refs.register_from_text(self, text, by="answer", case=case)          # a hint that points at a file ("use C:\data\x.xlsx") makes it a reference too
             state.setdefault("hints", {}).setdefault(case, []).append({"text": text, "at": time.strftime("%Y-%m-%d %H:%M:%S"), "by": by})
             state["attempts"].pop(case, None)
             state.setdefault("progress", {}).pop(case, None)

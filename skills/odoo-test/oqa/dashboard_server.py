@@ -6,7 +6,7 @@ import unicodedata
 from pathlib import Path
 from urllib.parse import quote
 
-from . import paths, report, sitemap, view, workspace
+from . import paths, refs, report, sitemap, view, workspace
 from .localserver import LocalApp, font_faces
 from .state import GateError, Session
 from .store import SchemaError
@@ -177,11 +177,21 @@ class Dashboard(LocalApp):
             if method == "POST" and path == "/api/hint":
                 self._session(body).hint(str(body.get("case", "")), str(body.get("text", "")), "dashboard")
                 return 200, {"ok": True}
+            if method == "POST" and path == "/api/refs":
+                session = self._session(body)
+                if session.state()["phase"] == "DONE":
+                    return 200, {"error": "Phiên này đã kết thúc."}
+                added, failed = refs.add_many(session, str(body.get("path", "")), by="user", case=str(body.get("case", "")) or None)
+                for item in added:
+                    refs.announce(session, item)
+                if not added:
+                    return 200, {"error": "Không tìm thấy trên máy này: " + "; ".join(failed or ["(trống)"]) + ". Dán đường dẫn đầy đủ của tệp hoặc thư mục (không cần tải lên)."}
+                return 200, {"ok": True, "added": [i["name"] for i in added], **({"error": "Không tìm thấy: " + "; ".join(failed)} if failed else {})}
             if method == "POST" and path == "/api/answer":
                 if not str(body.get("text", "")).strip():
                     return 200, {"error": "Write the answer first."}
                 self._session(body).answer(str(body["text"]).strip())
                 return 200, {"ok": True}
-        except (GateError, SchemaError, paths.PathError, sitemap.SitemapError, json.JSONDecodeError, OSError) as error:
+        except (GateError, SchemaError, refs.RefError, paths.PathError, sitemap.SitemapError, json.JSONDecodeError, OSError) as error:
             return 200, {"error": "\n".join(error.problems) if isinstance(error, SchemaError) else str(error)}
         return 404, {"error": "not found"}

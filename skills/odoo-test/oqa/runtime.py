@@ -11,7 +11,7 @@ import time
 import types
 from pathlib import Path
 
-from . import connect, diagnose, evidence, events, knowledge, memory, probe, recipe
+from . import connect, diagnose, evidence, events, knowledge, memory, probe, recipe, refs
 from .browser import launch
 from .odoo_ui import Odoo
 from .scaffold import HEADER, STEP_FUNCTION, case_sha, script_path, script_sha, step_hashes, unchecked_steps, unhighlighted_steps, unwritten
@@ -181,6 +181,7 @@ class T:
         self.runner, self.session, self.case, self.attempt, self.spec, self.profile, self.page = runner, runner.session, case, attempt, spec, profile, page
         self.checks = 0
         self.o = Odoo(page, runner.ws["url"], runner.ws["test_prefix"], on_check=self._count, timeout=timeout)
+        self.o.resolve_ref = refs.resolver(runner.session, runner.ws)
         self.evidence_dir = runner.session.dir / "evidence" / re.sub(r"[^\w.-]+", "_", case) / f"a{attempt}"
         self.done = list(done or [])                 # steps already passed (carried over when this run picks up where the last one stopped)
         self.data = {} if data is None else data     # what steps hand to each other; it outlives a failed step, so a repaired step finds what the earlier ones made

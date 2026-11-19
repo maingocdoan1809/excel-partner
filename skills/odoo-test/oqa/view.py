@@ -2,7 +2,7 @@
 they can never disagree about a case, a step or a picture."""
 import time
 
-from . import events, knowledge, paths, recipe
+from . import events, knowledge, paths, recipe, refs
 from .state import MAX_REPAIRS, PHASES, Session
 from .store import read_json
 
@@ -176,7 +176,8 @@ def session_view(session: Session):
             "confirmed": bool(state["confirmation"]), "created": state["created"], "updated": log[-1]["ts"] if log else state["created"], "idle_hours": round(hours, 1), "idle": hours >= IDLE_HOURS, "now": latest["text"] if latest else "",
             "counts": counts(records), "total": len(records), "cases": records, "connect": state.get("connect"),
             "reports": reports(session), "strategy": strategy_md.read_text(encoding="utf-8") if strategy_md.exists() else "", "can_confirm": current == "CONFIRM" and (session.dir / "strategy.json").exists()
-            and state["strategy_sha"] is not None, "knowledge": len(knowledge.search(session.ws))}
+            and state["strategy_sha"] is not None, "knowledge": len(knowledge.search(session.ws)),
+            "refs": [{k: i.get(k) for k in ("name", "path", "kind", "by", "case")} for i in refs.items(session)]}
 
 
 def list_sessions():

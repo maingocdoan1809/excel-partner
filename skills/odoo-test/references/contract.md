@@ -62,13 +62,23 @@ Phases: `ANALYZE → CONNECT → CONFIRM → EXECUTE → REPORT → DONE` (INTAK
 
 ## cases.json (INTAKE)
 
-`{schema_version, source:{file, name, sha256, sheet, header_row}, warnings:[text], cases:[{id, title, category, type, role, pre, steps:[text], expected, note, sheet, row, refs:[{kind:"file", text, status: found|missing, path}], case_refs:[id]}]}`
+`{schema_version, source:{file, name, sha256, sheet, header_row}, warnings:[text], cases:[{id, title, category, type, role, pre, steps:[text], expected, note, sheet, row, refs:[{kind:"file", text, status: found|missing, path}], case_refs:[id], vague:[{phrase, kind: reference|unmeasurable, where}]}]}`
+`vague` = wording a person would ask about before running: a result judged against a document nobody named ("as designed", "đúng design", "仕様通り", an "attachment" with no file name), or one that cannot be measured ("works correctly", "hiển thị bình thường", "正しく", no expected result). `warnings` also says what the workbook holds that is not read as text: embedded pictures, cell comments, other sheets (`oqa ref show <workbook>` reads them).
 
 ## analysis.json (ANALYZE)
 
 Produced by `oqa analyze --template`, completed by the assistant, accepted only by `oqa analyze --submit`. Per case:
-`id, profile, verdict (ready|needs_user|blocked), clarity{score 1-5, notes}, sufficiency{score 1-5, missing}, refs[{text, status: ok|missing|asked|waived, note}], data_needs[{what, fallback}], edge_cases[] or edge_cases_none_reason, depends_on[], reuse, steps[{n, action, expected}], timeout_s (optional, 5-120, default 8), questions[] (needs_user) / reason (blocked)`.
-`ready` needs clarity ≥ 3, sufficiency ≥ 3, no reference left `missing`, and may depend only on other `ready` cases. No cycles.
+`id, profile, verdict (ready|needs_user|blocked), clarity{score 1-5, notes}, sufficiency{score 1-5, missing}, refs[{kind:"file", text, status: ok|missing|asked|waived, path, note}], vague_resolved[{phrase, concrete, source}], data_needs[{what, fallback}], data_considered, edge_cases[] or edge_cases_none_reason, depends_on[], reuse, steps[{n, action, expected}], timeout_s (optional, 5-120, default 8), questions[] (needs_user) / reason (blocked)`.
+`ready` needs clarity ≥ 3, sufficiency ≥ 3, no reference `missing` or `asked`, and may depend only on other `ready` cases. No cycles. What the validator refuses (every defect is listed at once):
+- a reference `ok` with no file at its `path`; a `waived` one with no reason in `note`;
+- a flagged phrase of `cases.json` (`vague`) with no matching `vague_resolved` entry, or whose `concrete` is itself a general phrase or shorter than 15 characters; `source` is `ref:<a reference of the case marked ok>` or `user_answer` (a result judged against a document), and for what only needs reading also `workbook` or `domain`; a guess is never a source;
+- a step whose `expected` is again vague wording; a `ready` case whose `sufficiency.missing` is not matched by a `data_needs` fallback;
+- `needs_user` without full-sentence `questions` and `data_considered` (what was tried first: data created, a file read, the sitemap, and why only the user can answer); `blocked` without `reason` and `data_considered` (why the data cannot be created through the UI or an import).
+When a case is `needs_user` on the first submission the session stays in ANALYZE and every question is asked at once (`waiting`, case null); after the answer the template is fetched again (`_user_answers`, `_shared_files`, missing references looked up among the shared files) and the analysis handed in again.
+
+## refs.json (files the user points at)
+
+`{schema_version, items:[{path, name, kind: file|folder, by: user|answer|terminal, case, added}]}`. The user pastes a PATH (the dashboard's *Tệp tham chiếu* box, or a path written inside an answer, or `oqa ref add`): nothing is uploaded or copied, the assistant reads the file where it is with `oqa ref show`. Paths under a session's `auth` folder, or naming `storageState` / credentials, are refused. Scripts reach them with `o.ref(name)`.
 
 ## strategy.json / strategy.md (CONFIRM)
 
@@ -84,7 +94,8 @@ One JSON object per line, appended in order; each has `ts` and `kind`. Readers s
 |---|---|
 | session_started | workspace, file |
 | phase | phase, text |
-| ask / answered | question / answer, [case] |
+| ask / answered | question / answer, [case], [files: paths written in the answer, now references] |
+| ref_added | path, by, [name, what: file\|folder, case]: the user shared a file by its path (the assistant is told by `oqa wait`) |
 | confirmed | by, strategy_sha |
 | case_planned | case, title, steps[{n, action, expected}], order |
 | stopped / resumed | by (the user's Stop and Resume) |
@@ -117,7 +128,8 @@ kind: login | navigation | locator | data | error | fix | quirk | rule. Never a 
 | `analyze --template [--out F]` / `--submit F` | the skeleton to fill / hand in the analysis (validated; ANALYZE → CONNECT) |
 | `strategy` | order the ready cases, write `strategy.json` and `strategy.md` (phase CONFIRM) |
 | `confirm` | the user approves (terminal only); CONFIRM → EXECUTE |
-| `ask "Q" [--case ID]` / `answer "text"` | wait for the user / record their reply |
+| `ask "Q" [--case ID]` / `answer "text"` | wait for the user / record their reply (a path written in it becomes a reference) |
+| `ref add PATH [--case ID]` / `ref list` / `ref show NAME [--sheet S] [--max N]` | the files and folders the user pointed at: remember one, list them, read one as text (xlsx cells and comments, docx, pptx, csv, txt…; embedded pictures are saved and listed so they can be opened with the Read tool; a PDF or picture is named for the Read tool). Also reads the testcase workbook itself |
 | `wait [--timeout S]` | blocks until the user acts on the dashboard (confirm, answer, hint, stop, resume), then says what; run it in the background |
 | `stop` / `resume` | the USER stops the test (the step in progress finishes) / lets it go on (`resume` needs a real terminal); also buttons in the dashboard |
 | `repair ID --cause --evidence --change [--reanalysis] [--timeout S] [--unchanged why]` | after a failed run: record what was found and changed; `run` refuses a rerun without it |

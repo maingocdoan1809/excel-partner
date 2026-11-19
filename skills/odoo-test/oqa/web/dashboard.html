@@ -86,6 +86,12 @@
 
   .attn-panel { background:var(--card); border:1px solid var(--line); border-left:4px solid var(--accent); border-radius:12px; padding:24px 28px; margin-bottom:28px; }
   .attn-panel h3 { margin:0 0 6px; font:400 24px/1.2 var(--display); letter-spacing:-.3px; }
+  .attn-panel .q { white-space:pre-wrap; overflow-wrap:anywhere; }
+  .refs-panel { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:18px 24px; margin-bottom:28px; }
+  .refs-panel h3 { margin:0 0 4px; font:500 16px/1.3 var(--sans); }
+  .refs-panel textarea { width:100%; min-height:44px; margin:10px 0; padding:10px 14px; border:1px solid var(--line); border-radius:8px; background:var(--bg); color:var(--ink); font:inherit; resize:vertical; }
+  .refs-panel ul { margin:8px 0 0; padding:0; list-style:none; }
+  .refs-panel li { padding:4px 0; overflow-wrap:anywhere; }
   .attn-panel textarea { width:100%; min-height:80px; margin:12px 0; padding:12px 14px; border:1px solid var(--line); border-radius:8px; background:var(--bg); color:var(--ink); font:inherit; resize:vertical; }
   .btn { height:40px; padding:0 20px; border:1px solid var(--line); border-radius:8px; background:var(--bg); color:var(--ink); font-weight:500; cursor:pointer; }
   .btn.primary { background:var(--accent); color:var(--accent-ink); border-color:var(--accent); }
@@ -234,6 +240,14 @@ function ticks(c) {
 
 function renderMain() { keepScroll(drawMain); }
 
+function refsPanel(v) {
+  if (v.phase === "DONE") return "";
+  const list = (v.refs || []).map(r => `<li><span class="mono">${esc(r.name)}</span> <span class="muted">${r.kind === "folder" ? "thư mục" : "tệp"} · ${esc(r.path)}${r.case ? " · case " + esc(r.case) : ""}</span></li>`).join("");
+  return `<section class="refs-panel"><h3>Tệp tham chiếu</h3><div class="muted">Thiết kế (BD), đặc tả, file import, thư mục đính kèm… Dán đường dẫn trên máy này (mỗi dòng một đường dẫn), AI tự đọc, không cần tải lên.</div>
+      <textarea id="refPath" aria-label="Đường dẫn tệp hoặc thư mục" placeholder="C:\\Users\\bạn\\Documents\\BD_man_hinh_don_hang.xlsx"></textarea>
+      <button class="btn" id="addRef" ${S.busy ? "disabled" : ""}>Thêm đường dẫn</button>${list ? `<ul>${list}</ul>` : ""}</section>`;
+}
+
 function drawMain() {
   const v = S.view;
   if (!v) { $("main").innerHTML = `<div class="empty"><b>Chưa chọn phiên test</b>Mỗi yêu cầu test là một phiên. Hãy bảo AI test một file testcase, rồi chọn phiên ở cột bên trái.</div>`; return; }
@@ -243,8 +257,8 @@ function drawMain() {
   let attention = "";
   if (v.stopped) attention = `<section class="attn-panel"><h3>Bạn đã dừng test</h3><div class="muted">Bước đang chạy được hoàn tất, không có bước nào bắt đầu thêm. AI đang đợi. Bấm tiếp tục khi sẵn sàng.</div>
       <div style="margin-top:10px"><button class="btn primary" id="resume" ${S.busy ? "disabled" : ""}>Tiếp tục test</button></div><div class="err">${esc(S.error)}</div></section>`;
-  else if (v.waiting) attention = `<section class="attn-panel"><h3>AI đang chờ bạn trả lời</h3><div>${esc(v.waiting.question)}</div>${v.waiting.case ? `<div class="muted">Về case ${esc(v.waiting.case)}</div>` : ""}
-      <textarea id="answer" aria-label="Câu trả lời" placeholder="Nhập câu trả lời…"></textarea><button class="btn primary" id="sendAnswer" ${S.busy ? "disabled" : ""}>Gửi trả lời</button><div class="err">${esc(S.error)}</div></section>`;
+  else if (v.waiting) attention = `<section class="attn-panel"><h3>AI đang chờ bạn trả lời</h3><div class="q">${esc(v.waiting.question)}</div>${v.waiting.case ? `<div class="muted">Về case ${esc(v.waiting.case)}</div>` : ""}
+      <textarea id="answer" aria-label="Câu trả lời" placeholder="Nhập câu trả lời… Cần đưa tệp (thiết kế, file import…) thì dán thẳng đường dẫn vào đây, không phải tải lên: AI tự đọc."></textarea><button class="btn primary" id="sendAnswer" ${S.busy ? "disabled" : ""}>Gửi trả lời</button><div class="err">${esc(S.error)}</div></section>`;
   else if (v.can_confirm) attention = `<section class="attn-panel"><h3>Chiến lược đang chờ bạn duyệt</h3><div class="muted">Xem lại thứ tự, dữ liệu dự phòng và các bước. AI chỉ bắt đầu test sau khi bạn xác nhận.</div>
       <details data-key="strategy" ${isOpen("strategy", true)}><summary>Chiến lược</summary><pre class="strategy">${esc(v.strategy)}</pre></details><div style="margin-top:10px"><button class="btn primary" id="confirm" ${S.busy ? "disabled" : ""}>Xác nhận và bắt đầu test</button></div><div class="err">${esc(S.error)}</div></section>`;
   const rows = v.cases.map(k => `<tr class="case ${cls(k.status)}" tabindex="0" data-id="${esc(k.id)}" aria-selected="${k.id === S.caseId}">
@@ -260,6 +274,7 @@ function drawMain() {
     ${v.idle && !v.waiting ? `<div class="idle">Phiên này không có hoạt động ${Math.floor(v.idle_hours)} giờ nay: AI có thể đã dừng giữa chừng. Các case đang chạy hoặc đang sửa được hiển thị là "Bị bỏ dở". Bảo AI chạy <span class="mono">oqa status</span> để tiếp tục.</div>` : ""}
     ${reportBar(v)}
     ${attention}
+    ${refsPanel(v)}
     <div class="split"><div class="panel"><table><thead><tr><th>Case</th><th>Nội dung</th><th>Profile</th><th>Bước</th><th>Lần</th><th>Kết quả</th></tr></thead><tbody>${rows}</tbody></table></div>
     <div class="panel detail" id="detail"></div></div>`;
   renderDetail();
@@ -430,6 +445,7 @@ document.addEventListener("click", async e => {
     exportReport: () => post("/api/report", where),
     confirm: () => post("/api/confirm", where), stop: () => post("/api/stop", where), resume: () => post("/api/resume", where),
     sendAnswer: () => post("/api/answer", { ...where, text: ($("answer") || {}).value || "" }),
+    addRef: () => post("/api/refs", { ...where, path: ($("refPath") || {}).value || "" }),
     sendHint: () => post("/api/hint", { ...where, case: S.caseId, text: ($("hint") || {}).value || "" }),
   }[t.id];
   if (call) {
@@ -438,6 +454,7 @@ document.addEventListener("click", async e => {
     S.busy = false;
     if (t.id === "sendHint") { S.hintError = r.error || ""; if (!r.error) delete S.draft["hint-" + S.caseId]; } else S.error = r.error || "";
     if (t.id === "sendAnswer" && !r.error) delete S.draft.answer;
+    if (t.id === "addRef" && r.ok) delete S.draft.refPath;
     await refreshView();
     renderMain();
     if (t.id === "exportReport" && !r.error) window.location.assign(reportUrl(r.main));        // hand the workbook over as soon as it is built

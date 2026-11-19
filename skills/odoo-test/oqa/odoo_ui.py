@@ -190,6 +190,45 @@ class Odoo:
         self.page.wait_for_selector(".o_form_view")
         return self.ready()
 
+    # --- files: what the user pointed at by path ------------------------------------------------
+    resolve_ref = None                      # set by the runner / `oqa try`: a name -> the path on this computer ('' when unknown)
+
+    def ref(self, name):
+        """The path of a file the user pointed at (`oqa ref list`), by its name. Raises, saying so, when nobody gave it: ask the user for its path instead of inventing a file."""
+        path = self.resolve_ref(name) if self.resolve_ref else ""
+        if not path:
+            raise AssertionError(f"no reference file '{name}': ask the user for its path (`oqa ask`); `oqa ref list` shows the ones known")
+        return path
+
+    def file_inputs(self):
+        """Every `input[type=file]` on the screen (Odoo hides them behind a button, `oqa probe` does not list them): name, accepted types, where it lives."""
+        return self.page.evaluate("""() => [...document.querySelectorAll('input[type=file]')].map(e => ({name: e.name || '', accept: e.accept || '', multiple: e.multiple,
+            where: String((e.closest('.modal, .o-mail-Chatter, .o_field_widget, .o_import_action, .o_form_view, .o_content') || {className: 'page'}).className).split(' ')[0],
+            visible: !!(e.offsetWidth || e.offsetHeight)}))""")
+
+    def upload(self, name, selector=None):
+        """Put a reference file into the screen's file input: a chatter attachment, a binary field, the import page. No click on the button that opens the file dialog is needed
+        (that dialog is the operating system's, a script cannot drive it). With a dialog open, only its input is used. `selector` picks one input when there are several."""
+        path = self.ref(name)
+        scope = ".modal:visible " if self.page.locator(".modal:visible").count() else ""
+        found = self.page.locator(selector if selector else scope + "input[type=file]")
+        if not found.count():
+            raise AssertionError("no file input on this screen" + (f" matching {selector}" if selector else "") + f"; the screen has: {self.file_inputs() or 'none'}")
+        found.first.set_input_files(path)
+        return self.ready()
+
+    def import_file(self, name):
+        """On the import screen (list view > Favorites > Import records): upload the file, test it, import it, and raise with the page's message when Odoo refuses a row."""
+        self.upload(name, ".o_import_action input[type=file], input[type=file][name=ufile]")
+        for label in ("Test", "Import"):
+            button = self.button(label)
+            if button.count():
+                button.click()
+                self.ready()
+        d = diagnose.read(self.page)
+        assert not d["errors"], d["summary"]
+        return self
+
     # --- checking ---------------------------------------------------------------------------
     def expect_text(self, text):
         self.on_check()

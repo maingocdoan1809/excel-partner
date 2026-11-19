@@ -4,7 +4,8 @@ Kinds and their required fields (every event also has `ts` and `kind`):
   session_started  workspace, file
   phase            phase, text                      the phase just entered / what the assistant is doing now
   ask              question [case]                  the assistant is waiting for the user
-  answered         answer [case]
+  answered         answer [case, files]               files = the paths written in the answer, now references
+  ref_added        path, by [name, what (file|folder), case]        the user shared a file or folder by its path (nothing is uploaded; the assistant reads it where it is)
   confirmed        by, strategy_sha
   stopped / resumed  by                                  the user stopped the test / let it go on
   hint             case, text                            the user's advice for a case; it goes back in the queue with a fresh budget
@@ -34,6 +35,7 @@ KINDS = {
     "phase": ("phase", "text"),
     "ask": ("question",),
     "answered": ("answer",),
+    "ref_added": ("path", "by"),
     "confirmed": ("by", "strategy_sha"),
     "stopped": ("by",),
     "resumed": ("by",),
@@ -50,7 +52,7 @@ KINDS = {
     "case_finished": ("case", "status", "attempts"),
     "session_finished": ("counts",),
 }
-USER_KINDS = ("confirmed", "answered", "hint", "stopped", "resumed")        # what only the user does: the assistant waits for these
+USER_KINDS = ("confirmed", "answered", "ref_added", "hint", "stopped", "resumed")        # what only the user does: the assistant waits for these
 STEP_STATUSES = ("PASS", "FAIL", "SKIPPED")
 CASE_STATUSES = ("PASS", "FAIL", "PENDING", "BLOCKED", "NOT EXECUTED")
 

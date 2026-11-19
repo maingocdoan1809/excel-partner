@@ -63,7 +63,8 @@ def filled(cases_doc, config, **per_case):
     data = analysis.template(cases_doc, config)
     for case in data["cases"]:
         case.update(profile=config["profiles"][0]["name"], verdict="ready", clarity={"score": 4, "notes": "clear"}, sufficiency={"score": 4, "missing": []},
-                    edge_cases=["empty list"], refs=[dict(r, status="ok") for r in case["refs"]], reuse="")
+                    edge_cases=["empty list"], reuse="",
+                    refs=[dict(r, status="ok") if r["path"] else dict(r, status="waived", note="the case runs without this file in this test") for r in case["refs"]])
         for step in case["steps"]:
             step["expected"] = "ok"
         case.update(per_case.get(case["id"], {}))

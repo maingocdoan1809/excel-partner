@@ -13,7 +13,7 @@ import webbrowser
 from pathlib import Path
 from urllib.parse import quote
 
-from . import VERSION, build_id, analysis, connect, memory, dashboard_server, doctor, events, init_server, intake, knowledge, mcp_server, paths, probe, recipe, report, runtime, scaffold, service, sitemap, workspace
+from . import VERSION, build_id, analysis, connect, memory, dashboard_server, doctor, events, init_server, intake, knowledge, mcp_server, paths, probe, recipe, refs, report, runtime, scaffold, service, sitemap, workspace
 from .secrets import SecretStoreUnavailable, default_store
 from .state import MAX_REPAIRS, GateError, Session
 from .store import SchemaError, read_json, write_json
@@ -91,7 +91,7 @@ def cmd_analyze(args):
     cases = session.cases()
     if args.template:
         session.require("ANALYZE", "CONNECT", "CONFIRM")
-        skeleton = analysis.template(cases, config)
+        skeleton = analysis.template(cases, config, session)
         if args.out:
             write_json(args.out, skeleton)
             return {"template": args.out}, f"Wrote the template for {len(skeleton['cases'])} cases to {args.out}. Fill every judgement field, then: oqa analyze --submit {args.out}"
@@ -104,11 +104,46 @@ def cmd_analyze(args):
         raise SchemaError(f"{args.submit} is not an analysis file", "analysis")
     analysis.validate(submitted, cases, config)
     write_json(session.dir / "analysis.json", submitted)
-    session.analysis_submitted()
     counts = {}
     for case in submitted["cases"]:
         counts[case["verdict"]] = counts.get(case["verdict"], 0) + 1
-    return {"accepted": True, "verdicts": counts}, f"Analysis accepted ({', '.join(f'{n} {v}' for v, n in counts.items())}). Next: {session.summary()['next']}"
+    asking = [c for c in submitted["cases"] if c["verdict"] == "needs_user"]
+    question = "\n".join(f"[{c['id']}] {q}" for c in asking for q in c["questions"]) if asking else None
+    session.analysis_submitted(question)
+    summary = ", ".join(f"{n} {v}" for v, n in counts.items())
+    if question and session.state()["waiting"] and session.state()["phase"] == "ANALYZE":
+        return {"accepted": True, "verdicts": counts, "waiting": True}, (
+            f"Analysis accepted ({summary}) but {len(asking)} case(s) need the user, so nothing moves on yet. Their questions are now on the dashboard:\n{question}\n"
+            "Tell the user (they can answer there or in the chat, and paste a file path instead of uploading anything), then `oqa wait` in the background and stop. "
+            "After the answer: `oqa analyze --template` again (it carries their answers and the files they shared), fix those cases and `--submit` again.")
+    return {"accepted": True, "verdicts": counts}, f"Analysis accepted ({summary}). Next: {session.summary()['next']}"
+
+
+def cmd_ref(args):
+    """Files and folders the user pointed at by their path: add, list, read."""
+    session = Session.open(args.ws, args.session)
+    if args.what == "list":
+        return {"refs": refs.items(session)}, refs.listing(session)
+    if args.what == "add":
+        if not args.target:
+            raise GateError("Give the path: oqa ref add <path of a file or folder> [--case ID]")
+        try:
+            item = refs.add(session, args.target, by="terminal", case=args.case)
+        except refs.RefError as error:
+            raise GateError(str(error))
+        return {"ref": item}, f"Added {item['kind']} {item['path']}. Read it: oqa ref show \"{item['name']}\""
+    if not args.target:
+        raise GateError("Which one? oqa ref show <name or path of a reference, or of the testcase workbook>")
+    config = workspace.load(session.ws)
+    folders = [Path(session.cases()["source"]["file"]).parent] + [Path(d) for d in config.get("reference_dirs", [])]
+    path = refs.lookup(session, args.target, folders)
+    if not path:
+        raise GateError(f"No reference called '{args.target}'. Known:\n{refs.listing(session)}")
+    try:
+        text = refs.describe(path, args.max, args.sheet, session.dir / "refs")
+    except refs.RefError as error:
+        raise GateError(str(error))
+    return {"path": path, "text": text}, text
 
 
 def cmd_strategy(args):
@@ -518,7 +553,11 @@ def _describe(event):
     if kind == "confirmed":
         return "The user confirmed the strategy. Next: oqa run"
     if kind == "answered":
-        return f"The user answered{f' (about {case})' if case else ''}: {event['answer']}"
+        shared = event.get("files") or []
+        return (f"The user answered{f' (about {case})' if case else ''}: {event['answer']}"
+                + (f"\nThey shared {len(shared)} file(s) by path: read each with `oqa ref show \"<name>\"` ({'; '.join(shared)})." if shared else ""))
+    if kind == "ref_added":
+        return f"The user shared {event.get('what', 'file')} {event['path']}: read it with `oqa ref show \"{event.get('name', event['path'])}\"`."
     if kind == "hint":
         return f"The user sent a hint for {case}: {event['text']}\n{case} is back in the queue with a fresh budget. Next: oqa run {case}"
     if kind == "stopped":
@@ -698,8 +737,14 @@ def build_parser():
     p.add_argument("--timeout", type=int, default=3600)
     add("stop", cmd_stop, "the USER stops the test (the step in progress finishes)")
     add("resume", cmd_resume, "the USER lets a stopped test go on (needs a real terminal)")
-    p = add("answer", cmd_answer, "record the user's reply")
+    p = add("answer", cmd_answer, "record the user's reply (a file path written in it becomes a reference)")
     p.add_argument("text")
+    p = add("ref", cmd_ref, "files and folders the user pointed at by path: add, list, show (read their content, nothing is uploaded)")
+    p.add_argument("what", choices=["add", "list", "show"])
+    p.add_argument("target", nargs="?", help="add: the path; show: a reference's name or path, or the testcase workbook (saves its embedded pictures too)")
+    p.add_argument("--case", help="add: the case this file is for")
+    p.add_argument("--sheet", help="show: one sheet of a workbook")
+    p.add_argument("--max", type=int, default=6000, help="show: most characters to print")
     add("status", cmd_status, "phase, progress and the next command")
     p = add("knowledge", cmd_knowledge, "search or add what was learned about this Odoo")
     p.add_argument("what", choices=["search", "learn"])
