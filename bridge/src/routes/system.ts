@@ -8,14 +8,14 @@ import { ProviderIdSchema } from "../../../protocol/src/index.js";
 import { providerPackageRoot } from "../../../providers/src/profiled.js";
 import { connectedSession, readBody, sendJson } from "../http-util.js";
 import type { WorkbookSessions } from "../workbook-sessions.js";
-import { UpdateError, type UpdateService } from "../updater.js";
+import { UpdateError } from "../updater.js";
 import type { ProviderRegistry } from "../../../providers/src/registry.js";
 
 const root = providerPackageRoot();
 const store = createRequire(import.meta.url)(path.join(root, "bin", "runtime-store.cjs"));
 const action = z.object({ action: z.enum(["install", "remove", "debug-on", "debug-off"]), provider: ProviderIdSchema.optional() });
 export class SystemRoutes {
-  constructor(private readonly sessions: WorkbookSessions, private readonly providers: ProviderRegistry, private readonly updater: UpdateService | null,
+  constructor(private readonly sessions: WorkbookSessions, private readonly providers: ProviderRegistry,
     private readonly loginBusy = () => false) {}
   async handle(req: http.IncomingMessage, res: http.ServerResponse, url: URL) {
     const session = connectedSession(this.sessions, req);

@@ -18,6 +18,8 @@ param(
   [string] $Providers = 'copilot',
   # The parts chosen in the wizard: addin, gateway, both (or empty to read the MSI's markers, see Get-Targets).
   [string] $Targets = '',
+  # The MSI passes its payload architecture; a manual run defaults to the machine's native architecture.
+  [ValidateSet('x64', 'arm64')] [string] $Architecture = $(if ($env:PROCESSOR_ARCHITECTURE -eq 'ARM64' -or $env:PROCESSOR_ARCHITEW6432 -eq 'ARM64') { 'arm64' } else { 'x64' }),
   [switch] $NoSideload
 )
 $ErrorActionPreference = 'Stop'
@@ -43,7 +45,6 @@ function Get-UserFolder([string] $special, [string] $variable) {
 }
 $localAppData = Get-UserFolder 'LocalApplicationData' 'LOCALAPPDATA'
 $appData = Get-UserFolder 'ApplicationData' 'APPDATA'
-$userProfile = Get-UserFolder 'UserProfile' 'USERPROFILE'
 $programs = Join-Path $localAppData 'Programs'
 
 if (-not $Package) {
@@ -59,7 +60,6 @@ $altNodeHome = Join-Path $programs 'office-partner-node'
 $marker = Join-Path $nodeHome '.installed-by-office-partner'
 $altMarker = Join-Path $altNodeHome '.installed-by-office-partner'
 $cli = Join-Path $Package 'bin\office-partner.mjs'
-$npmCmd = Join-Path $nodeHome 'npm.cmd'
 $gatewayDir = Join-Path $localAppData 'Agent Gateway'
 $runKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
 $developerKey = 'HKCU:\Software\Microsoft\Office\16.0\WEF\Developer'
@@ -179,8 +179,8 @@ function Read-Manifest {
   if (-not (Test-Path -LiteralPath $file)) { throw "The package has no bin\runtime-manifest.json ($Package)." }
   return Get-Content -LiteralPath $file -Raw | ConvertFrom-Json
 }
-function Get-NodeAbi([string] $exe) {
-  try { return (& $exe -p "process.versions.modules" 2>$null | Select-Object -First 1).Trim() } catch { return $null }
+function Get-NodeRuntime([string] $exe) {
+  try { return (& $exe -p "process.arch + ':' + process.versions.modules" 2>$null | Select-Object -First 1).Trim() } catch { return $null }
 }
 function Get-NodeVersion([string] $exe) {
   try { return (& $exe --version 2>$null | Select-Object -First 1).Trim() } catch { return $null }
@@ -188,14 +188,12 @@ function Get-NodeVersion([string] $exe) {
 
 function Install-PinnedNode($manifest) {
   $version = $manifest.node.version
-  $expected = $manifest.node.win32.x64.sha256
-  if ($env:PROCESSOR_ARCHITECTURE -eq 'ARM64' -or $env:PROCESSOR_ARCHITEW6432 -eq 'ARM64') { $expected = $manifest.node.win32.arm64.sha256 }
+  $expected = $manifest.node.win32.$Architecture.sha256
   if (-not $version -or -not $expected) { throw 'The manifest pins no Node.js for this architecture.' }
-  $arch = if ($env:PROCESSOR_ARCHITECTURE -eq 'ARM64' -or $env:PROCESSOR_ARCHITEW6432 -eq 'ARM64') { 'arm64' } else { 'x64' }
   $existing = Join-Path $nodeHome 'node.exe'
   $target = if (-not (Test-Path -LiteralPath $existing)) { $nodeHome } else { $altNodeHome }
   Write-Log "    downloading Node.js v$version into $target (pinned, SHA-256 checked)"
-  $name = "node-v$version-win-$arch"
+  $name = "node-v$version-win-$Architecture"
   $work = Join-Path ([IO.Path]::GetTempPath()) "office-partner-node-$([guid]::NewGuid().ToString('N'))"
   New-Item -ItemType Directory -Path $work -Force | Out-Null
   try {
@@ -226,21 +224,21 @@ function Install-PinnedNode($manifest) {
 }
 
 function Ensure-Node($manifest, [switch] $NoDownload) {
-  $wanted = "$($manifest.node.abi)"
+  $wanted = "${Architecture}:$($manifest.node.abi)"
   $candidates = @(
     (Join-Path $nodeHome 'node.exe'),
     (Join-Path $altNodeHome 'node.exe')
   )
   foreach ($candidate in $candidates) {
     if (-not (Test-Path -LiteralPath $candidate)) { continue }
-    $abi = Get-NodeAbi $candidate
-    if ($abi -eq $wanted) { Write-Log "    using $candidate ($(Get-NodeVersion $candidate))"; return $candidate }
-    Write-Log "    $candidate has ABI $abi, this release needs $wanted"
+    $runtime = Get-NodeRuntime $candidate
+    if ($runtime -eq $wanted) { Write-Log "    using $candidate ($(Get-NodeVersion $candidate))"; return $candidate }
+    Write-Log "    $candidate has runtime $runtime, this release needs $wanted"
   }
   $onPath = $null
   try { $onPath = (Get-Command node.exe -ErrorAction Stop).Source } catch { }
-  if ($onPath -and (Get-NodeAbi $onPath) -eq $wanted) { Write-Log "    using the Node.js on PATH: $onPath ($(Get-NodeVersion $onPath))"; return $onPath }
-  if ($NoDownload) { Write-Log "    no Node.js with ABI $wanted on this machine yet"; return $null }
+  if ($onPath -and (Get-NodeRuntime $onPath) -eq $wanted) { Write-Log "    using the Node.js on PATH: $onPath ($(Get-NodeVersion $onPath))"; return $onPath }
+  if ($NoDownload) { Write-Log "    no Node.js with runtime $wanted on this machine yet"; return $null }
   return (Install-PinnedNode $manifest)
 }
 
@@ -265,7 +263,7 @@ function Ensure-NpmLayout([string] $nodeExe) {
   New-Item -ItemType Junction -Path $link -Value $Package | Out-Null
   # The command shim belongs next to npm's binaries (the prefix), which is the parent of its node_modules folder.
   $prefix = Split-Path -Parent $npmRoot
-  $source = Join-Path $packageParent 'office-partner.cmd'
+  $source = Join-Path (Split-Path -Parent $packageParent) 'office-partner.cmd'
   $destination = Join-Path $prefix 'office-partner.cmd'
   if ((Test-Path -LiteralPath $source) -and $source.ToLower() -ne $destination.ToLower()) { Copy-Item -LiteralPath $source -Destination $destination -Force }
 }
@@ -426,6 +424,12 @@ function Get-CertificateThumbprint {
 
 function Remove-CertificateTrust([string] $thumbprint) {
   if (-not $thumbprint) { Write-Log '    no localhost certificate found; nothing to untrust'; return }
+  # The gateway may keep using this certificate after the add-in is removed, as the product's unregister also allows.
+  $gatewayCert = Join-Path $gatewayDir 'localhost.crt'
+  if (Test-Path -LiteralPath $gatewayCert) {
+    $shared = (New-Object System.Security.Cryptography.X509Certificates.X509Certificate2 -ArgumentList $gatewayCert).Thumbprint
+    if ($shared -eq $thumbprint) { Write-Log '    keeping certificate trust for the gateway'; return }
+  }
   & certutil.exe -user -delstore Root $thumbprint 2>&1 | Out-Null
   if ($LASTEXITCODE -eq 0) { Write-Log "    removed $thumbprint" } else { Write-Log "    certutil exit $LASTEXITCODE for $thumbprint" }
 }
@@ -504,13 +508,13 @@ if ($Action -eq 'stop') {
 
 if ($Action -eq 'uninstall') {
   Step 'Stop the bridge, the gateway and their helpers' { Stop-ProductProcesses }
+  $node = $null
+  Step 'Look for a usable Node.js' { $script:node = Ensure-Node (Read-Manifest) -NoDownload }
   # The product removes its own certificate files, so read the thumbprint while localhost.crt still exists.
   $script:certThumbprint = $null
   Step 'Read the localhost certificate thumbprint' { $script:certThumbprint = Get-CertificateThumbprint }
   Step 'Let the product remove its registration, startup entry, shortcut and certificate trust' {
-    $node = $null
-    foreach ($candidate in @((Join-Path $nodeHome 'node.exe'), (Join-Path $altNodeHome 'node.exe'))) { if (Test-Path $candidate) { $node = $candidate; break } }
-    if ($node -and (Test-Path -LiteralPath $cli)) { & $node $cli uninstall all 2>&1 | Out-Host }
+    if ($node -and (Test-Path -LiteralPath $cli)) { Invoke-Product $node @('uninstall', 'all') | Out-Null }
   }
   Step 'Remove the startup entries' { Remove-OldStartup }
   Step 'Remove the add-in registration' {
@@ -525,8 +529,6 @@ if ($Action -eq 'uninstall') {
   Step 'Remove the Fix connection shortcut' { Remove-Item -LiteralPath (Join-Path ([Environment]::GetFolderPath('Programs')) 'Office Partner - Fix connection.lnk') -Force -ErrorAction SilentlyContinue }
   Step 'Remove the localhost certificate trust' { Remove-CertificateTrust $certThumbprint }
   Step 'Remove links and commands from other npm folders' {
-    $node = $null
-    foreach ($candidate in @((Join-Path $nodeHome 'node.exe'), (Join-Path $altNodeHome 'node.exe'))) { if (Test-Path $candidate) { $node = $candidate; break } }
     if ($node) {
       $npmRoot = Get-NpmRoot $node
       if ($npmRoot) {
@@ -573,10 +575,9 @@ try {
 
   Step 'Remove older installations and their commands' { Remove-PreviousInstall $node }
   Step 'Make npm see the package where it looks for it' { Ensure-NpmLayout $node }
-  Remove-OldStartup
 
   $setupTarget = if ($wantAddin -and $wantGateway) { 'all' } elseif ($wantGateway) { 'gateway' } elseif ($wantAddin) { 'addin' } else { '' }
-  $setupOk = $true
+  $setupOk = -not [bool]$setupTarget
   if ($setupTarget) {
     Step "Set up and start the selected parts ($setupTarget)" { $script:setupOk = Invoke-Setup $node $Providers $setupTarget }
   } else {

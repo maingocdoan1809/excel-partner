@@ -5,8 +5,6 @@ import type { PermissionMode } from "../permissions.js";
 import { setupComposerMenu } from "../ui/composer-menu.js";
 import { setupSelectionChip } from "../ui/selection-chip.js";
 import { loadProvider } from "../ui/provider-picker.js";
-import { boot } from "./boot.js";
-import { store } from "./services.js";
 
 export const PERMISSION_MODE_KEY = "excelPartner.permissionMode";
 export interface PendingPrompt {

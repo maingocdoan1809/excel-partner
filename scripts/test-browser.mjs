@@ -50,27 +50,31 @@ const bridge = new Bridge(config, { registry, usageFile: null, updater: null,
   systemPromptFile: path.join(temporary, 'prompt.txt'), savedReferencesFile: path.join(temporary, 'references.json'),
   workspaceConfigPath: null, skillUploadDir: path.join(temporary, 'skills') });
 let browser, page;
-const checks = [], errors = [], failedRequests = [];
+const checks = [], errors = [], failedRequests = [], providerErrors = [];
 const check = async (name, run) => {
   try { await run(); checks.push({ name, ok: true }); console.log(`PASS ${name}`); }
   catch (error) {
     const file = name.replace(/[^a-z0-9]+/gi, '-').toLowerCase();
     await page?.screenshot({ path: path.join(output, `failure-${file}.png`), fullPage: true }).catch(() => {});
     const state = await page?.evaluate(() => ({ provider: document.querySelector('#provider-select')?.value,
-      permission: document.querySelector('#permission-mode')?.value, errors: [...document.querySelectorAll('.bubble.error')].map(el => el.textContent) })).catch(() => undefined);
-    checks.push({ name, ok: false, error: error.message, state }); console.error(`FAIL ${name}: ${error.message} ${JSON.stringify(state)}`);
+      permission: document.querySelector('#permission-mode')?.value, errors: [...document.querySelectorAll('.bubble.error, .tool-call[data-state="error"]')].map(el => el.textContent) })).catch(() => undefined);
+    checks.push({ name, ok: false, error: error.message, state, providerErrors: [...providerErrors] }); console.error(`FAIL ${name}: ${error.message} ${JSON.stringify(state)} ${JSON.stringify(providerErrors)}`);
   }
 };
 try {
   const listening = await bridge.listen();
   const url = process.env.BROWSER_TEST_PORT ? `${tls ? 'https' : 'http'}://localhost:${process.env.BROWSER_TEST_PORT}` : listening.url;
-  config.publicBaseUrl = url;
+  bridge.config.publicBaseUrl = url;
   browser = await chromium.launch({ headless: process.env.BROWSER_TEST_HEADED !== '1',
     ...(process.env.BROWSER_EXECUTABLE ? { executablePath: process.env.BROWSER_EXECUTABLE } : process.platform === 'win32' ? { channel: 'msedge' } : {}) });
   page = await browser.newPage({ viewport: { width: 1200, height: 900 }, ignoreHTTPSErrors: Boolean(tls) });
   page.setDefaultTimeout(10000);
   page.on('pageerror', error => errors.push(error.message));
   page.on('requestfailed', request => failedRequests.push({ url: request.url(), error: request.failure()?.errorText }));
+  page.on('websocket', socket => socket.on('framereceived', frame => {
+    const event = JSON.parse(String(frame.payload));
+    if (event.type === 'error') providerErrors.push(event);
+  }));
   const settings = async () => { await page.locator('#menu-button').click(); await page.locator('#panel-settings').waitFor({ state: 'visible' }); };
   const connected = () => page.waitForFunction(() => document.querySelector('#connection-status')?.dataset.state === 'open');
   const send = async text => {

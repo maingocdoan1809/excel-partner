@@ -57,8 +57,8 @@ interface Job {
   conversationKey?: string;
   id: string; owner: string; route: Route; request: MessagesRequest; configHash: string; expected?: HistorySnapshot;
   state: ProviderSessionState; controller: AbortController; turnController: AbortController; pending: Map<string, Pending>;
-  idle: boolean; completedHistory?: HistorySnapshot; historyLength?: number; idleSince?: number;
-  exposed: Set<string>; segment: Segment; usage?: TokenUsage; timer?: NodeJS.Timeout; batch?: NodeJS.Timeout;
+  idle: boolean; completedHistory?: HistorySnapshot; idleSince?: number;
+  segment: Segment; usage?: TokenUsage; timer?: NodeJS.Timeout; batch?: NodeJS.Timeout;
   timeout?: NodeJS.Timeout; disposed: boolean;
   /** True once this turn called any tool; text-only turns can be retried safely. */
   sideEffects: boolean;
@@ -150,7 +150,8 @@ export class GatewayEngine {
       const job = this.calls.get(ids[0]!);
       if (!job || job.disposed) throw new ApiError(409, "invalid_request_error", "Tool continuation expired or is unknown. Start a new conversation; this request was not replayed.");
       if (job.owner !== owner || job.conversationKey !== key || job.configHash !== this.configHash(request, route)) throw new ApiError(409, "invalid_request_error", "Tool continuation belongs to a different conversation, token, model, system prompt or tool configuration");
-      if (new Set(ids).size !== ids.length || ids.length !== job.exposed.size || ids.some(id => !job.exposed.has(id) || this.calls.get(id) !== job)) {
+      if (new Set(ids).size !== ids.length || ids.length !== [...job.pending.values()].filter(p => p.exposed).length
+        || ids.some(id => !job.pending.get(id)?.exposed || this.calls.get(id) !== job)) {
         throw new ApiError(400, "invalid_request_error", "Supply exactly one result for every tool_use in the preceding response");
       }
       const incomingHistory = snapshotHistory(request.messages.slice(0, -1));
@@ -165,7 +166,6 @@ export class GatewayEngine {
       clearTimeout(job.timer);
       job.request = request;
       job.segment = new Segment(request.model);
-      job.exposed.clear();
       job.segmentStartedAt = performance.now();
       job.firstText = false;
       job.lastTextAt = undefined;
@@ -200,15 +200,15 @@ export class GatewayEngine {
     if (identified && !identified.idle) throw new ApiError(409, "invalid_request_error", "This conversation already has an active turn or unresolved client tools");
     if (key && !identified && saved && saved.status !== "idle") throw new ApiError(409, "invalid_request_error", "This conversation has an interrupted or failed turn. Its actions may already have executed; automatic replay is disabled. Start a new chat after inspecting workbook state.");
     const candidates = retained.filter(job => job.idle && job.owner === owner
-      && job.route.provider === route.provider && job.historyLength !== undefined
+      && job.route.provider === route.provider && job.completedHistory
       && (key ? job === identified : job.conversationKey === undefined)
-      && request.messages.length > job.historyLength
-      && request.messages[job.historyLength]?.role === "user"
-      && job.completedHistory && matchesHistory(job.completedHistory, prefixHash(job.historyLength)));
+      && request.messages.length > job.completedHistory.length
+      && request.messages[job.completedHistory.length]?.role === "user"
+      && matchesHistory(job.completedHistory, prefixHash(job.completedHistory.length)));
     if (identified && !candidates.length) throw new ApiError(409, "invalid_request_error", "Conversation ID matches, but supplied history is edited, truncated, or repeats a completed turn. No provider turn was sent.");
     if (candidates.length === 1) {
       const job = candidates[0]!;
-      const appended = request.messages.slice(job.historyLength!);
+      const appended = request.messages.slice(job.completedHistory!.length);
       this.turnContent(request, route, appended);
       if (this.parked.has(job.id)) {
         this.makeRoom();
@@ -245,13 +245,12 @@ export class GatewayEngine {
       state: { id, provider: route.provider, providerSessionId: null, providerNativeSessionId: checkpoint?.nativeId ?? null,
         providerChatSessionId: null, providerModel: null, providerEffort: route.effort,
         systemPromptRevision: null, capabilities: { webSearch: false, playwright: false } },
-      controller: new AbortController(), turnController: new AbortController(), pending: new Map(), exposed: new Set(),
+      controller: new AbortController(), turnController: new AbortController(), pending: new Map(),
       segment: new Segment(request.model), disposed: false, idle: false, sideEffects: false,
       traceId: "", startedAt: 0, segmentStartedAt: 0, firstText: false };
     this.jobs.set(job.id, job);
     job.completedHistory = checkpoint?.history;
-    job.historyLength = checkpoint?.history?.length;
-    this.startTurn(job, checkpoint ? request.messages.slice(job.historyLength!) : request.messages,
+    this.startTurn(job, checkpoint ? request.messages.slice(checkpoint.history!.length) : request.messages,
       checkpoint ? "persisted_conversation_id" : key ? "new_conversation_id" : candidates.length > 1 ? "ambiguous_history" : "new_history");
     return { segment: job.segment, cancel: this.cancellation(job) };
   }
@@ -320,7 +319,7 @@ export class GatewayEngine {
       const all = [...job.pending.values()].filter(p => !p.exposed);
       const pending = job.request.tool_choice?.disable_parallel_tool_use ? all.slice(0, 1) : all;
       if (!pending.length) return;
-      const blocks = pending.map(p => { p.exposed = true; job.exposed.add(p.id); return { type: "tool_use", id: p.id, name: p.name, input: p.input }; });
+      const blocks = pending.map(p => { p.exposed = true; return { type: "tool_use", id: p.id, name: p.name, input: p.input }; });
       const content: ContentBlock[] = [...(job.segment.text ? [{ type: "text", text: job.segment.text }] : []), ...blocks];
       job.expected = snapshotHistory([...job.request.messages, { role: "assistant", content }]);
       clearTimeout(job.timeout);
@@ -405,7 +404,6 @@ export class GatewayEngine {
       afterTextMs: job.lastTextAt === undefined ? null : Math.round(performance.now() - job.lastTextAt) });
     const content = [{ type: "text", text: job.segment.text }];
     job.completedHistory = snapshotHistory([...job.request.messages, { role: "assistant", content }]);
-    job.historyLength = job.request.messages.length + 1;
     this.checkpoint(job, "idle");
     job.segment.finish("end_turn", [], job.usage);
     job.idle = true;

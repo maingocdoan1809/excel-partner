@@ -6,7 +6,8 @@ import { showToast } from "../ui/toast.js";
 import { randomId } from "../bridge-client.js";
 import { buildContextPreface, type StoredMessage } from "../ui/sessions.js";
 import { activeHost } from "../host/index.js";
-import { type PendingPrompt, app, pendingAttachments, pendingPrompts } from "./state.js";
+import { type PendingPrompt, app, liveTools, pendingAttachments, pendingPrompts } from "./state.js";
+import { paintTool } from "../ui/tool-view.js";
 import { append, renderDelivery, updateDelivery } from "./messages.js";
 import { persistNow, startNewChat } from "./chats.js";
 import { autotestPanel, browserView, mcpSettings, providerOptions, openMenu, refreshModelCatalog, renderModelPicker, saveModelChoice, showPanel, slash, thinking, toolSettings, updateMentionMenu, updater, usagePanel } from "./services.js";
@@ -167,14 +168,17 @@ export async function submit(queued?: PendingPrompt, delegated?: { delegationId:
   thinking.show();
   persistNow();
 
-  // After the chat is marked busy, so a second Send during the (slow) export is queued instead of starting another turn.
-  if (!delegated && !nativeCommand) await autotestPanel.syncForPrompt(prompt);
-  const result = nativeCommand ? null : await activeHost().execute("get_selection", {});
-  if (app.currentRequestId !== requestId || app.requestSession !== app.session) { decline("The chat open in that file changed before the request could start."); return; }
-  const selection = result?.ok ? (result.data as never) : null;
-  if (app.cancelRequested) return finishLocalCancel(requestId, delegated?.delegationId);
+  const isCurrent = () => app.currentRequestId === requestId && app.requestSession === app.session;
   try {
+    // After the chat is marked busy, so a second Send during the (slow) export is queued instead of starting another turn.
+    if (!delegated && !nativeCommand) await autotestPanel.syncForPrompt(prompt);
+    if (!isCurrent()) { decline("The chat open in that file changed before the request could start."); return; }
+    const result = nativeCommand ? null : await activeHost().execute("get_selection", {});
+    if (!isCurrent()) { decline("The chat open in that file changed before the request could start."); return; }
+    const selection = result?.ok ? (result.data as never) : null;
+    if (app.cancelRequested) return finishLocalCancel(requestId, delegated?.delegationId);
     await mcpSettings.ready();
+    if (!isCurrent()) { decline("The chat open in that file changed before the request could start."); return; }
     const attachmentIds = turnAttachments.flatMap((item) => item.reference.id ? [item.reference.id] : []);
     const referencePaths = turnAttachments.flatMap((item) => item.reference.id ? [] : [item.reference.path]);
     if (app.cancelRequested) return finishLocalCancel(requestId, delegated?.delegationId);
@@ -184,10 +188,12 @@ export async function submit(queued?: PendingPrompt, delegated?: { delegationId:
     app.activeModel = model;
     app.activeEffort = effort;
   } catch (error) {
+    if (!isCurrent()) { decline("The request could not be sent in that file."); return; }
     if (app.cancelRequested) return finishLocalCancel(requestId, delegated?.delegationId);
     decline("The request could not be sent in that file.");
-    thinking.clear();
-    app.currentRequestId = null;
+    app.autoQueueAllowed = false;
+    holdPendingPrompts();
+    app.needsContext = app.session.messages.length > 0;
     setBusy(false);
     if (queued) { queued.state = "held"; pendingPrompts.set(queued.id, queued); updateDelivery(queued); }
     else if (!delegated) els.input.value = prompt;
@@ -211,8 +217,7 @@ export function stopCurrentTurn(): void {
 export function finishLocalCancel(requestId: string, delegationId?: string): void {
   if (app.currentRequestId !== requestId) return;
   if (delegationId) app.client.declineDelegation(delegationId, "The user stopped the request in that file before it started.");
-  thinking.clear();
-  app.currentRequestId = null;
+  setBusy(false);
   holdPendingPrompts();
   const last = app.session.messages[app.session.messages.length - 1];
   if (last?.kind === "user" && pendingPrompts.size === 0) {
@@ -229,16 +234,28 @@ export function finishLocalCancel(requestId: string, delegationId?: string): voi
     }
   }
   app.needsContext = app.session.messages.length > 0;
-  setBusy(false);
   append({ kind: "note", text: "Stopped." });
   persistNow();
   updater.reloadIfIdle();
 }
 
-/** The send control becomes a red Stop button while a turn is running. */
+/** Enter or leave a turn. Every exit releases the same request, streaming UI and tool cards. */
 export function setBusy(busy: boolean): void {
   if (busy) app.autoQueueAllowed = true;
-  if (!busy) thinking.clear();
+  else {
+    thinking.clear();
+    app.currentRequestId = null;
+    app.requestSession = null;
+    app.live = null;
+    for (const { card, tool } of liveTools.values()) {
+      tool.state = "error";
+      tool.error = "no result";
+      paintTool(card, tool);
+    }
+    liveTools.clear();
+    if (app.liveToolGroup) app.liveToolGroup.element.open = false;
+    app.liveToolGroup = null;
+  }
   app.cancelRequested = false;
   app.promptDispatched = false;
   els.send.dataset.mode = busy ? "stop" : "send";
@@ -257,8 +274,6 @@ export function abandonRequest(): void {
   if (app.currentRequestId) app.client.cancel(app.currentRequestId);
   holdPendingPrompts();
   pendingPrompts.clear();
-  app.currentRequestId = null;
-  app.requestSession = null;
   usagePanel.reset();
   setBusy(false);
 }

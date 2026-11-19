@@ -1,6 +1,5 @@
 import type http from "node:http";
 import type https from "node:https";
-import path from "node:path";
 import type { Duplex } from "node:stream";
 import { WebSocketServer, type RawData, type WebSocket } from "ws";
 import { HostIdSchema, PROTOCOL_VERSION, WorkbookInfoMessageSchema, type AdminPolicy, type ClientMessage, type ServerMessage } from "../../protocol/src/index.js";

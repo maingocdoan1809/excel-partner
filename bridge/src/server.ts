@@ -217,7 +217,7 @@ export class Bridge {
     });
     this.routes = {
       peer: new PeerRoutes({ sessions: this.sessions, delegations, tokenFile: path.join(dataDir, "peer-token.txt") }),
-      system:new SystemRoutes(this.sessions, this.providers, this.updater, () => this.logins.isBusy),
+      system:new SystemRoutes(this.sessions, this.providers, () => this.logins.isBusy),
       files: new FileRoutes({ sessions: this.sessions, logger: this.logger, activateWorkbook: options.activateWorkbook ?? activateWorkbook }),
       external: new ExternalSessionRoutes({ sessions: this.sessions, providers: this.providers, history: this.history, logger: this.logger.child("external-sessions"), disabled: policy.disabledProviders }),
       mcp: new McpRoutes({ sessions: this.sessions, mcpServers: this.mcpServers, discover: discoverMcp }),

@@ -2,7 +2,6 @@
 import fs from "node:fs";
 import { afterEach, expect, it, vi } from "vitest";
 import { setupHistoryStorage } from "../frontend/taskpane/ui/history-storage.js";
-const tick = async () => { for (let i = 0; i < 30; i++) await Promise.resolve(); };
 afterEach(() => { vi.restoreAllMocks(); });
 function fixture() {
  document.body.innerHTML = fs.readFileSync("frontend/taskpane/index.html", "utf8").match(/<body[^>]*>([\s\S]*)<\/body>/)![1]!;

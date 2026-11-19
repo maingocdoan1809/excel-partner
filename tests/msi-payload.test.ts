@@ -82,11 +82,11 @@ describe("MSI payload pruning", () => {
 
 describe("MSI files", () => {
   it("writes a CRLF command that prefers the pinned Node.js this installer put in place", () => {
-    const shim = commandShim();
+    const shim = commandShim(manifest.node.abi, "x64");
     expect(shim).toContain("\r\n");
     expect(shim).not.toMatch(/[^\r]\n/);
     expect(shim).toContain("%LOCALAPPDATA%\\Programs\\nodejs\\node.exe");
-    expect(shim).toContain("%dp0%\\node_modules\\office-partner\\bin\\office-partner.mjs");
+    expect(shim).toContain("%~dp0node_modules\\office-partner\\bin\\office-partner.mjs");
   });
 
   it("turns a package version into an MSI version", () => {

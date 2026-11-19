@@ -77,7 +77,7 @@ Panes for different open files can read each other (`read_connected_file`) or ha
 
 ### Frontend
 
-`frontend/taskpane/main.ts` still holds ~30 module-level mutable variables (`client`, `session`, `provider`, `currentRequestId`, …). `tests/chat-session-metadata.test.ts` evaluates `handleEvent` from the source text of `main.ts` with stand-in variables, so keep those names in sync when moving code. The pane reads provider differences from `capabilities` in detection results, never from provider names.
+`frontend/taskpane/main.ts` registers `Office.onReady`; `chat/boot.ts` starts the pane. Shared chat state lives in `chat/state.ts`, turn handling in `chat/turn.ts`, and provider events in `chat/events.ts`. Every turn exit uses `setBusy(false)` to release request ownership and streaming/tool UI. `tests/chat-session-metadata.test.ts` imports the real event handler with mocked UI services. The pane reads provider differences from `capabilities` in detection results, never from provider names.
 
 ## Product rules (owner-confirmed)
 

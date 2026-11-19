@@ -21,7 +21,7 @@ if (!version.stdout.trim().startsWith(WIX_VERSION)) throw new Error(`WiX ${versi
 
 const msi = path.join(root, "release", `${info.name}-${info.version}-${arch}.msi`);
 /** The util extension's custom action binary, which runs a command line without ever opening a console window. */
-const utilCa = { x64: "Wix4UtilCA_X64", arm64: "Wix4UtilCA_A64", x86: "Wix4UtilCA_X86" }[arch];
+const utilCa = { x64: "Wix4UtilCA_X64", arm64: "Wix4UtilCA_A64" }[arch];
 if (!utilCa) throw new Error(`No util custom action binary for ${arch}.`);
 
 /**
@@ -46,7 +46,7 @@ const launcher = buildLauncher();
 
 // `wix build` does not run ICE validation (that is the separate `wix msi validate`), so the per-user-file ICE38/ICE64/ICE91 warnings never appear here.
 const args = ["build", "-arch", arch, "-ext", "WixToolset.Util.wixext", "-ext", "WixToolset.UI.wixext",
-  "-d", `Version=${info.msiVersion}`, "-d", `PayloadDir=${path.join(outDir, "payload")}`, "-d", `UtilCA=${utilCa}`,
+  "-d", `Version=${info.msiVersion}`, "-d", `PayloadDir=${path.join(outDir, "payload")}`, "-d", `UtilCA=${utilCa}`, "-d", `RuntimeArch=${arch}`,
   "-d", `LauncherDir=${path.dirname(launcher)}`,
   "-d", `LicenseRtf=${path.join(root, "installer", "msi", "license.rtf")}`,
   "-loc", path.join(root, "installer", "msi", "OfficePartner.en-us.wxl"),

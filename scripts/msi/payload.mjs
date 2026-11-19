@@ -1,9 +1,7 @@
 // Pure helpers for the thin MSI payload (see scripts/build-msi-payload.mjs). No I/O here, so tests can run them without a build.
-import path from "node:path";
-
 /** Node.js ABI (process.versions.modules) of each major release the pinned prebuilt SQLite binary can be built for. */
-export const NODE_ABI_BY_MAJOR = { 20: 115, 22: 127, 24: 137 };
-export const ARCHS = ["x64", "arm64"];
+const NODE_ABI_BY_MAJOR = { 20: 115, 22: 127, 24: 137 };
+const ARCHS = ["x64", "arm64"];
 const SEMVER = /^(\d+)\.(\d+)\.(\d+)$/;
 const SHA256 = /^[0-9a-f]{64}$/;
 
@@ -12,7 +10,7 @@ const SHA256 = /^[0-9a-f]{64}$/;
  * Purpose: one place for every version and hash, so a build can never pick "whatever is latest".
  * @param {any} manifest Parsed runtime-manifest.json.
  * @param {"x64"|"arm64"} arch Windows architecture of the MSI.
- * @returns {{ node: { version: string, abi: number, sha256: string, file: string, url: string, shasumsUrl: string },
+ * @returns {{ node: { version: string, abi: number, sha256: string, file: string, url: string },
  *            sqlite: { version: string, sha256: string, file: string, url: string },
  *            copilot: { package: string, version: string, sdkVersion: string } }}
  */
@@ -34,7 +32,7 @@ export function readPins(manifest, arch) {
   const sqliteFile = `better-sqlite3-v${sqlite.version}-node-v${node.abi}-win32-${arch}.tar.gz`;
   return {
     node: { version: node.version, abi: node.abi, sha256: nodeSha, file: nodeFile,
-      url: `https://nodejs.org/dist/v${node.version}/${nodeFile}`, shasumsUrl: `https://nodejs.org/dist/v${node.version}/SHASUMS256.txt` },
+      url: `https://nodejs.org/dist/v${node.version}/${nodeFile}` },
     sqlite: { version: sqlite.version, sha256: sqliteSha, file: sqliteFile,
       url: `https://github.com/WiseLibs/better-sqlite3/releases/download/v${sqlite.version}/${sqliteFile}` },
     copilot: { package: copilot.package, version: copilot.version, sdkVersion: copilot.sdkVersion },
@@ -79,36 +77,33 @@ export function pruneReason(relative, isDirectory) {
 
 /**
  * The `office-partner.cmd` command the MSI puts next to the package, like the one `npm install -g` writes.
- * Purpose: run the pinned Node.js (the one the bundled SQLite binary was built for) when this installer put it there; otherwise the first `node` on PATH.
+ * Purpose: use a local Node.js only when it matches the bundled SQLite binary; otherwise use `node` on PATH.
+ * @param {number} abi Node.js ABI pinned by the runtime manifest.
+ * @param {"x64"|"arm64"} arch Architecture of the payload.
  * @returns {string} Batch file text with CRLF line endings.
  */
-export function commandShim() {
+export function commandShim(abi, arch) {
+  if (!Number.isInteger(abi) || abi <= 0 || !ARCHS.includes(arch)) throw new Error("The command shim needs a Node.js ABI and payload architecture.");
   return [
     "@ECHO off",
-    "GOTO start",
-    ":find_dp0",
-    "SET dp0=%~dp0",
-    "EXIT /b",
-    ":start",
     "SETLOCAL",
-    "CALL :find_dp0",
-    "",
-    'IF EXIST "%LOCALAPPDATA%\\Programs\\nodejs\\node.exe" (',
-    '  SET "_prog=%LOCALAPPDATA%\\Programs\\nodejs\\node.exe"',
-    ") ELSE IF EXIST \"%LOCALAPPDATA%\\Programs\\office-partner-node\\node.exe\" (",
-    '  SET "_prog=%LOCALAPPDATA%\\Programs\\office-partner-node\\node.exe"',
-    ") ELSE (",
-    '  SET "_prog=node"',
-    "  SET PATHEXT=%PATHEXT:;.JS;=;%",
-    ")",
-    "",
-    'endLocal & goto #_undefined_# 2>NUL || title %COMSPEC% & "%_prog%"  "%dp0%\\node_modules\\office-partner\\bin\\office-partner.mjs" %*',
+    ...["nodejs", "office-partner-node"].flatMap(folder => [
+      `SET "_prog=%LOCALAPPDATA%\\Programs\\${folder}\\node.exe"`,
+      'IF EXIST "%_prog%" (',
+      `  "%_prog%" -e "process.exit(process.arch === '${arch}' && Number(process.versions.modules) === ${abi} ? 0 : 1)" >NUL 2>&1`,
+      "  IF NOT ERRORLEVEL 1 GOTO run",
+      ")",
+    ]),
+    'SET "_prog=node"',
+    ":run",
+    '"%_prog%" "%~dp0node_modules\\office-partner\\bin\\office-partner.mjs" %*',
+    "EXIT /b %ERRORLEVEL%",
     "",
   ].join("\r\n");
 }
 
 /**
- * Turns a package version into the four-part number Windows Installer accepts.
+ * Turns a package version into the three-part number Windows Installer accepts.
  * @param {string} version Package version such as `0.1.26` or `0.2.0-beta.1`.
  * @returns {string} `major.minor.patch` (a pre-release suffix is dropped).
  */
@@ -117,6 +112,3 @@ export function msiVersion(version) {
   if (!match || Number(match[1]) > 255 || Number(match[2]) > 255 || Number(match[3]) > 65535) throw new Error(`'${version}' cannot be an MSI version (limits 255.255.65535).`);
   return `${match[1]}.${match[2]}.${match[3]}`;
 }
-
-/** Normalises a Windows or POSIX path to `/` separators for the rules above. */
-export const slash = (value) => value.split(path.sep).join("/");
