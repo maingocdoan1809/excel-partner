@@ -13,7 +13,10 @@ describe("the bundled task pane", () => {
   it("starts and registers with Office", () => {
     const out = path.join(root, "tmp", "pane-bundle-test.js");
     fs.mkdirSync(path.dirname(out), { recursive: true });
-    execFileSync(process.execPath, [path.join(root, "node_modules", "esbuild", "bin", "esbuild"), path.join(root, "frontend", "taskpane", "main.ts"), "--bundle", "--format=iife", "--target=es2020", `--outfile=${out}`, "--log-level=error"]);
+    // Keep esbuild in Node's own realm: jsdom's Uint8Array differs from Node's TextEncoder output.
+    execFileSync(process.execPath, ["-e", "require('esbuild').buildSync(JSON.parse(process.argv[1]))", JSON.stringify({
+      entryPoints: [path.join(root, "frontend", "taskpane", "main.ts")], bundle: true, format: "iife", target: "es2020", outfile: out, logLevel: "error",
+    })], { cwd: root });
     document.documentElement.innerHTML = fs.readFileSync(path.join(root, "frontend", "taskpane", "index.html"), "utf8").replace(/<script[^>]*><\/script>/g, "");
     let ready: ((info: { host: string }) => void) | undefined;
     g.Office = {
@@ -32,7 +35,7 @@ describe("the bundled task pane", () => {
     // eslint-disable-next-line no-new-func
     new Function(fs.readFileSync(out, "utf8"))();
     expect(ready, "the bundle must register Office.onReady").toBeTypeOf("function");
-    expect(() => ready!({ host: "Excel" })).not.toThrow();
+    expect(() => ready!({ host: "Word" })).not.toThrow();
     fs.rmSync(out, { force: true });
   });
 });

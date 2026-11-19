@@ -33,7 +33,7 @@ export class BrowserView {
   /** True while the large view shows the newest picture; stepping back pauses following. */
   private following = true;
 
-  constructor(private readonly els: BrowserViewElements, private readonly openLarge: () => void, private readonly onCount?: (count: number) => void) {
+  constructor(private readonly els: BrowserViewElements, openLarge: () => void, private readonly onCount?: (count: number) => void) {
     els.dockOpen.addEventListener("click", openLarge);
     els.dockExpand.addEventListener("click", openLarge);
     els.dockClose.addEventListener("click", () => { els.dock.hidden = true; });

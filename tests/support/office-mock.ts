@@ -620,7 +620,7 @@ export class MockRange {
     );
   }
   getCellProperties() {
-    const side = (key: string, edge: string, record: Record<string, unknown>) => ({
+    const side = (edge: string, record: Record<string, unknown>) => ({
       style: (record[`border.${edge}.style`] as string) ?? "None",
       color: (record[`border.${edge}.color`] as string) ?? "#000000",
       weight: (record[`border.${edge}.weight`] as string) ?? "Thin",
@@ -642,10 +642,10 @@ export class MockRange {
             fill: { color: (rec["fill.color"] as string) ?? "#FFFFFF" },
             horizontalAlignment: (rec["horizontalAlignment"] as string) ?? "General",
             borders: {
-              top: side("top", "EdgeTop", rec),
-              bottom: side("bottom", "EdgeBottom", rec),
-              left: side("left", "EdgeLeft", rec),
-              right: side("right", "EdgeRight", rec),
+              top: side("EdgeTop", rec),
+              bottom: side("EdgeBottom", rec),
+              left: side("EdgeLeft", rec),
+              right: side("EdgeRight", rec),
             },
           },
         };

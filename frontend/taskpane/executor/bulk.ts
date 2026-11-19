@@ -249,7 +249,7 @@ export async function writeGrid(context: Excel.RequestContext, topLeft: Excel.Ra
     if (row.length === columns && (fillable.size === 0 || r === 0)) return row;
     return Array.from({ length: columns }, (_, c) => (c >= row.length || (r > 0 && fillable.has(c)) ? null : row[c]));
   };
-  const hasFormulas = grid.some((row, r) => rowToSend(r).some(isFormulaString));
+  const hasFormulas = grid.some((_, r) => rowToSend(r).some(isFormulaString));
   const kind: BulkKind = hasFormulas ? "formulas" : "values";
 
   return manualCalculationIf(context, needsBatches(kind, rows * columns), async () => {

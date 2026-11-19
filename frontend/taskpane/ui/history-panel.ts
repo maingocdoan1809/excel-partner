@@ -161,11 +161,11 @@ export function setupHistoryPanel(deps: HistoryPanelDeps) {
       const intro = document.createElement("p");
       intro.className = "settings-description";
       intro.textContent = "Pick a conversation to bring into History. You can then continue it here with its full context.";
-      list.replaceChildren(intro, ...sessions.map((item) => importRow(provider, item, message)));
+      list.replaceChildren(intro, ...sessions.map((item) => importRow(provider, item)));
     } catch (error) { message(`Could not read the conversations: ${error instanceof Error ? error.message : String(error)}`); }
   }
 
-  function importRow(provider: ProviderId, item: ExternalSessionSummary, message: (text: string) => void): HTMLElement {
+  function importRow(provider: ProviderId, item: ExternalSessionSummary): HTMLElement {
     const row = document.createElement("button");
     row.type = "button";
     row.className = "history-item";

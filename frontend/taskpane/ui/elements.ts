@@ -1,5 +1,4 @@
 import { byId } from "./dom.js";
-import { preview, settings } from "../chat/services.js";
 
 export const els = {
   usageStats: byId<HTMLElement>("usage-stats"),

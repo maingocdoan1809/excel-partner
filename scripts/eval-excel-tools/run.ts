@@ -42,7 +42,7 @@ async function startBridge() {
 
 /* --------------------------------- a run --------------------------------- */
 interface Outcome { run: Run; usage: { in: number; out: number; cached: number }; seconds: number; reason: string; unsim: string[] }
-async function runCase(env: Awaited<ReturnType<typeof startBridge>>, c: Case, rep: number): Promise<Outcome> {
+async function runCase(env: Awaited<ReturnType<typeof startBridge>>, c: Case): Promise<Outcome> {
   const wb: Workbook = c.fixture(); const snap = selectionFor(c, wb); const before = wb.snapshot();
   if (MODE !== "real") env.registry!.register(new env.MockAdapter({ id: "claude", toolCalls: MODE === "oracle" ? c.oracle.calls : [], reply: MODE === "oracle" ? c.oracle.reply : "" }));
   const calls: Call[] = []; const started = new Map<string, any>(); let reply = ""; let reason = "error"; const usage = { in: 0, out: 0, cached: 0 };
@@ -114,7 +114,7 @@ async function main() {
     for (;;) {
       const j = jobs[next++]; if (!j) return; const { c, rep } = j;
       try {
-        const o = await runCase(env, c, rep);
+        const o = await runCase(env, c);
         if (o.reason !== "completed") { failed++; fs.appendFileSync(errorsFile, JSON.stringify({ prompt_id: c.id, rep, failure_class: o.reason === "timeout" ? "timeout" : "harness_or_serving_error", message: o.reason, usage: o.usage }) + "\n"); console.log(`  ${c.id}#${rep} NOT SCORED (${o.reason})`); continue; }
         const v: Verdict = c.check(o.run); let judged = "";
         if (c.claims) {

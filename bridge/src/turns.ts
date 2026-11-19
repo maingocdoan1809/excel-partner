@@ -1,6 +1,5 @@
 import { sessionMcpEndpoint } from "./session-mcp.js";
 import { createHash } from "node:crypto";
-import path from "node:path";
 import { parseNativeCommand, type NativeCommand } from "../../protocol/src/commands.js";
 import { providerSessionKey, type AnySelectionSnapshot, type ProviderId, type ServerMessage, type ToolCapabilities } from "../../protocol/src/index.js";
 import { hostSystemPrompt } from "../../protocol/src/system-prompts.js";
@@ -429,7 +428,6 @@ export class TurnRunner {
       if (session.activeRequestId !== requestId) return;
       this.deps.logger.warn("provider ignored cancel; closing its process", { requestId });
       this.finishTurn(session, requestId, "cancelled");
-      session.endTurn(requestId);
       void this.closeProviderProcess(session, "cancel_timeout");
     }, this.deps.config.cancelGraceMs);
     watchdog.unref();

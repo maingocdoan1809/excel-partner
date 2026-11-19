@@ -1,7 +1,6 @@
 import http from "node:http";
 import https from "node:https";
 import fs from "node:fs";
-import path from "node:path";
 import { randomBytes, randomUUID, createHash, timingSafeEqual } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { createDefaultRegistry, type ProviderRegistry } from "../../providers/src/registry.js";

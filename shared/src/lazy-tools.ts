@@ -1,4 +1,3 @@
-import type { HostId } from "../../protocol/src/index.js";
 import type { JsonSchema, ToolDefinition } from "./tool-definitions.js";
 
 /**

@@ -148,17 +148,6 @@ export function handleEvent(event: ProviderEvent): void {
       void refreshUsage();
       slash.reload();
       void userSkills.refresh();
-      thinking.clear();
-      app.currentRequestId = null;
-      app.live = null;
-      for (const { card, tool } of liveTools.values()) {
-        tool.state = "error";
-        tool.error = "no result";
-        paintTool(card, tool);
-      }
-      liveTools.clear();
-      if (app.liveToolGroup) app.liveToolGroup.element.open = false;
-      app.liveToolGroup = null;
       setBusy(false);
       if (event.reason === "cancelled") append({ kind: "note", text: "Stopped." });
       if (event.reason !== "completed") holdPendingPrompts();
@@ -190,8 +179,6 @@ export function renderState(state: string): void {
     // The bridge dropped mid-turn; the running request can no longer finish, so free the UI.
     usagePanel.reset();
     renderUsage();
-    app.currentRequestId = null;
-    app.live = null;
     setBusy(false);
     showToast("Connection to the bridge was lost; the running request was stopped. Reconnecting…");
   }

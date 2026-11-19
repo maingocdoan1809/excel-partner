@@ -160,7 +160,7 @@ function tokenize(s: string): string[] {
 }
 /** Move the relative references of a formula by (dRow, dCol), as filling it across a range does. */
 export function shiftFormula(f: string, dRow: number, dCol: number): string {
-  return f.replace(/(\$?)([A-Za-z]{1,3})(\$?)(\d+)(?![\w(])/g, (m, ca, col, ra, row) => `${ca}${ca ? col : colName(colNum(col) + dCol)}${ra}${ra ? row : Number(row) + dRow}`);
+  return f.replace(/(\$?)([A-Za-z]{1,3})(\$?)(\d+)(?![\w(])/g, (_, ca, col, ra, row) => `${ca}${ca ? col : colName(colNum(col) + dCol)}${ra}${ra ? row : Number(row) + dRow}`);
 }
 
 /* ------------------------------- tools -------------------------------- */

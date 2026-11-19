@@ -471,7 +471,7 @@ describe("continued chats", () => {
     expect(seen[0]?.endsWith("continue please")).toBe(true);
 
     pane.send({ type: "prompt", requestId: "r2", prompt: "no context here", selection: null });
-    await pane.waitFor((m, i) => m.type === "turn_finished" && (m as { requestId: string }).requestId === "r2");
+    await pane.waitFor((m) => m.type === "turn_finished" && (m as { requestId: string }).requestId === "r2");
     expect(seen[1]?.endsWith("no context here")).toBe(true);
     await pane.close();
   });

@@ -120,7 +120,7 @@ describe("names are read when someone looks, not on a timer", () => {
     first.send({ type: "refresh_connected_files" });
     second.send({ type: "refresh_connected_files" });
     second.send({ type: "refresh_connected_files" });
-    await second.waitFor((m, i) => m.type === "connected_files" && second.received.filter((x) => x.type === "connected_files").length > before);
+    await second.waitFor((m) => m.type === "connected_files" && second.received.filter((x) => x.type === "connected_files").length > before);
     await new Promise((resolve) => setTimeout(resolve, 100));
     expect(askedFirst.count).toBe(1);
     expect(askedSecond.count).toBe(1);

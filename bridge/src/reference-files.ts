@@ -41,10 +41,12 @@ export function isNetworkPath(input: string): boolean {
 
 /** `input` as an absolute local path; a network path only when it lies inside one of `networkRoots` (folders the user configured). */
 export function localPath(input: string, networkRoots: readonly string[] = []): string {
-  const candidate = path.resolve(toLocalPath(input));
-  if (!isNetworkPath(candidate)) return candidate;
-  const key = (value: string) => value.toLowerCase().replace(/[\\/]+$/, "");
-  if (networkRoots.filter(isNetworkPath).some(root => key(candidate) === key(root) || key(candidate).startsWith(key(root) + path.sep))) return candidate;
+  const local = toLocalPath(input);
+  // POSIX resolve collapses the leading // or treats backslashes as a filename, hiding a network path from the guard.
+  if (!isNetworkPath(local)) return path.resolve(local);
+  const candidate = path.win32.normalize(local);
+  const key = (value: string) => path.win32.normalize(value).toLowerCase().replace(/\\+$/, "");
+  if (networkRoots.filter(isNetworkPath).some(root => key(candidate) === key(root) || key(candidate).startsWith(key(root) + "\\"))) return candidate;
   throw new ReferenceError_(`'${input}' is a network location. Add its folder as a workspace first to let the assistant read it.`);
 }
 
@@ -58,9 +60,9 @@ export function workbookFolderFromUrl(documentUrl: string): string {
     if (url.hostname && url.hostname !== "localhost") throw new ReferenceError_("Network file URLs cannot be mapped to a local workspace. Add the folder manually.");
     input = decodeURIComponent(url.pathname).replace(/^\/(?=[A-Za-z]:\/)/, "");
   }
-  if (isNetworkPath(path.resolve(toLocalPath(input)))) throw new ReferenceError_("This workbook is opened from a network location. Add its folder manually.");
+  const candidate = localPath(input);
   let file: string;
-  try { file = fs.realpathSync(path.resolve(toLocalPath(input))); }
+  try { file = fs.realpathSync(candidate); }
   catch { throw new ReferenceError_("The open workbook path is unavailable to the bridge. Add its folder manually."); }
   if (!fs.statSync(file).isFile()) throw new ReferenceError_("The open workbook path is not a file.");
   return path.dirname(file);

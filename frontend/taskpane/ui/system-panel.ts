@@ -1,6 +1,5 @@
 import type { ProviderId } from "../../../protocol/src/index.js";
 import { PROVIDER_NAMES } from "./provider-picker.js";
-import { confirmAction } from "./confirm-action.js";
 
 export interface SystemInfo {
   version: string | null; debug?: boolean;

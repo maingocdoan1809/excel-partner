@@ -29,7 +29,7 @@ function run(input: Record<string, unknown>, data = rows, dateLike?: boolean[]) 
 
 describe("analyze_range engine", () => {
   it("names columns by letters and recognises dates from the number format", () => {
-    expect(["A", "Z", "AA", "AZ", "BA"].map((letter, i) => columnLetter([0, 25, 26, 51, 52][i]!))).toEqual(["A", "Z", "AA", "AZ", "BA"]);
+    expect([0, 25, 26, 51, 52].map(columnLetter)).toEqual(["A", "Z", "AA", "AZ", "BA"]);
     expect(["yyyy-mm-dd", "d/m/yy", "h:mm", "[$-409]d-mmm", "dd \"of\" mmm"].map(isDateFormat)).toEqual([true, true, true, true, true]);
     expect(["General", "0.00", "$#,##0.00", "0%", "@", "\"day\" 0"].map(isDateFormat)).toEqual([false, false, false, false, false, false]);
     expect(isoToSerial("2023-03-15")).toBe(45_000);

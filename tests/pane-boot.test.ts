@@ -253,6 +253,80 @@ describe("which chat the pane opens", () => {
   });
 });
 
+describe("task pane turn cleanup and async ownership", () => {
+  beforeEach(() => { localStorage.clear(); sessionStorage.clear(); installWordFake(new FakeWordDoc()); });
+  afterEach(() => { vi.restoreAllMocks(); uninstallWordFake(); delete g.Office; delete g.WebSocket; });
+
+  it.each(["completed", "disconnected", "switched"] as const)("releases streaming tools and request ownership when %s", async (exit) => {
+    await boot("Word", true);
+    const { app, liveTools } = await import("../frontend/taskpane/chat/state.js");
+    const { submit } = await import("../frontend/taskpane/chat/turn.js");
+    const { handleEvent, renderState } = await import("../frontend/taskpane/chat/events.js");
+    (document.getElementById("prompt-input") as HTMLTextAreaElement).value = "Run a tool";
+    await submit();
+    const requestId = app.currentRequestId!;
+    handleEvent({ type: "tool_started", requestId, callId: "running-tool", tool: "shell", args: {} });
+    const { tool } = liveTools.get("running-tool")!;
+    const group = app.liveToolGroup!.element;
+    group.open = true;
+    if (exit === "completed") handleEvent({ type: "turn_finished", requestId, reason: "completed" });
+    else if (exit === "disconnected") renderState("closed");
+    else (await import("../frontend/taskpane/chat/chats.js")).startNewChat();
+    expect(app.currentRequestId).toBeNull();
+    expect(app.requestSession).toBeNull();
+    expect(app.live).toBeNull();
+    expect(app.liveToolGroup).toBeNull();
+    expect(liveTools.size).toBe(0);
+    expect(tool).toMatchObject({ state: "error", error: "no result" });
+    expect(group.open).toBe(false);
+    expect(document.getElementById("send-button")!.dataset.mode).toBe("send");
+  });
+
+  it.each([false, true])("keeps a newer request when an older MCP preparation settles (reject=%s)", async (reject) => {
+    const socket = await boot("Word", true);
+    const { app } = await import("../frontend/taskpane/chat/state.js");
+    const { mcpSettings } = await import("../frontend/taskpane/chat/services.js");
+    const { submit } = await import("../frontend/taskpane/chat/turn.js");
+    const { startNewChat } = await import("../frontend/taskpane/chat/chats.js");
+    let settle!: () => void;
+    const ready = vi.spyOn(mcpSettings, "ready").mockReturnValueOnce(new Promise<void>((resolve, fail) => {
+      settle = () => reject ? fail(new Error("Old preparation failed")) : resolve();
+    }));
+    const input = document.getElementById("prompt-input") as HTMLTextAreaElement;
+    input.value = "Old request";
+    const old = submit();
+    await vi.waitFor(() => expect(ready).toHaveBeenCalled());
+    startNewChat();
+    input.value = "New request";
+    await submit();
+    const newRequestId = app.currentRequestId;
+    expect(newRequestId).toBeTruthy();
+    settle();
+    await old;
+    expect(app.currentRequestId).toBe(newRequestId);
+    expect(app.requestSession).toBe(app.session);
+    expect(socket.sent.filter(message => message.type === "prompt").map(message => message.prompt)).toEqual(["New request"]);
+    expect(document.getElementById("send-button")!.dataset.mode).toBe("stop");
+  });
+
+  it("releases the composer when preparation fails before sending", async () => {
+    const socket = await boot("Word", true);
+    const { app } = await import("../frontend/taskpane/chat/state.js");
+    const { autotestPanel } = await import("../frontend/taskpane/chat/services.js");
+    const { submit } = await import("../frontend/taskpane/chat/turn.js");
+    vi.spyOn(autotestPanel, "syncForPrompt").mockRejectedValueOnce(new Error("Export failed"));
+    const input = document.getElementById("prompt-input") as HTMLTextAreaElement;
+    input.value = "Please try this request";
+    await submit();
+    expect(app.currentRequestId).toBeNull();
+    expect(app.requestSession).toBeNull();
+    expect(app.needsContext).toBe(true);
+    expect(input.value).toBe("Please try this request");
+    expect(document.getElementById("send-button")!.dataset.mode).toBe("send");
+    expect(socket.sent.some(message => message.type === "prompt")).toBe(false);
+  });
+});
+
 describe("model picker across provider changes", () => {
   beforeEach(() => { localStorage.clear(); sessionStorage.clear(); });
   afterEach(() => { uninstallWordFake(); delete g.Office; delete g.WebSocket; });

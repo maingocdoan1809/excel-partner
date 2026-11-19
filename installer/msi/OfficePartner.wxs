@@ -7,7 +7,7 @@
   The wizard offers two independent parts (checked in the Customize page, one, both, or neither):
     AddIn   the task pane, its bridge and the add-in registration (default on)
     Gateway the Anthropic-compatible API on https://localhost:8766 (default off)
-  Silent deployments pick them the usual MSI way: ADDLOCAL=Files,AddIn,Gateway (or ADDLOCAL=Files only for the gateway).
+  Silent deployments pick them the usual MSI way: ADDLOCAL=Files,AddIn,Gateway (or ADDLOCAL=Files,Gateway only for the gateway).
 -->
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs" xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util" xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
   <Package Name="Office Partner" Manufacturer="Office Partner" Version="$(Version)" UpgradeCode="552e7bb6-e522-4ea5-8264-96392d389aed"
@@ -100,17 +100,17 @@
          no earlier copy at all, so it asks cmd.exe first: the step then succeeds whichever way, and the log of a clean
          install has no error in it. -->
     <CustomAction Id="SetPrepareInstall" Property="WixQuietExecCmdLine"
-                  Value="&quot;[SystemFolder]cmd.exe&quot; /c if exist &quot;[INSTALLFOLDER]installer\bootstrap.ps1&quot; &quot;[SystemFolder]WindowsPowerShell\v1.0\powershell.exe&quot; -NoProfile -NonInteractive -ExecutionPolicy Bypass -File &quot;[INSTALLFOLDER]installer\bootstrap.ps1&quot; -Action prepare" />
+                  Value="&quot;[SystemFolder]cmd.exe&quot; /c if exist &quot;[INSTALLFOLDER]installer\bootstrap.ps1&quot; &quot;[SystemFolder]WindowsPowerShell\v1.0\powershell.exe&quot; -NoProfile -NonInteractive -ExecutionPolicy Bypass -File &quot;[INSTALLFOLDER]installer\bootstrap.ps1&quot; -Action prepare -Architecture $(RuntimeArch)" />
     <CustomAction Id="SetUninstall" Property="WixQuietExecCmdLine"
-                  Value="&quot;[SystemFolder]WindowsPowerShell\v1.0\powershell.exe&quot; -NoProfile -NonInteractive -ExecutionPolicy Bypass -File &quot;[INSTALLFOLDER]installer\bootstrap.ps1&quot; -Action uninstall" />
+                  Value="&quot;[SystemFolder]WindowsPowerShell\v1.0\powershell.exe&quot; -NoProfile -NonInteractive -ExecutionPolicy Bypass -File &quot;[INSTALLFOLDER]installer\bootstrap.ps1&quot; -Action uninstall -Architecture $(RuntimeArch)" />
     <CustomAction Id="StopBridge" BinaryRef="StopLauncher" Execute="immediate" Return="ignore"
                   ExeCommand="--stop &quot;[SystemFolder]WindowsPowerShell\v1.0\powershell.exe&quot;" />
     <CustomAction Id="PrepareInstall" BinaryRef="$(UtilCA)" DllEntry="WixQuietExec" Execute="immediate" Return="ignore" />
     <CustomAction Id="Uninstall" BinaryRef="$(UtilCA)" DllEntry="WixQuietExec" Execute="immediate" Return="ignore" />
     <CustomAction Id="Install" Directory="INSTALLFOLDER" Execute="deferred" Impersonate="yes" Return="ignore"
-                  ExeCommand="&quot;[INSTALLFOLDER]run-hidden.exe&quot; &quot;[SystemFolder]WindowsPowerShell\v1.0\powershell.exe&quot; -NoProfile -NonInteractive -ExecutionPolicy Bypass -File &quot;[INSTALLFOLDER]installer\bootstrap.ps1&quot; -Action install -Providers &quot;[PROVIDERS]&quot;" />
+                  ExeCommand="&quot;[INSTALLFOLDER]run-hidden.exe&quot; &quot;[SystemFolder]WindowsPowerShell\v1.0\powershell.exe&quot; -NoProfile -NonInteractive -ExecutionPolicy Bypass -File &quot;[INSTALLFOLDER]installer\bootstrap.ps1&quot; -Action install -Architecture $(RuntimeArch) -Providers &quot;[PROVIDERS]&quot;" />
     <CustomAction Id="InstallNoSideload" Directory="INSTALLFOLDER" Execute="deferred" Impersonate="yes" Return="ignore"
-                  ExeCommand="&quot;[INSTALLFOLDER]run-hidden.exe&quot; &quot;[SystemFolder]WindowsPowerShell\v1.0\powershell.exe&quot; -NoProfile -NonInteractive -ExecutionPolicy Bypass -File &quot;[INSTALLFOLDER]installer\bootstrap.ps1&quot; -Action install -Providers &quot;[PROVIDERS]&quot; -NoSideload" />
+                  ExeCommand="&quot;[INSTALLFOLDER]run-hidden.exe&quot; &quot;[SystemFolder]WindowsPowerShell\v1.0\powershell.exe&quot; -NoProfile -NonInteractive -ExecutionPolicy Bypass -File &quot;[INSTALLFOLDER]installer\bootstrap.ps1&quot; -Action install -Architecture $(RuntimeArch) -Providers &quot;[PROVIDERS]&quot; -NoSideload" />
 
     <InstallExecuteSequence>
       <!-- Release SQLite before the files-in-use scan. Run on npm-to-MSI installs too: neither Installed nor

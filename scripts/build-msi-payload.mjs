@@ -9,7 +9,7 @@ import fs from "node:fs";
 import path from "node:path";
 import zlib from "node:zlib";
 import { fileURLToPath } from "node:url";
-import { commandShim, msiVersion, pruneReason, readPins, slash } from "./msi/payload.mjs";
+import { commandShim, msiVersion, pruneReason, readPins } from "./msi/payload.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const arg = (name, fallback) => { const at = process.argv.indexOf(name); return at >= 0 ? process.argv[at + 1] : fallback; };
@@ -51,7 +51,7 @@ function prune(dir) {
     for (const entry of fs.readdirSync(current, { withFileTypes: true })) {
       const full = path.join(current, entry.name);
       const isDirectory = entry.isDirectory();
-      if (pruneReason(slash(path.relative(dir, full)), isDirectory)) { removed.bytes += size(full); removed.paths++; fs.rmSync(full, { recursive: true, force: true }); }
+      if (pruneReason(path.relative(dir, full).split(path.sep).join("/"), isDirectory)) { removed.bytes += size(full); removed.paths++; fs.rmSync(full, { recursive: true, force: true }); }
       else if (isDirectory) walk(full);
     }
   };
@@ -123,7 +123,7 @@ try {
   for (const script of ["bootstrap.ps1", "stop-processes.ps1"]) {
     fs.copyFileSync(path.join(root, "installer", "msi", script), path.join(target, "installer", script));
   }
-  fs.writeFileSync(path.join(payload, `${pkg.name}.cmd`), commandShim());
+  fs.writeFileSync(path.join(payload, `${pkg.name}.cmd`), commandShim(pins.node.abi, arch));
 
   const files = listFiles(payload);
   const bytes = files.reduce((sum, file) => sum + file.size, 0);

@@ -351,7 +351,7 @@ export class FRange {
     return controlWrap(this.doc)(data);
   }
   get contentControls(): object { return collection(() => this.doc.controls.map(controlWrap(this.doc)), "ContentControlCollection"); }
-  insertTable(rows: number, columns: number, location: string, values?: string[][]): object {
+  insertTable(rows: number, columns: number, _location: string, values?: string[][]): object {
     return addTable(this.doc, rows, columns, values, this.p2);
   }
   select(): void { this.doc.selection = this; }
@@ -547,7 +547,7 @@ class FPara {
     return wrap(picture, "InlinePicture", ["width", "height"]);
   }
   insertHtml(html: string, location: string): FRange { return this.getRange("Whole").insertHtml(html, location === "Replace" ? "Replace" : location); }
-  insertTable(rows: number, columns: number, location: string, values?: string[][]): object { return addTable(this.doc, rows, columns, values, this.data); }
+  insertTable(rows: number, columns: number, _location: string, values?: string[][]): object { return addTable(this.doc, rows, columns, values, this.data); }
   startNewList(): object {
     this.doc.requires("WordApi", "1.3", "startNewList");
     const id = this.doc.newListId();
@@ -713,7 +713,7 @@ function controlWrap(doc: FakeWordDoc): (data: ControlData & { para: ParaData | 
 
 /* ----- body, document, context ------------------------------------------------------------------------------------ */
 
-function headerBody(doc: FakeWordDoc, bag: Record<string, string>, type: string): object {
+function headerBody(bag: Record<string, string>, type: string): object {
   return wrap({
     get text() { return bag[type]!; },
     insertText(text: string) { bag[type] = text; return {}; },
@@ -771,7 +771,7 @@ function buildBody(doc: FakeWordDoc): object {
       else throw new WordError("InvalidArgument", `bad location ${location}`);
       return paraWrap(doc)(created);
     },
-    insertTable(rows: number, columns: number, location: string, values?: string[][]) { return addTable(doc, rows, columns, values, null); },
+    insertTable(rows: number, columns: number, _location: string, values?: string[][]) { return addTable(doc, rows, columns, values, null); },
     insertHtml(html: string, location: string) { doc.htmlInserts.push({ html, location }); doc.paragraphs.push(doc.newPara(html.replace(/<[^>]+>/g, " ").trim())); return {}; },
   };
   return wrap(body, "Body", []);
@@ -779,8 +779,8 @@ function buildBody(doc: FakeWordDoc): object {
 
 function makeDocument(doc: FakeWordDoc): object {
   const sections = () => doc.sections.map((s) => wrap({
-    getHeader: (type: string) => headerBody(doc, s.header, type),
-    getFooter: (type: string) => headerBody(doc, s.footer, type),
+    getHeader: (type: string) => headerBody(s.header, type),
+    getFooter: (type: string) => headerBody(s.footer, type),
     get pageSetup() {
       doc.requires("WordApiDesktop", "1.3", "Section.pageSetup");
       return wrap({
