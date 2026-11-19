@@ -12,7 +12,8 @@ const NETWORK = ["\\\\attacker\\share\\x.xlsx", "//attacker/share/x.xlsx", "\\\\
 describe("network paths never reach the file system", () => {
   it("recognises UNC, device, long-path and WebDAV forms by their text", () => {
     for (const input of NETWORK) expect(isNetworkPath(input), input).toBe(true);
-    for (const input of ["C:\\Users\\me\\x.xlsx", "/home/me/x.xlsx", "relative\\x.xlsx"]) expect(isNetworkPath(input), input).toBe(false);
+    for (const input of ["C:\\Users\\me\\x.xlsx", "/home/me/x.xlsx", "relative\\x.xlsx", "\\\\wsl.localhost\\Ubuntu\\home\\me", "\\\\wsl$\\Ubuntu\\home\\me", "//wsl.localhost/Ubuntu/home/me"]) expect(isNetworkPath(input), input).toBe(false);
+    for (const input of ["\\\\wsl.localhost.evil.com\\share", "\\\\wsl.localhost@SSL\\x", "\\\\?\\UNC\\wsl.localhost\\x", "\\\\wsl.localhost"]) expect(isNetworkPath(input), input).toBe(true);
   });
 
   it("refuses a model-supplied network path before any fs call, in every entry point", () => {

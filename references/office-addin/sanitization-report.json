@@ -1,0 +1,54 @@
+{
+  "scope": "Two decompressed static JavaScript bundles from an Office add-in cache.",
+  "purpose": "Sanitized reading references; not executable artifacts.",
+  "excluded": [
+    "Cookies",
+    "Local Storage",
+    "session databases",
+    "document contents",
+    "raw cache archives"
+  ],
+  "limitations": "Pattern-based sanitization is not a guarantee that every identifying value has been recognized. Manual review is required before external sharing.",
+  "files": [
+    {
+      "file": "main-bundle.reference.txt",
+      "bytes": 11846692,
+      "sha256": "3322faaa31f059cecd732e5ee3ea28235b4c0f063fc0733979910cca3a8876b0",
+      "replacements": {
+        "credentials": 0,
+        "jwt": 0,
+        "urls": 423,
+        "websocket_urls": 2,
+        "emails": 22,
+        "windows_user_paths": 0,
+        "home_paths": 7,
+        "known_local_identifiers": 0,
+        "uuid_identifiers": 23,
+        "long_hex_identifiers": 416,
+        "ipv4_addresses": 89,
+        "provider_branding": 255,
+        "assistant_branding": 648
+      }
+    },
+    {
+      "file": "support-bundle.reference.txt",
+      "bytes": 156685,
+      "sha256": "e58d8ef26e9b7a0f82898e7620d1d221dfd26c237b928ebd116ddc5d0c284d7f",
+      "replacements": {
+        "credentials": 0,
+        "jwt": 0,
+        "urls": 2,
+        "websocket_urls": 0,
+        "emails": 0,
+        "windows_user_paths": 0,
+        "home_paths": 0,
+        "known_local_identifiers": 0,
+        "uuid_identifiers": 2,
+        "long_hex_identifiers": 1,
+        "ipv4_addresses": 0,
+        "provider_branding": 0,
+        "assistant_branding": 0
+      }
+    }
+  ]
+}

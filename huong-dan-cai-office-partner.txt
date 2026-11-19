@@ -1,0 +1,105 @@
+HUONG DAN CAI OFFICE PARTNER (KHONG CAN QUYEN ADMIN)
+=====================================================
+Dung cho may bi loi "Access is Denied" khi chay script cai dat.
+Tat ca lenh chay bang tai khoan thuong, khong chon "Run as administrator".
+
+
+PHAN A. CAI NODE.JS VA NPM VAO THU MUC CA NHAN
+-----------------------------------------------
+Mo PowerShell (phim Windows, go "powershell", Enter). Chay lan luot:
+
+A1. Tai ban zip
+    $v = "22.23.5"
+    $zip = "$env:USERPROFILE\node-v$v-win-x64.zip"
+    Invoke-WebRequest -Uri "https://nodejs.org/dist/v$v/node-v$v-win-x64.zip" -OutFile $zip -UseBasicParsing
+
+    - May ARM: doi "x64" thanh "arm64".
+    - Can Node tu 22.12 tro len, duoi 26. Neu 22.23.5 khong tai duoc,
+      chon ban 22 khac tai https://nodejs.org/dist/
+    - Khong tai duoc (proxy cong ty): tai file zip bang trinh duyet,
+      de vao thu muc %USERPROFILE%, roi chay tiep A2.
+
+A2. Giai nen vao thu muc ca nhan
+    Expand-Archive -LiteralPath $zip -DestinationPath "$env:USERPROFILE\nodetmp" -Force
+    New-Item -ItemType Directory -Path "$env:LOCALAPPDATA\Programs" -Force | Out-Null
+    Move-Item "$env:USERPROFILE\nodetmp\node-v$v-win-x64" "$env:LOCALAPPDATA\Programs\nodejs"
+
+    - npm da co san trong ban zip, khong can cai rieng.
+    - Neu bao Access is Denied: antivirus dang chan file .exe moi.
+      Thu thu muc khac, vi du %USERPROFILE%\nodejs
+      (khi do thay "$env:LOCALAPPDATA\Programs\nodejs" bang duong dan moi o cac buoc sau).
+
+A3. Them vao PATH cua rieng ban
+    $dir = "$env:LOCALAPPDATA\Programs\nodejs"
+    [Environment]::SetEnvironmentVariable("Path", "$dir;" + [Environment]::GetEnvironmentVariable("Path","User"), "User")
+    $env:Path = "$dir;$env:Path"
+
+A4. Kiem tra
+    node --version
+    npm --version
+
+    Hien so phien ban la xong.
+
+A5. Dat thu muc cai goi toan cuc ve cho ca nhan
+    npm config set prefix "$env:APPDATA\npm"
+
+    Buoc nay tranh viec "npm install -g" ghi vao thu muc he thong bi khoa.
+
+
+PHAN B. CAI OFFICE PARTNER (TACH TUNG BUOC)
+--------------------------------------------
+Mo Command Prompt (phim Windows, go "cmd", Enter).
+
+B1. Dong het Word, Excel, PowerPoint.
+
+B2. Tai file cai dat ve (chua chay)
+    curl.exe -fsSL -o "%USERPROFILE%\install-office-partner.cmd" https://raw.githubusercontent.com/maingocdoan1809/excel-partner/v0.1.24/installer/install-office-partner.cmd
+
+    - Luu o %USERPROFILE% thay vi %TEMP%, vi co may chan ghi file chay duoc vao %TEMP%.
+    - Loi o buoc nay: thu muc bi chan ghi hoac antivirus xoa file. Thu luu ra Desktop.
+
+B3. Kiem tra file va quyen ghi thu muc du lieu
+    dir "%USERPROFILE%\install-office-partner.cmd"
+    mkdir "%LOCALAPPDATA%\Excel Partner"
+    echo ok > "%LOCALAPPDATA%\Excel Partner\test.txt"
+
+    Script ghi log vao %LOCALAPPDATA%\Excel Partner\install.log.
+    Neu buoc nay loi thi do la nguyen nhan.
+
+B4. Chay script
+    "%USERPROFILE%\install-office-partner.cmd"
+
+    Script thay Node hop le (da cai o Phan A) se bo qua buoc tai Node.
+    Neu windows hien hop thoai bao mat ve chung chi localhost, bam Yes.
+    Thay dong "Office Partner is installed." la xong.
+
+
+PHAN C. NEU VAN LOI: DOC FILE LOG
+----------------------------------
+Mo %LOCALAPPDATA%\Excel Partner\install.log, tim dong "==>" cuoi cung:
+
+  Downloading Node.js   -> loi ghi vao %LOCALAPPDATA%\Programs\nodejs.
+                           Thuong do antivirus hoac co tien trinh Node dang mo.
+                           Dong chung roi chay lai, hoac lam Phan A bang tay.
+  npm install           -> loi khi cai goi toan cuc.
+                           Chay: npm config get prefix  (xem thu muc dich co ghi duoc khong)
+                           Neu khong, chay lai buoc A5.
+  setup / chung chi     -> loi khi tin cay chung chi localhost, thuong do policy cong ty.
+                           Can IT cho phep.
+  Chay file .cmd bi chan -> cong ty chan chay script (AppLocker/policy). Can IT cho phep.
+
+Gui cho nguoi ho tro: dong loi day du, dong "==>" ngay truoc no,
+va file install.log.
+
+
+PHAN D. SAU KHI CAI XONG
+-------------------------
+1. Mo Excel, Word hoac PowerPoint. Vao tab Home, bam Office Partner.
+2. Mo Settings, chon nha cung cap AI, bam Sign in.
+   - GitHub Copilot: man hinh hien mot ma. Mo trang dang nhap GitHub, nhap ma, xac nhan.
+3. Dang nhap xong, quay lai khung chat va gui thu mot tin nhan.
+
+Loi thuong gap:
+  - Khong thay nut Office Partner: dong han moi cua so Office roi mo lai.
+  - Khung chat bao khong ket noi: Start Menu, chay "Office Partner - Fix connection".
+  - Script bao "Close Word, Excel and PowerPoint first": dong Office roi chay lai.

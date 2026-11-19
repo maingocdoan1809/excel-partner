@@ -32,9 +32,11 @@ export function toLocalPath(input: string): string {
 /**
  * `\\server\share`, `//server/share`, `\\?\`, `\\.\` and WebDAV `\\host@port\...`: touching one makes Windows connect to that
  * host and offer the user's NTLM credentials, so such a path is refused by its text before any file system call.
+ * The WSL shares `\\wsl.localhost\<distro>` and `\\wsl$\<distro>` are this machine, so they count as local.
  */
 export function isNetworkPath(input: string): boolean {
-  return /^[\\/]{2}/.test(input.trim());
+  const text = input.trim();
+  return /^[\\/]{2}/.test(text) && !/^[\\/]{2}wsl(?:\.localhost|\$)[\\/]/i.test(text);
 }
 
 /** `input` as an absolute local path; a network path only when it lies inside one of `networkRoots` (folders the user configured). */
