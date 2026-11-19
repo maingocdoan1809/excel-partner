@@ -36,7 +36,9 @@ function buildLauncher() {
   ].find((candidate) => fs.existsSync(candidate));
   if (!csc) throw new Error("csc.exe (.NET Framework) was not found; it ships with Windows.");
   const exe = path.join(outDir, "run-hidden.exe");
-  const compile = spawnSync(csc, ["/nologo", "/codepage:65001", "/target:winexe", "/optimize+", `/out:${exe}`, path.join(root, "installer", "msi", "run-hidden.cs")], { encoding: "utf8" });
+  const compile = spawnSync(csc, ["/nologo", "/codepage:65001", "/target:winexe", "/optimize+", `/out:${exe}`,
+    `/resource:${path.join(root, "installer", "msi", "stop-processes.ps1")},StopProcesses`,
+    path.join(root, "installer", "msi", "run-hidden.cs")], { encoding: "utf8" });
   if (compile.error || compile.status !== 0) throw new Error(`Compiling run-hidden.exe failed.\n${compile.stdout ?? ""}${compile.stderr ?? ""}`);
   return exe;
 }

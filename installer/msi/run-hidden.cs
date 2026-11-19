@@ -19,9 +19,13 @@ internal static class RunHidden
 
         try
         {
-            var start = new ProcessStartInfo(args[0])
+            // Stop runs from the Binary table before InstallValidate, including when only an npm installation exists.
+            // The same script is dot-sourced by bootstrap.ps1; no installed file or Node.js is needed here.
+            var stop = args[0] == "--stop";
+            if (stop && args.Length != 2) return 2;
+            var start = new ProcessStartInfo(stop ? args[1] : args[0])
             {
-                Arguments = Arguments(args, 1),
+                Arguments = stop ? StopArguments() : Arguments(args, 1),
                 UseShellExecute = false,
                 CreateNoWindow = true,
             };
@@ -43,6 +47,17 @@ internal static class RunHidden
             }
             catch { }
             return 3;
+        }
+    }
+
+    private static string StopArguments()
+    {
+        using (var stream = System.Reflection.Assembly.GetExecutingAssembly().GetManifestResourceStream("StopProcesses"))
+        using (var reader = new System.IO.StreamReader(stream))
+        {
+            var script = reader.ReadToEnd() + "\r\nStop-ProductProcesses\r\n";
+            return "-NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand " +
+                Convert.ToBase64String(Encoding.Unicode.GetBytes(script));
         }
     }
 

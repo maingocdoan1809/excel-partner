@@ -57,6 +57,8 @@
     <ComponentGroup Id="Launcher" Directory="INSTALLFOLDER">
       <Files Include="$(LauncherDir)\run-hidden.exe" />
     </ComponentGroup>
+    <!-- Available before InstallFiles: npm installations have no bootstrap.ps1 to stop the running bridge. -->
+    <Binary Id="StopLauncher" SourceFile="$(LauncherDir)\run-hidden.exe" />
     <ComponentGroup Id="Cleanup" Directory="INSTALLFOLDER">
       <Component Id="InstallDirRecord" Guid="0f6c3a52-5d0e-4a39-9a43-3c1a6f7d2b11">
         <RegistryValue Root="HKCU" Key="Software\Office Partner" Name="InstallDir" Type="string" Value="[INSTALLFOLDER]" KeyPath="yes" />
@@ -82,7 +84,7 @@
     </ComponentGroup>
 
     <!-- PowerShell runs as the signed-in user without a console window. Two mechanisms, because the steps differ:
-         the three short steps (stop, prepare, uninstall) go through QuietExec, a custom action DLL that lives inside
+         the two short steps (prepare, uninstall) go through QuietExec, a custom action DLL that lives inside
          msiexec and starts its command with CREATE_NO_WINDOW. The install step starts the bridge and the gateway, which
          inherit whatever handles it is given: QuietExec reads its child's output from a pipe and returns only when every
          process holding that pipe has closed it, so the setup's own long-lived processes would keep the action open for
@@ -94,16 +96,15 @@
          reported in its log, never turned into a rollback the person cannot act on.
          An immediate action hands its command line to QuietExec through WixQuietExecCmdLine (which QuietExec clears). -->
     <Property Id="WixQuietExecCmdTimeout" Value="3600000" />
-    <!-- Stop and uninstall only ever run where an earlier copy put the script on disk. Prepare may run on a machine with
+    <!-- Uninstall only runs where an earlier copy put the script on disk. Prepare may run on a machine with
          no earlier copy at all, so it asks cmd.exe first: the step then succeeds whichever way, and the log of a clean
          install has no error in it. -->
-    <CustomAction Id="SetStopBridge" Property="WixQuietExecCmdLine"
-                  Value="&quot;[SystemFolder]WindowsPowerShell\v1.0\powershell.exe&quot; -NoProfile -NonInteractive -ExecutionPolicy Bypass -File &quot;[INSTALLFOLDER]installer\bootstrap.ps1&quot; -Action stop" />
     <CustomAction Id="SetPrepareInstall" Property="WixQuietExecCmdLine"
                   Value="&quot;[SystemFolder]cmd.exe&quot; /c if exist &quot;[INSTALLFOLDER]installer\bootstrap.ps1&quot; &quot;[SystemFolder]WindowsPowerShell\v1.0\powershell.exe&quot; -NoProfile -NonInteractive -ExecutionPolicy Bypass -File &quot;[INSTALLFOLDER]installer\bootstrap.ps1&quot; -Action prepare" />
     <CustomAction Id="SetUninstall" Property="WixQuietExecCmdLine"
                   Value="&quot;[SystemFolder]WindowsPowerShell\v1.0\powershell.exe&quot; -NoProfile -NonInteractive -ExecutionPolicy Bypass -File &quot;[INSTALLFOLDER]installer\bootstrap.ps1&quot; -Action uninstall" />
-    <CustomAction Id="StopBridge" BinaryRef="$(UtilCA)" DllEntry="WixQuietExec" Execute="immediate" Return="ignore" />
+    <CustomAction Id="StopBridge" BinaryRef="StopLauncher" Execute="immediate" Return="ignore"
+                  ExeCommand="--stop &quot;[SystemFolder]WindowsPowerShell\v1.0\powershell.exe&quot;" />
     <CustomAction Id="PrepareInstall" BinaryRef="$(UtilCA)" DllEntry="WixQuietExec" Execute="immediate" Return="ignore" />
     <CustomAction Id="Uninstall" BinaryRef="$(UtilCA)" DllEntry="WixQuietExec" Execute="immediate" Return="ignore" />
     <CustomAction Id="Install" Directory="INSTALLFOLDER" Execute="deferred" Impersonate="yes" Return="ignore"
@@ -112,13 +113,11 @@
                   ExeCommand="&quot;[INSTALLFOLDER]run-hidden.exe&quot; &quot;[SystemFolder]WindowsPowerShell\v1.0\powershell.exe&quot; -NoProfile -NonInteractive -ExecutionPolicy Bypass -File &quot;[INSTALLFOLDER]installer\bootstrap.ps1&quot; -Action install -Providers &quot;[PROVIDERS]&quot; -NoSideload" />
 
     <InstallExecuteSequence>
-      <!-- Before the files are replaced or removed, the bridge must let go of them. Only when there is something to stop:
-           on a fresh install no script is on disk yet, so the step would only log an error. An upgrade keeps the
-           registration and certificate. -->
-      <Custom Action="SetStopBridge" Before="StopBridge" Condition="Installed OR WIX_UPGRADE_DETECTED" />
-      <Custom Action="StopBridge" Before="InstallInitialize" Condition="Installed OR WIX_UPGRADE_DETECTED" />
+      <!-- Release SQLite before the files-in-use scan. Run on npm-to-MSI installs too: neither Installed nor
+           WIX_UPGRADE_DETECTED is set there, and no installed bootstrap script exists yet. -->
+      <Custom Action="StopBridge" Before="InstallValidate" />
       <Custom Action="SetPrepareInstall" Before="PrepareInstall" Condition="NOT Installed" />
-      <Custom Action="PrepareInstall" After="StopBridge" Condition="NOT Installed" />
+      <Custom Action="PrepareInstall" After="InstallValidate" Condition="NOT Installed" />
       <Custom Action="SetUninstall" Before="Uninstall" Condition="REMOVE=&quot;ALL&quot; AND NOT WIX_UPGRADE_DETECTED AND NOT UPGRADINGPRODUCTCODE" />
       <Custom Action="Uninstall" Before="InstallInitialize" Condition="REMOVE=&quot;ALL&quot; AND NOT WIX_UPGRADE_DETECTED AND NOT UPGRADINGPRODUCTCODE" />
       <!-- An upgrade arrives with REMOVE=ALL as well; the setup step must still run there, or the machine would keep the files

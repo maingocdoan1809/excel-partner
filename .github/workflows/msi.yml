@@ -35,7 +35,7 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run typecheck
-      - run: npx vitest run tests/msi-payload.test.ts tests/architecture.test.ts
+      - run: npx vitest run tests/msi-payload.test.ts tests/msi-launcher.test.ts tests/architecture.test.ts
       - name: WiX 5.0.2
         run: |
           dotnet tool install --global wix --version 5.0.2

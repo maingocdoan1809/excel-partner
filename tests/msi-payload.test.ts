@@ -135,12 +135,14 @@ describe("MSI files", () => {
     const wxs = fs.readFileSync("installer/msi/OfficePartner.wxs", "utf8");
     // A custom action that runs powershell.exe directly opens a console window, and on Windows 11 that window is a
     // Windows Terminal one that -WindowStyle Hidden does not suppress. The install step runs through a GUI-subsystem
-    // launcher that starts PowerShell with CREATE_NO_WINDOW; the three short steps use QuietExec, which does the same
+    // launcher that starts PowerShell with CREATE_NO_WINDOW; prepare and uninstall use QuietExec, which does the same
     // from inside msiexec. No step runs PowerShell by itself.
     const commands = [...wxs.matchAll(/ExeCommand="([^"]*)"/g)].map((match) => match[1] ?? "");
     expect(commands.length).toBeGreaterThanOrEqual(2);
-    for (const command of commands) expect(command.startsWith("&quot;[INSTALLFOLDER]run-hidden.exe&quot;")).toBe(true);
-    expect(wxs.match(/DllEntry="WixQuietExec"/g)).toHaveLength(3);
+    for (const command of commands) {
+      expect(command.startsWith("&quot;[INSTALLFOLDER]run-hidden.exe&quot;") || command.startsWith("--stop ")).toBe(true);
+    }
+    expect(wxs.match(/DllEntry="WixQuietExec"/g)).toHaveLength(2);
     // The install step must be deferred: it runs the files that InstallFiles copies, and every immediate action of
     // InstallExecuteSequence runs before the deferred script does.
     expect(wxs).toMatch(/<CustomAction Id="Install"[^>]*Execute="deferred"/);
@@ -155,5 +157,23 @@ describe("MSI files", () => {
     const bootstrap = fs.readFileSync("installer/msi/bootstrap.ps1", "utf8");
     expect(bootstrap).toContain("CreateNoWindow = $true");
     expect(bootstrap).not.toContain("Start-Process");
+  });
+
+  it("releases files before validation even for npm installations with no installed bootstrap", () => {
+    const wxs = fs.readFileSync("installer/msi/OfficePartner.wxs", "utf8");
+    expect(wxs).toMatch(/<Custom Action="StopBridge" Before="InstallValidate"\s*\/>/);
+    expect(wxs).toMatch(/<CustomAction Id="StopBridge" BinaryRef="StopLauncher"[^>]*ExeCommand="--stop /);
+    expect(wxs).toContain('<Binary Id="StopLauncher" SourceFile="$(LauncherDir)\\run-hidden.exe"');
+    const launcher = fs.readFileSync("installer/msi/run-hidden.cs", "utf8");
+    expect(launcher).toContain('GetManifestResourceStream("StopProcesses")');
+    expect(launcher).toContain("Stop-ProductProcesses\\r\\n");
+    const build = fs.readFileSync("scripts/build-msi.mjs", "utf8");
+    expect(build).toContain("/resource:");
+    expect(build).toContain('"stop-processes.ps1"');
+    const bootstrap = fs.readFileSync("installer/msi/bootstrap.ps1", "utf8");
+    expect(bootstrap).toContain(". (Join-Path $PSScriptRoot 'stop-processes.ps1')");
+    expect(bootstrap).not.toContain("function Stop-ProductProcesses");
+    const payload = fs.readFileSync("scripts/build-msi-payload.mjs", "utf8");
+    expect(payload).toContain('["bootstrap.ps1", "stop-processes.ps1"]');
   });
 });

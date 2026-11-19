@@ -120,7 +120,9 @@ try {
     try { run(process.execPath, [smoke, ...(process.platform === "win32" && arch === process.arch ? [] : ["--no-native"])], { cwd: target }); } finally { fs.rmSync(smoke, { force: true }); }
   }
   fs.mkdirSync(path.join(target, "installer"), { recursive: true });
-  fs.copyFileSync(path.join(root, "installer", "msi", "bootstrap.ps1"), path.join(target, "installer", "bootstrap.ps1"));
+  for (const script of ["bootstrap.ps1", "stop-processes.ps1"]) {
+    fs.copyFileSync(path.join(root, "installer", "msi", script), path.join(target, "installer", script));
+  }
   fs.writeFileSync(path.join(payload, `${pkg.name}.cmd`), commandShim());
 
   const files = listFiles(payload);
