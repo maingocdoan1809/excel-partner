@@ -11,9 +11,7 @@ $ErrorActionPreference = 'Stop'
 $certPath = Join-Path $DataDir 'localhost.crt'
 $installedManifest = Join-Path $DataDir 'manifest.xml'
 $developerKey = 'HKCU:\Software\Microsoft\Office\16.0\WEF\Developer'
-$runKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
 $manifestId = ([xml](Get-Content -LiteralPath $ManifestPath -Raw)).OfficeApp.Id
-$runName = 'Excel Partner Bridge'
 $fixShortcut = Join-Path ([Environment]::GetFolderPath('Programs')) 'Office Partner - Fix connection.lnk'
 
 if ($Action -eq 'register') {
@@ -38,7 +36,6 @@ if ($Action -eq 'register') {
       New-ItemProperty -Path $developerKey -Name $manifestId -Value $installedManifest -PropertyType String -Force | Out-Null
     } catch { throw "Could not register the add-in for this user (company policy may block developer add-ins; deploy the manifest from the Microsoft 365 admin center and run setup --no-sideload): $($_.Exception.Message)" }
   }
-  New-ItemProperty -Path $runKey -Name $runName -Value ('"' + $NodePath + '" "' + $CliPath + '" start --at-logon') -PropertyType String -Force | Out-Null
   # A button outside the task pane: the pane is served by the bridge, so it cannot offer one while the bridge is down.
   $shell = New-Object -ComObject WScript.Shell
   $link = $shell.CreateShortcut($fixShortcut)
@@ -47,10 +44,9 @@ if ($Action -eq 'register') {
   $link.WorkingDirectory = $DataDir
   $link.Description = 'Start Office Partner again if its pane does not open or shows an error'
   $link.Save()
-  Write-Host 'Registered the add-in and bridge startup for this Windows user.'
+  Write-Host 'Registered the add-in for this Windows user.'
 } else {
   Remove-ItemProperty -Path $developerKey -Name $manifestId -ErrorAction SilentlyContinue
-  Remove-ItemProperty -Path $runKey -Name $runName -ErrorAction SilentlyContinue
   Remove-Item -LiteralPath $fixShortcut -ErrorAction SilentlyContinue
   # The Agent Gateway may use the same certificate: its trust stays while the gateway still has it.
   $gatewayCert = Join-Path $env:LOCALAPPDATA 'Agent Gateway\localhost.crt'
@@ -67,5 +63,5 @@ if ($Action -eq 'register') {
     } finally { $store.Close() }
   }
   Remove-Item -LiteralPath $installedManifest -ErrorAction SilentlyContinue
-  Write-Host 'Removed the add-in registration, startup entry, Fix connection shortcut and local certificate trust.'
+  Write-Host 'Removed the add-in registration, Fix connection shortcut and local certificate trust.'
 }

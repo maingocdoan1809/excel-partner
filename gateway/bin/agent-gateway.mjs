@@ -8,6 +8,7 @@ import https from "node:https";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { ConfigSchema, dataDir, loadConfig } from "../dist/config.mjs";
 import { decideRecorded, processOwner } from "./process-record.mjs";
+import { setWindowsStartup, startupNames, windowsRunKey } from "../../bin/windows-startup.mjs";
 
 const dir = dataDir();
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -79,7 +80,7 @@ async function doctor() {
     const store = spawnSync("certutil.exe", ["-user", "-store", "Root"], { encoding: "utf8", windowsHide: true, maxBuffer: 64 * 1024 * 1024 });
     const trusted = (store.stdout ?? "").toLowerCase().includes(x509.fingerprint.replaceAll(":", "").toLowerCase());
     line(trusted, trusted ? "Certificate trusted for this Windows user" : "Certificate not trusted. Run: office-partner setup gateway");
-    const run = spawnSync("reg.exe", ["query", runKey, "/v", runName], { stdio: "ignore", windowsHide: true });
+    const run = spawnSync("reg.exe", ["query", windowsRunKey, "/v", startupNames.gateway], { stdio: "ignore", windowsHide: true });
     line(run.status === 0 ? true : null, run.status === 0 ? "Starts automatically at Windows sign-in" : "No sign-in startup entry. Run: office-partner gateway autostart on");
   }
   const h = await health();
@@ -126,14 +127,9 @@ async function setup() {
   autostart(true);
   info(true);
 }
-const runKey = "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run", runName = "Agent Gateway";
 function autostart(enable) {
   if (process.platform !== "win32") { console.log("Automatic startup is only managed on Windows."); return; }
-  const startup = `"${process.execPath}" "${fileURLToPath(import.meta.url)}" start`;
-  const args = enable ? ["add", runKey, "/v", runName, "/t", "REG_SZ", "/d", startup, "/f"]
-    : ["delete", runKey, "/v", runName, "/f"];
-  const result = spawnSync("reg.exe", args, { stdio: "ignore", windowsHide: true });
-  if (result.status !== 0 && enable) throw new Error("Could not register Windows sign-in startup");
+  setWindowsStartup("gateway", { dataDir: dir, cliPath: fileURLToPath(import.meta.url), enabled: enable });
   console.log(enable ? "Gateway will start automatically when you sign in to Windows." : "Automatic startup removed.");
 }
 function info(copyToken = false) {

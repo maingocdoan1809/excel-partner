@@ -4,6 +4,7 @@ import path from "node:path";
 import { createHash, randomUUID, X509Certificate } from "node:crypto";
 import { createRequire } from "node:module";
 import { runCommand, requestHealth, probeMcp, readJson, readLastStartup } from "./doctor-probes.mjs";
+import { startupNames, startupTargets, windowsRunKey } from "./windows-startup.mjs";
 
 export const PROVIDERS = ["claude", "copilot", "codex", "opencode"];
 const version = text => /\b(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)\b/.exec(String(text))?.[1] ?? null;
@@ -127,13 +128,12 @@ export async function collectDoctor(options) {
     add(`${service.id}.build`, present ? "pass" : "fail", present ? "BUILD_OK" : "BUILD_MISSING", present ? "Compiled service entrypoint is present." : "Compiled service entrypoint is missing.", "Reinstall this product version, or build the source checkout.");
     if (platform === "win32") {
       let startup;
-      try { startup = await run("reg.exe", ["query", "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run", "/v", service.id === "addin" ? "Excel Partner Bridge" : "Agent Gateway"], { env, timeoutMs: 3000 }); }
+      try { startup = await run("reg.exe", ["query", windowsRunKey, "/v", startupNames[service.id]], { env, timeoutMs: 3000 }); }
       catch { startup = { code: null }; }
       add(`${service.id}.startup`, startup.code === 0 ? "pass" : "warn", startup.code === 0 ? "STARTUP_OK" : "STARTUP_UNVERIFIED",
         startup.code === 0 ? "Windows sign-in startup entry is present." : "Windows sign-in startup entry was not verified.", service.cli);
-      // The entry stores the full path of Node and of the launcher. If either was moved or removed, nothing starts at sign-in.
-      const programs = startup.code === 0 && typeof startup.stdout === "string" ? [...startup.stdout.matchAll(/"([^"]+)"/g)].map(match => match[1]).slice(0, 2) : [];
-      if (programs.length === 2) {
+      const programs = startup.code === 0 && typeof startup.stdout === "string" ? startupTargets(startup.stdout, service.id) : [];
+      if (programs.length >= 2) {
         const present = programs.every(program => file(program));
         add(`${service.id}.startup_target`, present ? "pass" : "fail", present ? "STARTUP_TARGET_OK" : "STARTUP_TARGET_MISSING",
           present ? "The sign-in startup entry points to files that exist." : "The sign-in startup entry points to Node.js or a launcher file that no longer exists.", present ? undefined : service.cli);

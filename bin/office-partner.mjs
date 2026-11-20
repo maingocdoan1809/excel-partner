@@ -7,6 +7,7 @@ import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import runtimeStore from "./runtime-store.cjs";
 import { packageNameOf, stopBridgeForUpdate, stopPackageProcesses, updatePackage } from "./update.mjs";
+import { setWindowsStartup } from "./windows-startup.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const dataDir = runtimeStore.home();
@@ -384,6 +385,7 @@ async function main() {
         await ensureCertificate();
         // --no-sideload: the manifest comes from Microsoft 365 centralized deployment, so no per-user developer registration.
         powershell("register", flags.includes("--no-sideload") ? ["-NoSideload"] : []);
+        setWindowsStartup("addin", { dataDir, cliPath: fileURLToPath(import.meta.url) });
         await stop();
         await start();
         console.log("Restart Word, Excel and PowerPoint, then open Home > Office Partner. Use Settings > Sign in to GitHub Copilot for device-code sign-in; other providers use their own CLI login.");
@@ -444,6 +446,7 @@ async function main() {
       if (wantGateway) add("Gateway", gatewayStep(["uninstall"]));
       if (wantAddin) add("Add-in", addin(async () => {
         await stop();
+        setWindowsStartup("addin", { dataDir, enabled: false });
         powershell("unregister");
         rmSync(cert, { force: true });
         rmSync(key, { force: true });

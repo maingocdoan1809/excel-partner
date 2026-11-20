@@ -62,7 +62,7 @@ office-partner-doctor --json
 node <package-directory>/bin/doctor.mjs --json
 ```
 
-The `doctor.mjs`, `doctor-checks.mjs` and `doctor-probes.mjs` files must be present
+The `doctor.mjs`, `doctor-checks.mjs`, `doctor-probes.mjs` and `windows-startup.mjs` files must be present
 together. MCP probes additionally need the installed MCP SDK and compiled MCP
 entrypoint; Windows command shims in provider probes need cross-spawn. If these
 are missing, diagnostics reports a failed check rather than loading the bridge.
