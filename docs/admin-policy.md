@@ -12,7 +12,7 @@ Only administrators can write to `%ProgramData%` by default, so users cannot loo
 
 | Key | Default | Effect |
 |---|---|---|
-| `disabledProviders` | `[]` | Providers (`claude`, `copilot`, `codex`, `opencode`) the pane cannot switch to or sign in to. |
+| `disabledProviders` | `[]` | Providers (`claude`, `copilot`, `codex`, `opencode`, `antigravity`) the pane cannot switch to or sign in to. |
 | `allowAutoApprove` | `true` | `false` disables the pane's Auto mode. Every change is then asked for. |
 | `allowCodeExecution` | `true` | `false` refuses `run_python` and skill scripts. |
 | `allowExternalMcp` | `true` | `false` starts and exposes no user-configured MCP servers. |

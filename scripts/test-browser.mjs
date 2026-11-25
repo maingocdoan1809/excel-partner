@@ -42,7 +42,7 @@ class ProgressMock extends MockAdapter {
 }
 const registry = new ProviderRegistry();
 const mockCalls = new Map();
-for (const id of ['claude', 'copilot', 'codex', 'opencode']) {
+for (const id of ['claude', 'copilot', 'codex', 'opencode', 'antigravity']) {
   const toolCalls = []; mockCalls.set(id, toolCalls);
   registry.register(new ProgressMock({ id, toolCalls, reply: 'WEB_SMOKE_OK', delayMs: 150 }));
 }

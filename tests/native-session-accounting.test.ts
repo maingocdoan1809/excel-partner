@@ -47,7 +47,7 @@ async function prompt(pane: PaneClient, requestId: string, chatSessionId: string
 }
 
 describe("native session identity through bridge, ledger and reconnect", () => {
-  it.each(["copilot", "claude", "codex", "opencode"] as const)("%s resumes the same accounting row after reconnect and creates a new row only for New chat", async provider => {
+  it.each(["copilot", "claude", "codex", "opencode", "antigravity"] as const)("%s resumes the same accounting row after reconnect and creates a new row only for New chat", async provider => {
     const adapter = new NativeAdapter({ id: provider });
     const bridge = new Bridge(loadConfig({ port: 0, tls: null, logLevel: "error" }), {
       usageFile: null, registry: new ProviderRegistry().register(adapter),

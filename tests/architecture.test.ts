@@ -78,7 +78,7 @@ describe("the folders depend on each other in one direction only", () => {
 
   it("only the providers folder decides anything by the name of a provider", () => {
     // A provider name used as a value to compare, switch on, look up or test with: `=== "x"`, `case "x":`, `"x" ?`, `includes("x")`, `map["x"]`.
-    const name = String.raw`["'](?:claude|copilot|codex|opencode)["']`;
+    const name = String.raw`["'](?:claude|copilot|codex|opencode|antigravity)["']`;
     const named = new RegExp([String.raw`[!=]==\s*${name}`, String.raw`case\s+${name}\s*:`, String.raw`${name}\s*(?:\?|&&)`, String.raw`(?:includes|startsWith|indexOf)\(\s*${name}`, String.raw`\[${name}\]`].join("|"));
     const found: string[] = [];
     for (const folder of ["shared", "bridge", "gateway", "frontend", "protocol"]) {
@@ -92,7 +92,7 @@ describe("the folders depend on each other in one direction only", () => {
   it("only the providers folder knows how a terminal CLI calls itself", () => {
     // The name a person sees for a terminal CLI and the pattern that recognises it both come from its provider's `static terminal`. The pane's own
     // provider picker (frontend) is a separate, older list of display names and is left out.
-    const shown = /\b(?:Claude Code|Copilot CLI|Codex CLI)\b|\/(?:claude|copilot|codex|opencode)(?:\|(?:claude|copilot|codex|opencode))*\/[a-z]*i\b/;
+    const shown = /\b(?:Claude Code|Copilot CLI|Codex CLI|Antigravity CLI)\b|\/(?:claude|copilot|codex|opencode|antigravity)(?:\|(?:claude|copilot|codex|opencode|antigravity))*\/[a-z]*i\b/;
     const found: string[] = [];
     for (const folder of ["shared", "bridge", "gateway", "excel_mcp"]) {
       for (const file of sources(folder)) {

@@ -10,7 +10,7 @@ import type {
   ProviderId,
   TokenUsage,
 } from "../../../protocol/src/index.js";
-import { acpPermissionOutcome, contentText, toolNameOf } from "../acp.js";
+import { acpModels, authorizeAcpRequest, contentText, toolNameOf } from "../acp.js";
 import { AsyncQueue } from "../async-queue.js";
 import { BaseCliAdapter, cliEnvironment, execCli, type CliProbe } from "../base.js";
 import { ProviderLoginError } from "../login.js";
@@ -97,15 +97,7 @@ interface ActiveTurn {
  * also pins the effort).
  */
 export function parseOpencodeModels(options: OpencodeConfigOption[] | undefined): ProviderModelCatalog {
-  const option = options?.find((item) => item.category === "model" || item.id === "model");
-  const seen = new Set<string>();
-  const models = (option?.options ?? []).flatMap((entry) => {
-    const id = entry.value;
-    if (!id || seen.has(id)) return [];
-    seen.add(id);
-    return [{ id, name: entry.name || id }];
-  });
-  return { models, defaultModelId: option?.currentValue ?? null };
+  return acpModels({ configOptions: options as AcpConfigOption[] | undefined });
 }
 
 /**
@@ -753,15 +745,7 @@ export class OpencodeAdapter extends BaseCliAdapter {
   }
 
   private async onServerRequest(method: string, params: unknown, authorize?: StartSessionContext["authorizeTool"]): Promise<unknown> {
-    if (method !== "session/request_permission") throw new Error(`unsupported client method: ${method}`);
-    const request = (params ?? {}) as { toolCall?: Record<string, any>; options?: Array<{ optionId: string; kind?: string }> };
-    if (toolNameOf(request.toolCall ?? {}, true).isExcel) return acpPermissionOutcome(params);
-    // Fail closed when disconnected or when the pane cannot answer.
-    let approved = false;
-    try { approved = await authorize?.(request.toolCall ?? {}) ?? false; } catch { /* reject below */ }
-    const kind = approved ? "allow_once" : "reject_once";
-    const choice = request.options?.find(option => option.kind === kind);
-    return choice ? { outcome: { outcome: "selected", optionId: choice.optionId } } : { outcome: { outcome: "cancelled" } };
+    return authorizeAcpRequest(method, params, authorize);
   }
 }
 

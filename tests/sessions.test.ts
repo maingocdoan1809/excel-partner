@@ -26,7 +26,7 @@ const chat = (id: string, at: number, messages: StoredMessage[], changes: Stored
 });
 
 describe("provider session binding", () => {
-  it.each(["claude", "copilot", "codex", "opencode"])("keeps %s native titles and resumes the same history item", provider => {
+  it.each(["claude", "copilot", "codex", "opencode", "antigravity"])("keeps %s native titles and resumes the same history item", provider => {
     const first = bindProviderSession(chat("provisional", 10, [user("paint red")]),
       { provider, providerSessionId: "native-1", title: "Change Shape Color to Red" }, 0, 0, 10);
     expect(first.current).toMatchObject({ id: `${provider}:native-1`, title: "Change Shape Color to Red" });

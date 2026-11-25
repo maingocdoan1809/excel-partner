@@ -19,7 +19,7 @@ function panels(provider: ProviderId, status: ProviderConnectionStatus) {
   const api = setupPanels({
     getProvider: () => provider,
     getProviderStatus: () => status,
-    getCapabilities: () => ({ ...MockAdapter.capabilities, loginKind: provider === "claude" ? "browser" : provider === "opencode" ? "account" : "device" }),
+    getCapabilities: () => ({ ...MockAdapter.capabilities, loginKind: (provider === "claude" || provider === "antigravity") ? "browser" : provider === "opencode" ? "account" : "device" }),
     renderHistory: vi.fn(), renderChanges: vi.fn(), renderProviderMenu: vi.fn(), openSettings: vi.fn(), closePreview: vi.fn(),
     refreshReferences: vi.fn(async () => {}), refreshSkills: vi.fn(async () => {}), refreshTesting: vi.fn(async () => {}), loadTemplateSkills: vi.fn(async () => {}),
     loginPanel, loginInstall: { reset: vi.fn() },
@@ -32,7 +32,7 @@ function panels(provider: ProviderId, status: ProviderConnectionStatus) {
 }
 
 describe("Setting up a provider that is not installed", () => {
-  it.each(["claude", "copilot", "codex", "opencode"] as const)("offers only an Install button for %s and starts no sign-in", provider => {
+  it.each(["claude", "copilot", "codex", "opencode", "antigravity"] as const)("offers only an Install button for %s and starts no sign-in", provider => {
     const { api, loginPanel } = panels(provider, "not_installed");
     api.showPanel("login");
     expect(loginPanel.open).not.toHaveBeenCalled();
@@ -43,7 +43,7 @@ describe("Setting up a provider that is not installed", () => {
     expect(element("login-install").textContent).toMatch(/^Install /);
   });
 
-  it.each([["claude", "BROWSER"], ["copilot", "DEVICE CODE"], ["codex", "DEVICE CODE"], ["opencode", "ACCOUNT"]] as const)("signs in to an installed %s from the pane, labelled by how it signs in", (provider, badge) => {
+  it.each([["claude", "BROWSER"], ["copilot", "DEVICE CODE"], ["codex", "DEVICE CODE"], ["opencode", "ACCOUNT"], ["antigravity", "BROWSER"]] as const)("signs in to an installed %s from the pane, labelled by how it signs in", (provider, badge) => {
     const { api, loginPanel } = panels(provider, "login_required");
     api.showPanel("login");
     expect(loginPanel.open).toHaveBeenCalledOnce();

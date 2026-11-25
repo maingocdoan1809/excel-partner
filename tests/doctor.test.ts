@@ -195,7 +195,7 @@ describe("portable provider doctor", () => {
     const w = world();
     fs.rmSync(path.join(w.root, "node_modules"), { recursive: true });
     fs.rmSync(path.join(w.root, "dist"), { recursive: true });
-    for (const name of ["doctor.mjs", "doctor-checks.mjs", "doctor-probes.mjs", "windows-startup.mjs"]) w.put(`bin/${name}`, fs.readFileSync(path.join("bin", name), "utf8"));
+    for (const name of ["doctor.mjs", "doctor-checks.mjs", "doctor-probes.mjs", "windows-startup.mjs", "runtime-store.cjs", "runtime-manifest.json"]) w.put(`bin/${name}`, fs.readFileSync(path.join("bin", name), "utf8"));
     const result = spawnSync(process.execPath, [path.join(w.root, "bin", "doctor.mjs"), "gateway", "--json"], {
       env: { ...process.env, ...w.env, PATH: "", Path: "" }, encoding: "utf8", timeout: 15000, windowsHide: true,
     });

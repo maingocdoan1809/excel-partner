@@ -5,10 +5,10 @@ import { byId } from "./dom.js";
 import type { StoredMessage } from "./sessions.js";
 
 export const PROVIDER_KEY = "excelPartner.provider";
-export const PROVIDER_NAMES: Record<ProviderId, string> = { claude: "Claude Code", copilot: "GitHub Copilot", codex: "Codex", opencode: "OpenCode" };
+export const PROVIDER_NAMES: Record<ProviderId, string> = { claude: "Claude Code", copilot: "GitHub Copilot", codex: "Codex", opencode: "OpenCode", antigravity: "Antigravity" };
 const MODEL_KEY = "excelPartner.models.v1";
 /** Short label used in the model picker. */
-const PROVIDER_SHORT_NAMES: Record<ProviderId, string> = { claude: "Claude", copilot: "Copilot", codex: "Codex", opencode: "OpenCode" };
+const PROVIDER_SHORT_NAMES: Record<ProviderId, string> = { claude: "Claude", copilot: "Copilot", codex: "Codex", opencode: "OpenCode", antigravity: "Antigravity" };
 const MODEL_ID = /^[a-zA-Z0-9][a-zA-Z0-9._/-]{0,79}$/;
 
 function loadModels(): Partial<Record<ProviderId, string>> {

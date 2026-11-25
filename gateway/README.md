@@ -1,7 +1,7 @@
 # Agent Gateway
 
 A standalone local Anthropic Messages-compatible API backed by the installed
-Claude, GitHub Copilot, Codex and OpenCode CLIs. It reuses Excel Partner's
+Claude, GitHub Copilot, Codex, OpenCode and Antigravity CLIs. It reuses Excel Partner's
 provider transports, authentication and cancellation code. It requires neither
 the Excel Partner add-in nor its bridge. Provider CLI installation and sign-in
 are still required.

@@ -43,7 +43,7 @@ function setup(provider: ProviderId) {
   return { adapter, manager, session, settings, context, input, complete, release };
 }
 
-describe.each(["claude", "copilot", "codex", "opencode"] as const)("%s shared session lifecycle", provider => {
+describe.each(["claude", "copilot", "codex", "opencode", "antigravity"] as const)("%s shared session lifecycle", provider => {
   it("opens once and reuses the runtime for subsequent turns", async () => {
     const h = setup(provider);
     await h.manager.ensure(h.session, h.settings, h.context);

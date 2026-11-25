@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 /** CLI providers supported by the bridge. */
-export const ProviderIdSchema = z.enum(["claude", "copilot", "codex", "opencode"]);
+export const ProviderIdSchema = z.enum(["claude", "copilot", "codex", "opencode", "antigravity"]);
 export type ProviderId = z.infer<typeof ProviderIdSchema>;
 
 export const PROVIDER_IDS = ProviderIdSchema.options;
@@ -42,6 +42,8 @@ export const ProviderCapabilitiesSchema = z.object({
   liveEffort: z.boolean(),
   /** The CLI's conversations from outside the add-in (terminal, VS Code) can be listed and imported, then resumed here. */
   importSessions: z.boolean(),
+  /** The model sends no arguments for a tool whose input schema is open (lazy stubs), so tools must always carry their full schema. */
+  fullSchemasOnly: z.boolean().optional(),
 });
 export type ProviderCapabilities = z.infer<typeof ProviderCapabilitiesSchema>;
 

@@ -5,6 +5,7 @@ export * from "./claude/adapter.js";
 export * from "./copilot/adapter.js";
 export * from "./codex/adapter.js";
 export * from "./opencode/adapter.js";
+export * from "./antigravity/adapter.js";
 export * from "./mock.js";
 export * from "./registry.js";
 export * from "./client-tools.js";

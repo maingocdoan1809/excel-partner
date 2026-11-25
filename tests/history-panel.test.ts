@@ -13,7 +13,7 @@ function failureFixture() {
  const resetChat = vi.fn(), abandonRequest = vi.fn(), showPanel = vi.fn();
  const panel = setupHistoryPanel({ store, getClient: () => ({ connected: false }) as never, getSession: () => session, getRequestId: () => null, getProvider: () => "copilot" as const, canImport: () => true,
   persistNow() {}, abandonRequest, resetChat, refreshUsage: async () => {}, loadSession() {}, showPanel,
-  providerNames: { claude: "Claude", copilot: "Copilot", codex: "Codex", opencode: "OpenCode" }, renderMessage: container => container,
+  providerNames: { claude: "Claude", copilot: "Copilot", codex: "Codex", opencode: "OpenCode", antigravity: "Antigravity" }, renderMessage: container => container,
   elements: { historyClear: element("clear") as HTMLButtonElement, historyImport: element("import") as HTMLButtonElement, historyImportList: element("import-list"), historyList: element("list"), sessionTitle: element("title"), sessionMeta: element("meta"), sessionTranscript: element("transcript"), sessionContinue: element("continue") as HTMLButtonElement, input: element("input") as HTMLTextAreaElement } });
  return { panel, store, element, resetChat, abandonRequest, showPanel };
 }
@@ -55,7 +55,7 @@ it("H04 loads only the latest transcript page for browsing and the full chat onl
  load: vi.fn(async () => session), loadPage: vi.fn(async (_id: string, offset = 0, limit = 100) => ({ session: { ...session, messages: session.messages.slice(offset, offset + limit) }, revision: 1, generation: 0, totalMessages: 250, totalChanges: 0 })) };
  const el = (id: string) => document.getElementById(id)!;
  const loadSession = vi.fn();
- const panel = setupHistoryPanel({ store, getClient: () => ({ connected: false }) as never, getSession: () => ({ ...session, id: "current" }), getRequestId: () => null, getProvider: () => "copilot" as const, canImport: () => true, persistNow() {}, abandonRequest() {}, resetChat() {}, refreshUsage: async () => {}, loadSession, showPanel() {}, providerNames: { claude: "Claude", copilot: "Copilot", codex: "Codex", opencode: "OpenCode" }, renderMessage(container, message) { const node = document.createElement("p"); node.textContent = message.text; container.append(node); return node; }, elements: { historyClear: el("clear") as HTMLButtonElement, historyImport: el("import") as HTMLButtonElement, historyImportList: el("import-list"), historyList: el("list"), sessionTitle: el("title"), sessionMeta: el("meta"), sessionTranscript: el("transcript"), sessionContinue: el("continue") as HTMLButtonElement, input: el("input") as HTMLTextAreaElement } });
+ const panel = setupHistoryPanel({ store, getClient: () => ({ connected: false }) as never, getSession: () => ({ ...session, id: "current" }), getRequestId: () => null, getProvider: () => "copilot" as const, canImport: () => true, persistNow() {}, abandonRequest() {}, resetChat() {}, refreshUsage: async () => {}, loadSession, showPanel() {}, providerNames: { claude: "Claude", copilot: "Copilot", codex: "Codex", opencode: "OpenCode", antigravity: "Antigravity" }, renderMessage(container, message) { const node = document.createElement("p"); node.textContent = message.text; container.append(node); return node; }, elements: { historyClear: el("clear") as HTMLButtonElement, historyImport: el("import") as HTMLButtonElement, historyImportList: el("import-list"), historyList: el("list"), sessionTitle: el("title"), sessionMeta: el("meta"), sessionTranscript: el("transcript"), sessionContinue: el("continue") as HTMLButtonElement, input: el("input") as HTMLTextAreaElement } });
  await panel.renderHistory(); (el("list").querySelector("button")!).click();
  await new Promise(resolve => setTimeout(resolve, 0));
  expect(el("transcript").querySelectorAll("p")).toHaveLength(100); expect(store.load).not.toHaveBeenCalled();
@@ -70,7 +70,7 @@ describe("importing conversations from the provider's own tools", () => {
   const client = { connected: true, externalSessions: vi.fn(async (_provider: string) => ({ sessions })), importExternalSession: vi.fn(async (_provider: string, _id: string) => ({ id: "copilot:native-1", existing: false })) };
   const panel = setupHistoryPanel({ store: w.store, getClient: () => client as never, getSession: () => ({ id: "current", title: "", provider: "copilot", startedAt: 1, updatedAt: 1, messages: [], changes: [] }), getRequestId: () => null,
    getProvider: () => "copilot" as const, canImport: () => true, persistNow() {}, abandonRequest() {}, resetChat() {}, refreshUsage: async () => {}, loadSession() {}, showPanel: w.showPanel,
-   providerNames: { claude: "Claude", copilot: "Copilot", codex: "Codex", opencode: "OpenCode" }, renderMessage: container => container,
+   providerNames: { claude: "Claude", copilot: "Copilot", codex: "Codex", opencode: "OpenCode", antigravity: "Antigravity" }, renderMessage: container => container,
    elements: { historyClear: w.element("clear") as HTMLButtonElement, historyImport: w.element("import") as HTMLButtonElement, historyImportList: w.element("import-list"), historyList: w.element("list"), sessionTitle: w.element("title"), sessionMeta: w.element("meta"), sessionTranscript: w.element("transcript"), sessionContinue: w.element("continue") as HTMLButtonElement, input: w.element("input") as HTMLTextAreaElement } });
   return { ...w, client, panel };
  }

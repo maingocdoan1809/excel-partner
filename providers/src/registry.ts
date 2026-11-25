@@ -4,6 +4,7 @@ import { ClaudeAdapter } from "./claude/adapter.js";
 import { CopilotAdapter } from "./copilot/adapter.js";
 import { CodexAdapter } from "./codex/adapter.js";
 import { OpencodeAdapter } from "./opencode/adapter.js";
+import { AntigravityAdapter } from "./antigravity/adapter.js";
 import { ProfiledAdapter, type AdapterClass } from "./profiled.js";
 import type { TerminalAgentSpec } from "./terminal-agent.js";
 
@@ -69,6 +70,7 @@ const adapters: Record<ProviderId, AdapterClass> = {
   copilot: CopilotAdapter,
   codex: CodexAdapter,
   opencode: OpencodeAdapter,
+  antigravity: AntigravityAdapter,
 };
 
 /** The providers whose terminal CLI can be given an MCP server, with how each is asked to. */

@@ -5,8 +5,9 @@ import { createHash, randomUUID, X509Certificate } from "node:crypto";
 import { createRequire } from "node:module";
 import { runCommand, requestHealth, probeMcp, readJson, readLastStartup } from "./doctor-probes.mjs";
 import { startupNames, startupTargets, windowsRunKey } from "./windows-startup.mjs";
+import runtimeManifest from "./runtime-store.cjs";
 
-export const PROVIDERS = ["claude", "copilot", "codex", "opencode"];
+export const PROVIDERS = runtimeManifest.ids;
 const version = text => /\b(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)\b/.exec(String(text))?.[1] ?? null;
 const older = (a, b) => {
   const left = a.split(/[.-]/).slice(0, 3).map(Number), right = b.split(/[.-]/).slice(0, 3).map(Number);
@@ -202,7 +203,7 @@ export async function collectDoctor(options) {
         disabled ? `${id}: provider is disabled.` : `${id}: recorded runtime is missing, changed, or invalid.`, `office-partner providers install ${id}`); continue;
     }
     const override = envValue(env, `${id.toUpperCase()}_BIN`, platform);
-    const matches = resolveCommands(profile?.command ?? override ?? id, env, platform), minimum = adapterMinimum(root, id);
+    const matches = resolveCommands(profile?.command ?? override ?? runtimeManifest.manifest.providers[id]?.bin ?? id, env, platform), minimum = adapterMinimum(root, id);
     const required = Boolean(provider) || target !== "addin" && (gatewayConfig.enabledProviders ?? ["copilot"]).includes(id);
     if (!matches.length) {
       add(`provider.${id}.executable`, required ? "fail" : "warn", "CLI_NOT_FOUND", `${id}: CLI executable not found.`, "Check the CLI installation and executable override in the service environment.", { source: override ? "override" : "PATH" });
@@ -230,6 +231,9 @@ export async function collectDoctor(options) {
         "External Copilot CLI differs from the SDK's bundled runtime. Compatibility is unverified.",
         "Include both version numbers when reporting a Copilot tool failure.", { cliVersion: foundVersion, sdkVersion, bundledRuntime: sdkRuntime });
       add(`provider.${id}.auth`, "warn", "AUTH_UNVERIFIED", "Copilot authentication cannot be proved by CLI presence or a stored config file.", "Use the product sign-in flow. A successful tool turn is a separate live check."); continue;
+    }
+    if (runtimeManifest.manifest.providers[id]?.download) {
+      add(`provider.${id}.auth`, "warn", "AUTH_UNVERIFIED", `${id}: sign-in is checked through the product adapter.`, "Use Settings to check sign-in. No login was started by doctor."); continue;
     }
     const args = id === "claude" ? ["auth", "status"] : id === "codex" ? ["login", "status"] : ["auth", "list"];
     try { result = await run(matches[0], args, { env: childEnv }); } catch { result = { code: null }; }

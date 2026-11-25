@@ -7,6 +7,7 @@ const BIN_VARS: Record<ProviderId, string> = {
   codex: "CODEX_BIN",
   copilot: "COPILOT_BIN",
   opencode: "OPENCODE_BIN",
+  antigravity: "ANTIGRAVITY_BIN",
 };
 
 const saved = { ...process.env };

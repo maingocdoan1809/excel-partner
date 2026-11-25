@@ -10,7 +10,7 @@ import { Harness } from '../tests/support/harness.js';
 import type { ProviderId } from '../protocol/src/index.js';
 const provider = process.argv[2] as ProviderId;
 const model = process.argv[3];
-assert.ok(['copilot', 'opencode', 'claude', 'codex'].includes(provider) && model, 'Specify provider and model');
+assert.ok(['copilot', 'opencode', 'claude', 'codex', 'antigravity'].includes(provider) && model, 'Specify provider and model');
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'office-live-mcp-'));
 let h: Harness | undefined;
 try {

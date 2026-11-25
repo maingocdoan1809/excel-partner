@@ -25,14 +25,16 @@ const stateFile = () => path.join(fs.mkdtempSync(path.join(os.tmpdir(), "termina
 
 describe("registering the peer MCP server in the terminal CLIs", () => {
   it("knows how each CLI adds a server", () => {
-    expect(agents.map(agent => agent.id)).toEqual(["claude", "copilot", "codex"]);
+    expect(agents.map(agent => agent.id)).toEqual(["claude", "copilot", "codex", "antigravity"]);
     expect(claude.spec.add(server)).toEqual(["mcp", "add", "--scope", "user", "office-partner", "-e", "OFFICE_PARTNER_DATA_DIR=C:\\data", "--", "node", "C:\\app\\peer-cli.js"]);
     expect(agents.find(agent => agent.id === "copilot")!.spec.add(server)).toEqual(["mcp", "add", "office-partner", "--env", "OFFICE_PARTNER_DATA_DIR=C:\\data", "--", "node", "C:\\app\\peer-cli.js"]);
+    expect(agents.find(agent => agent.id === "antigravity")!.spec.add(server)).toEqual(["mcp", "add", "--env", "OFFICE_PARTNER_DATA_DIR=C:\\data", "office-partner", "--", "node", "C:\\app\\peer-cli.js"]);
+    expect(terminalAgentLabel(agents, "Antigravity ACP Server")).toBe("Antigravity CLI (terminal)");
     expect(claude.spec.remove("office-partner")).toEqual(["mcp", "remove", "--scope", "user", "office-partner"]);
   });
 
   it("shows the person who is asking from the name the CLI gave in the MCP handshake, each provider supplying its own label", () => {
-    expect(agents.map(agent => agent.spec.label)).toEqual(["Claude Code", "Copilot CLI", "Codex CLI"]);
+    expect(agents.map(agent => agent.spec.label)).toEqual(["Claude Code", "Copilot CLI", "Codex CLI", "Antigravity CLI"]);
     expect(terminalAgentLabel(agents, "claude-code")).toBe("Claude Code (terminal)");
     expect(terminalAgentLabel(agents, "GitHub-Copilot-CLI")).toBe("Copilot CLI (terminal)");
     expect(terminalAgentLabel(agents, "codex-mcp-client")).toBe("Codex CLI (terminal)");
@@ -44,7 +46,7 @@ describe("registering the peer MCP server in the terminal CLIs", () => {
   it("registers in the CLIs that are installed and skips the rest", async () => {
     const pc = computer(["claude"]);
     const results = await syncTerminalAgents(agents, server, { stateFile: stateFile(), run: pc.run });
-    expect(results).toEqual({ claude: { outcome: "registered" }, copilot: { outcome: "not_installed" }, codex: { outcome: "not_installed" } });
+    expect(results).toEqual({ claude: { outcome: "registered" }, copilot: { outcome: "not_installed" }, codex: { outcome: "not_installed" }, antigravity: { outcome: "not_installed" } });
     expect(pc.calls.filter(call => call[0] === "claude").map(call => call.slice(1, 3).join(" "))).toEqual(["--version", "mcp remove", "mcp add"]);
     expect(pc.calls.some(call => call[0] === "copilot" && call[1] === "mcp")).toBe(false);
   });

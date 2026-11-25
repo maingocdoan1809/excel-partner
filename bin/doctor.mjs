@@ -23,7 +23,7 @@ export function parseDoctorArgs(args) {
       result[arg.slice(2)] = value;
     } else throw new Error("Unknown doctor argument. Use doctor [addin|gateway|all] [--provider <id>] [--probe] [--mcp] [--host <host>] [--json] [--output <file>].");
   }
-  if (result.provider && !PROVIDERS.includes(result.provider)) throw new Error("Provider must be claude, copilot, codex or opencode.");
+  if (result.provider && !PROVIDERS.includes(result.provider)) throw new Error(`Provider must be one of: ${PROVIDERS.join(", ")}.`);
   if (!["excel", "word", "powerpoint"].includes(result.host)) throw new Error("Host must be excel, word or powerpoint.");
   return result;
 }

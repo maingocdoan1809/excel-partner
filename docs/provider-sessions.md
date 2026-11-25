@@ -1,6 +1,6 @@
 # Provider sessions
 
-The add-in bridge and standalone API gateway use the same lifecycle for Claude, Copilot, Codex and OpenCode:
+The add-in bridge and standalone API gateway use the same lifecycle for Claude, Copilot, Codex, OpenCode and Antigravity:
 
 ```text
 Bridge HTTP/WebSocket handlers
@@ -81,6 +81,7 @@ after the new capabilities have been applied.
 | Copilot | Copilot SDK over the local CLI; ACP for callers without the pane question callback | SDK completion / ACP prompt response |
 | Codex | `codex app-server`, JSON-RPC | Native turn completion |
 | OpenCode | `opencode acp`, JSON-RPC | ACP prompt response |
+| Antigravity | `agy acp`, JSON-RPC | ACP prompt response |
 
 Claude sends an `initialize` control request when opening and an `interrupt`
 control request on Stop. `--resume` is only passed when opening a saved

@@ -1,6 +1,6 @@
 # Office Partner (formerly Excel Partner)
 
-Chat with an AI coding assistant, **Claude Code, GitHub Copilot CLI, Codex CLI or OpenCode**, to read, analyse and edit the file you have open in **Excel, Word or PowerPoint desktop on Windows**. One install adds **Home > Office Partner** to all three.
+Chat with an AI coding assistant, **Claude Code, GitHub Copilot CLI, Codex CLI, OpenCode or Antigravity CLI**, to read, analyse and edit the file you have open in **Excel, Word or PowerPoint desktop on Windows**. One install adds **Home > Office Partner** to all three.
 
 > **Renamed.** The npm package is now `office-partner` and the command is `office-partner`. Already have `excel-partner`? Run `npm install -g office-partner` and `office-partner setup`, or just run `excel-partner` once (or press **Update now** in Settings): it installs `office-partner` and hands the command over. Your settings, certificate, backups and saved sign-ins are kept; the data folder is still `%LOCALAPPDATA%\Excel Partner`.
 
@@ -9,7 +9,7 @@ Chat with an AI coding assistant, **Claude Code, GitHub Copilot CLI, Codex CLI o
 ## How it works
 
 ```
-Excel task pane  <-->  local bridge (localhost:8765)  <-->  your provider CLI (Claude / Copilot / Codex / OpenCode)
+Excel task pane  <-->  local bridge (localhost:8765)  <-->  your provider CLI (Claude / Copilot / Codex / OpenCode / Antigravity)
 ```
 
 - The task pane is the chat UI inside Excel, Word or PowerPoint. Changes run through Office.js in the file you have open.
@@ -36,7 +36,9 @@ office-partner status
 
 `setup` trusts a localhost certificate for your user, registers the add-in, starts the bridge and adds it to Windows start-up. A healthy bridge prints `Bridge running at https://localhost:8765`.
 
-**2. Choose providers.** Interactive setup asks which private CLIs to install (`copilot`, `claude`, `codex`, `opencode`). Enter keeps existing system CLIs. For an unattended selection use `office-partner setup --providers copilot,codex`; `--providers none` keeps external CLIs. System CLI files and PATH are never changed. Every provider signs in from the pane (Settings, Sign in): Copilot, Codex and Claude show a link and a code, and OpenCode lists its accounts (OAuth where it offers one, an API key otherwise). A private CLI that needs sign-in stays pending while the previous selection is retained.
+**2. Choose providers.** Interactive setup asks which private CLIs to install (`copilot`, `claude`, `codex`, `opencode`, `antigravity`). Enter keeps existing system CLIs. For an unattended selection use `office-partner setup --providers copilot,codex`; `--providers none` keeps external CLIs. System CLI files and PATH are never changed. Every provider signs in from the pane (Settings, Sign in): Copilot, Codex and Claude show a link and a code, and OpenCode lists its accounts (OAuth where it offers one, an API key otherwise). A private CLI that needs sign-in stays pending while the previous selection is retained.
+
+**Antigravity:** install with `office-partner providers install antigravity`, then choose Antigravity in Settings > Sign in. The official `agy` 1.5.16 binary uses [ACP over stdio](https://antigravity.google/docs/cli/acp), with Google sign-in and an authorization code pasted back into the pane. Office Partner checks the release SHA-512 and keeps its CLI state across updates. Model choices come from the CLI; Google restricts third-party models to specific editor clients ([ACP guide](https://antigravity.google/docs/ide/extensions/acp)). Importing terminal conversations and signing out from the pane are not supported yet.
 
 **3. Use it:** reopen Excel, Word or PowerPoint, open a file, choose **Home > Office Partner**, pick a provider, select cells, text or a slide shape, type a request, press **Enter**. (**Ctrl+Enter** adds a new line.) Settings > App & storage > System & recovery also manages private providers. See [runtime management and recovery](docs/diagnostics.md).
 
@@ -100,7 +102,7 @@ What to expect when something is done in the other file:
 - Its task pane must be open: a file without the pane is not listed. A file that was closed and reopened gets a new id, so the assistant lists again.
 - What is read or sent goes to the AI provider of the chat that handles it. Replies and cell contents from the other file are data, not instructions.
 
-**From a terminal agent.** Claude Code, Copilot CLI and Codex CLI can ask the assistant of an open file the same way. Nothing to set up: when Office Partner starts it finds those CLIs on your computer and registers an `office-partner` MCP server in each (user level, so it works in every folder). It adds two tools, `list_office_files` and `ask_office_file`. The request runs as a normal turn in that file's chat, with that file's provider and permission setting, and the reply goes back to the terminal.
+**From a terminal agent.** Claude Code, Copilot CLI, Codex CLI and Antigravity CLI can ask the assistant of an open file the same way. Nothing to set up: when Office Partner starts it finds those CLIs on your computer and registers an `office-partner` MCP server in each (user level, so it works in every folder). It adds two tools, `list_office_files` and `ask_office_file`. The request runs as a normal turn in that file's chat, with that file's provider and permission setting, and the reply goes back to the terminal.
 - A CLI that already has the registration is left alone, so if you remove it (`claude mcp remove office-partner`) it stays removed until a new release moves the files. To turn the automatic registration off, set `OFFICE_PARTNER_TERMINAL_AGENTS=0` or put `{"disabled": true}` in `terminal-agents.json` in the data folder.
 - OpenCode is not registered automatically: its terminal CLI has no non-interactive way to add a server. You can add `office-partner mcp-peer` yourself in its settings.
 - The person at that window is asked first and sees who is asking and the exact text (Auto mode allows it, as for another file's assistant).

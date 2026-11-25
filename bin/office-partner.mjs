@@ -358,7 +358,7 @@ async function main() {
     if (!skipProviders && selected === undefined && process.stdin.isTTY) {
       const { createInterface } = await import("node:readline/promises");
       const input = createInterface({ input: process.stdin, output: process.stdout });
-      try { selected = (await input.question("Providers to install (copilot, claude, codex, opencode; comma separated; Enter keeps existing CLIs): ")).trim() || "none"; }
+      try { selected = (await input.question("Providers to install (copilot, claude, codex, opencode, antigravity; comma separated; Enter keeps existing CLIs): ")).trim() || "none"; }
       finally { input.close(); }
       if (selected !== "none" && !selected.split(",").every(id => runtimeStore.ids.includes(id))) fail("Unknown provider selection.");
     }

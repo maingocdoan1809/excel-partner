@@ -118,7 +118,7 @@ export class TurnRunner {
     try {
       const detection = await adapter.detect();
       if (entry.controller.signal.aborted || session.isBusy || !detection.installed || detection.status !== "ready") return;
-      await this.openRuntime(session, adapter, input, this.promptSettings(session, this.lazy(input.capabilities)), entry.controller.signal);
+      await this.openRuntime(session, adapter, input, this.promptSettings(session, this.lazy(input.capabilities, adapter)), entry.controller.signal);
     } catch (error) {
       if (!entry.controller.signal.aborted) this.deps.logger.debug("runtime warm-up failed", { error: String(error) });
     } finally {
@@ -127,7 +127,8 @@ export class TurnRunner {
   }
 
   /** Whether tools are offered by summary: the pane's own choice, else the bridge's `toolSchemas` setting. */
-  private lazy(capabilities?: ToolCapabilities): boolean {
+  private lazy(capabilities: ToolCapabilities | undefined, adapter: ProviderAdapter): boolean {
+    if (adapter.capabilities.fullSchemasOnly) return false;
     return capabilities?.lazySchemas ?? this.deps.config.toolSchemas === "lazy";
   }
 
@@ -151,7 +152,7 @@ export class TurnRunner {
     await this.deps.providerSessions.ensure(session, {
       model, effort, chatSessionId, resumeSessionId,
       capabilities: { ...input.capabilities, webSearch: input.capabilities.webSearch && adapter.capabilities.nativeWebSearch,
-        connectedFiles: this.deps.hasOtherFiles(session), lazySchemas: this.lazy(input.capabilities) },
+        connectedFiles: this.deps.hasOtherFiles(session), lazySchemas: this.lazy(input.capabilities, adapter) },
       systemPromptRevision: `${promptSettings.revision}:${catalogRevision}`,
     }, () => ({
       requestUserInput: (request, requestSignal) => session.requestUserInput(request, requestSignal),
@@ -248,7 +249,7 @@ export class TurnRunner {
 
     const adapter = this.deps.providers.require(session.provider);
     const selectedModel = model ?? null;
-    const promptSettings = this.promptSettings(session, this.lazy(capabilities));
+    const promptSettings = this.promptSettings(session, this.lazy(capabilities, adapter));
     if (delegationId && !delegations.accept(session, delegationId, requestId)) {
       // Nobody waits for this any more (it timed out, the asker stopped, or it was never asked): do not change the file for no one.
       session.send({ type: "error", requestId, code: "cancelled", message: "The other file's request is no longer waiting for an answer, so it was not run." });
@@ -260,7 +261,7 @@ export class TurnRunner {
       sessionId: resumeSessionId ? providerSessionKey(session.provider, resumeSessionId) : chatSessionId ?? session.id,
       providerSessionId: resumeSessionId, requestId, provider: session.provider,
       model: selectedModel, startedAt: Date.now(), durationMs: 0, reason: "completed", usage: null,
-      catalogChars: toolCatalogChars(session.host, this.deps.config.allowOfficeJs, { ...session.capabilities, lazySchemas: this.lazy(capabilities) }),
+      catalogChars: toolCatalogChars(session.host, this.deps.config.allowOfficeJs, { ...session.capabilities, lazySchemas: this.lazy(capabilities, adapter) }),
     });
     // `/skill-name request` loads the skill's instructions into this turn.
     const expanded = isCommand ? { prompt, skill: undefined } : expandSkillPrompt(prompt, skills);

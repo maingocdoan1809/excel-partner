@@ -5,6 +5,7 @@ import { createRequire } from "node:module";
 import store from "./runtime-store.cjs";
 import { resolveCommands } from "./doctor-checks.mjs";
 import { runCommand } from "./doctor-probes.mjs";
+import { installBinary, validDownload } from "./runtime-download.mjs";
 
 const VERSION = /^\d+\.\d+\.\d+(?:-[\w.-]+)?$/;
 export function readManifest(root) {
@@ -12,7 +13,9 @@ export function readManifest(root) {
   if (manifest.schemaVersion !== 1 || !manifest.providers) throw new Error("RUNTIME_MANIFEST_INVALID");
   for (const id of store.ids) {
     const item = manifest.providers[id];
-    if (!item || typeof item.package !== "string" || item.bin !== id || !VERSION.test(item.version) || item.sdkVersion && !/^\d+\.\d+\.\d+$/.test(item.sdkVersion)) throw new Error("RUNTIME_MANIFEST_INVALID");
+    if (!item || typeof item.bin !== "string" || !/^[a-zA-Z0-9_-]+$/.test(item.bin) || !VERSION.test(item.version)
+      || item.sdkVersion && !/^\d+\.\d+\.\d+$/.test(item.sdkVersion)
+      || (item.download ? !Object.keys(item.download).length || !Object.values(item.download).every(validDownload) : typeof item.package !== "string")) throw new Error("RUNTIME_MANIFEST_INVALID");
   }
   return manifest;
 }
@@ -36,6 +39,11 @@ export async function installPackage(prefix, spec, { env = process.env, run = ru
  * (`nativeBin` in the manifest): the launcher can lose the piped stdin that ACP needs, so the executable is used directly.
  */
 function entrypoint(prefix, item) {
+  if (item.download) {
+    const command = path.join(prefix, item.bin + (process.platform === "win32" ? ".exe" : ""));
+    if (!fs.existsSync(command) || !store.inside(prefix, fs.realpathSync(command))) throw new Error("CLI_ENTRYPOINT_INVALID");
+    return command;
+  }
   const root = path.join(prefix, "node_modules", item.package), pkg = store.readJson(path.join(root, "package.json"));
   if (pkg.version !== item.version) throw new Error("INSTALLED_VERSION_MISMATCH");
   const entry = typeof pkg.bin === "string" ? pkg.bin : pkg.bin?.[item.bin];
@@ -82,7 +90,7 @@ function stateHomeFor(dataDir, provider, state) {
  * The install folder is named by what is installed, so a release that ships the same CLI reuses it instead of downloading it again.
  */
 export async function installRuntime(root, provider, options = {}) {
-  const { dataDir = store.home(), env = process.env, run = runCommand, install = installPackage, preflight = nativePreflight } = options;
+  const { dataDir = store.home(), env = process.env, run = runCommand, install = installPackage, download = installBinary, preflight = nativePreflight } = options;
   if (!store.ids.includes(provider)) throw new Error("PROVIDER_INVALID");
   const item = readManifest(root).providers[provider];
   if (item.sdkVersion) {
@@ -114,7 +122,8 @@ export async function installRuntime(root, provider, options = {}) {
         fs.mkdirSync(path.dirname(directory), { recursive: true });
         staging = fs.mkdtempSync(path.join(path.dirname(directory), ".install-"));
         store.atomic(path.join(staging, "package.json"), { name: "office-partner-runtime", version: "1.0.0", private: true });
-        await install(staging, `${item.package}@${item.version}`, { env: store.childEnvironment(env), run });
+        if (item.download) await download(staging, item, { env: store.childEnvironment(env), run });
+        else await install(staging, `${item.package}@${item.version}`, { env: store.childEnvironment(env), run });
         await verifyVersion(entrypoint(staging, item), item, run, privateEnv);
         store.renameFolder(staging, directory); staging = null;
       }
@@ -136,7 +145,7 @@ export async function installRuntime(root, provider, options = {}) {
       removeUnusedInstalls(dataDir);
       return profile;
     } catch (error) {
-      const known = /^(?:NATIVE_PREFLIGHT_[A-Z_]+|INSTALL_FAILED|INSTALL_TIMEOUT|CLI_PREFLIGHT_FAILED|INSTALLED_VERSION_MISMATCH)$/;
+      const known = /^(?:NATIVE_PREFLIGHT_[A-Z_]+|INSTALL_FAILED|INSTALL_TIMEOUT|CLI_PREFLIGHT_FAILED|INSTALLED_VERSION_MISMATCH|RUNTIME_INTEGRITY_FAILED|RUNTIME_PLATFORM_UNSUPPORTED)$/;
       const code = known.test(error.message) ? error.message : "RUNTIME_INSTALL_FAILED";
       store.changeState(dataDir, state => { state.failures[provider] = { code, version: item.version, at: new Date().toISOString() }; });
       throw error;
