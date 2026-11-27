@@ -1,4 +1,5 @@
 import { byId } from "./dom.js";
+import { createComposerInput } from "./composer-input.js";
 import { preview, settings } from "../chat/services.js";
 
 export const els = {
@@ -51,13 +52,12 @@ export const els = {
   sessionContinue: byId<HTMLButtonElement>("session-continue"),
   resizer: byId<HTMLElement>("composer-resizer"),
   chip: byId<HTMLDivElement>("selection-chip"),
-  input: byId<HTMLTextAreaElement>("prompt-input"),
+  input: createComposerInput(byId<HTMLDivElement>("prompt-input")),
   modelSelect: byId<HTMLSelectElement>("model-select"),
   effortSelect: byId<HTMLSelectElement>("effort-select"),
   permissionMode: byId<HTMLSelectElement>("permission-mode"),
   slashMenu: byId<HTMLDivElement>("slash-menu"),
   mentionMenu: byId<HTMLDivElement>("mention-menu"),
-  promptDisplay: byId<HTMLDivElement>("prompt-display"),
   attachButton: byId<HTMLButtonElement>("attach-button"),
   send: byId<HTMLButtonElement>("send-button"),
   sendLabel: document.querySelector<HTMLSpanElement>("#send-button .label")!,

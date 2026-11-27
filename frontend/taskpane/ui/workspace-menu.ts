@@ -1,3 +1,4 @@
+import type { TextField } from "./composer-input.js";
 import { currentDocumentUrl } from "./document-url.js";
 import type { BridgeClient, SavedReference, UploadedAttachment, WorkspaceEntry, WorkspaceRoot } from "../bridge-client.js";
 import { activeHost } from "../host/index.js";
@@ -12,7 +13,7 @@ export interface WorkspaceMenuDeps {
   renderComposerPreview(): void;
   append(message: StoredMessage): HTMLElement;
   attachments: Array<{ reference: UploadedAttachment; name: string }>;
-  elements: { input: HTMLTextAreaElement; mentionMenu: HTMLElement };
+  elements: { input: TextField; mentionMenu: HTMLElement };
 }
 
 /** The @ menu, granted workspace folders, and local files chosen or dropped into the composer. */

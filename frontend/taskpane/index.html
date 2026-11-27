@@ -407,12 +407,16 @@
         <div id="mention-menu" class="slash-menu workspace-menu" aria-label="Workspace files" hidden></div>
         <div id="selection-chip" class="chip" role="status" aria-live="polite" aria-atomic="true" title="Current selection (sent with your message)">No selection</div>
         <div class="composer-input-wrap">
-          <div id="prompt-display" class="prompt-display" aria-hidden="true"></div>
-          <textarea
+          <div
             id="prompt-input"
-            rows="3"
-            placeholder="Reply or / to use a skill"
-          ></textarea>
+            class="composer-input"
+            contenteditable="plaintext-only"
+            role="textbox"
+            aria-multiline="true"
+            aria-label="Message"
+            spellcheck="true"
+            data-placeholder="Reply or / to use a skill"
+          ></div>
         </div>
         <div class="composer-actions">
           <button id="attach-button" type="button" class="attach-button" title="Attach a file or image" aria-label="Attach a file or image"><svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="6.5"/><path d="M10 6.5v7M6.5 10h7"/></svg></button>

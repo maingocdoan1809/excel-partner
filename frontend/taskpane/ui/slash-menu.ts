@@ -1,8 +1,9 @@
 import { BUILTIN_COMMANDS, filterCommands, slashQuery, type SlashCommand } from "./slash.js";
+import type { TextField } from "./composer-input.js";
 import { parseNativeCommand, type ProviderCommand } from "../../../protocol/src/commands.js";
 
 export interface SlashMenuOptions {
-  input: HTMLTextAreaElement;
+  input: TextField;
   menu: HTMLElement;
   /** A built-in command was chosen (currently only `clear`). */
   onBuiltin(name: string): void;

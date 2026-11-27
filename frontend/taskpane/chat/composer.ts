@@ -1,26 +1,28 @@
-import { slashBadgeRange } from "../ui/slash.js";
 import { fileMentionRanges } from "../ui/file-mentions.js";
 import type { PermissionMode } from "../permissions.js";
 import { byId } from "../ui/dom.js";
+import { slashBadgeRange } from "../ui/slash.js";
 import { els } from "../ui/elements.js";
 import { appendFileMentions } from "./messages.js";
 import { PERMISSION_MODE_KEY, app, pendingAttachments } from "./state.js";
 
-export function renderComposerPreview(): void {
-  updateSendControl();
-  els.promptDisplay.replaceChildren();
-  const text = els.input.value;
+/** What the message box highlights: a finished leading `/command` and the `@file` names that were attached. */
+els.input.decorate = text => {
+  const holder = document.createElement("div");
   const command = slashBadgeRange(text, app.selectedSlashToken);
   if (command) {
     const badge = document.createElement("span");
     badge.className = "slash-token";
     badge.textContent = text.slice(command.start, command.end);
-    els.promptDisplay.append(badge);
-    appendFileMentions(els.promptDisplay, text.slice(command.end), pendingAttachments.map((item) => item.name));
-  } else appendFileMentions(els.promptDisplay, text, pendingAttachments.map((item) => item.name));
-  // A textarea keeps a caret line after a trailing newline; mirror that line too.
-  if (text.endsWith("\n")) els.promptDisplay.append(document.createTextNode("\u200b"));
-  els.promptDisplay.scrollTop = els.input.scrollTop;
+    holder.append(badge);
+  }
+  appendFileMentions(holder, text.slice(command?.end ?? 0), pendingAttachments.map((item) => item.name));
+  return [...holder.childNodes];
+};
+
+export function renderComposerPreview(): void {
+  updateSendControl();
+  els.input.refresh();
 }
 
 export function syncSelectedSlashToken(): void {

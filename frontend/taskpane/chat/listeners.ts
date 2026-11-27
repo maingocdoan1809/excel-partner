@@ -187,7 +187,6 @@ export function bindListeners(): void {
     slash.update();
     updateMentionMenu();
   });
-  els.input.addEventListener("scroll", () => { els.promptDisplay.scrollTop = els.input.scrollTop; });
   els.input.addEventListener("paste", (event) => {
     const files = filesFromClipboard(event.clipboardData);
     if (!files.length) return;

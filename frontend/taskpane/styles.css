@@ -267,39 +267,36 @@ button:disabled { cursor: default; }
   white-space: nowrap;
   vertical-align: bottom;
 }
-/* Both layers need the same wrapping width, including the native scrollbar gutter. */
-.composer-card textarea, .prompt-display {
+.composer-card .composer-input {
   scrollbar-gutter: stable;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
-.composer-card textarea {
+.composer-card .composer-input {
   display: block;
   width: 100%;
   min-width: 0;
   height: var(--input-height);
   min-height: 40px;
-  resize: none;
+  overflow-y: auto;
+  box-sizing: border-box;
+  outline: none;
   font: inherit;
-  /* Match the preview's inherited tracking so the caret stays beside its text. */
   letter-spacing: inherit;
   padding: 2px 2px;
   border: 0;
   background: transparent;
-  /* Hide only glyphs; keep a real text color for the native WebView caret. */
   color: var(--text);
-  -webkit-text-fill-color: transparent;
   caret-color: var(--text);
   position: relative;
   z-index: 1;
 }
-.composer-card textarea:focus-visible { outline: none; }
-.composer-card textarea::placeholder { color: #839b8b; -webkit-text-fill-color: currentColor; }
+.composer-card .composer-input:focus-visible { outline: none; }
+.composer-card .composer-input:empty::before { color: #839b8b; content: attr(data-placeholder); pointer-events: none; }
 .composer-input-wrap { position: relative; min-width: 0; }
-.prompt-display { position: absolute; inset: 0; overflow: hidden; pointer-events: none; padding: 2px; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--text); font: inherit; }
+/* Highlights inside the box must not change the width of the text they cover, or the caret would drift. */
+.composer-input .file-mention, .composer-input .slash-token { padding: 0; font-weight: inherit; box-shadow: 0 0 0 2px var(--blue-100); }
 .file-mention { border-radius: 6px; padding: 1px 4px; background: var(--blue-100); color: var(--accent-strong); white-space: break-spaces; }
-.prompt-display .file-mention { padding: 0; box-shadow: 0 0 0 2px var(--blue-100); }
-.prompt-display .slash-token { padding: 0; font-weight: inherit; background: var(--blue-100); box-shadow: 0 0 0 2px var(--blue-100); }
 .bubble.user .file-mention { background: var(--blue-100); color: var(--accent-strong); font-weight: 600; }
 .composer-actions { display: grid; grid-template-columns: 28px minmax(0, 1fr) 64px auto; align-items: center; gap: 6px; margin-top: 4px; min-width: 0; }
 .model-select { min-width: 0; width: 100%; padding: 5px 4px; border: 1px solid var(--border); border-radius: 8px; background: var(--blue-50); color: var(--accent-strong); font: inherit; font-size: 12px; cursor: pointer; text-overflow: ellipsis; }
@@ -514,7 +511,7 @@ button:focus-visible, a:focus-visible, select:focus-visible { outline: 2px solid
 .eyebrow { color: #8bc8a0; font-size: 9px; font-weight: 600; letter-spacing: 1.2px; }
 .login-body h2 span { color: var(--accent-soft); }
 .chip { padding: 3px 7px; border-radius: 5px; font-size: 10px; font-weight: 400; }
-.composer-card textarea, .prompt-display { font-size: 12px; line-height: 1.6; }
+.composer-card .composer-input { font-size: 12px; line-height: 1.6; }
 .model-select, .permission-select { background: transparent; border-color: transparent; font-size: 10px; color: var(--text-secondary); font-weight: 400; padding-left: 0; }
 .model-select option, .permission-select option { background: #202b23; color: var(--text); }
 
@@ -634,8 +631,8 @@ body { scrollbar-color: var(--blue-300) transparent; }
 .composer { background: var(--bg); }
 .composer-card { border-radius: 18px; box-shadow: none; padding: 12px 14px; }
 .composer-card:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 28%, transparent); }
-.composer-card textarea::placeholder { color: var(--text-tertiary); }
-.composer-card textarea, .prompt-display { font-size: 13px; line-height: 1.6; }
+.composer-card .composer-input:empty::before { color: var(--text-tertiary); }
+.composer-card .composer-input { font-size: 13px; line-height: 1.6; }
 
 /* actions: filled blue pills, outlined blue pills for secondary */
 button { border-radius: 999px; background: var(--btn); color: var(--on-mint); font-weight: 400; padding: 6px 16px; transition: filter .15s, transform .1s; }

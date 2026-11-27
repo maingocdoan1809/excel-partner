@@ -1,7 +1,7 @@
 const INPUT_HEIGHT_KEY = "excelPartner.inputHeight";
 
 /** Drag handle above the message box: drag up to make it taller (keyboard: Arrow Up/Down). Height is remembered. */
-export function setupInputResizer(handle: HTMLElement, input: HTMLTextAreaElement): void {
+export function setupInputResizer(handle: HTMLElement, input: HTMLElement): void {
   const apply = (height: number) => {
     const max = Math.round(window.innerHeight * 0.5);
     document.documentElement.style.setProperty("--input-height", `${Math.round(Math.min(max, Math.max(40, height)))}px`);

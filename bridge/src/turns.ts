@@ -342,7 +342,7 @@ export class TurnRunner {
           message: aborted ? "turn cancelled" : `${resumeSessionId && !session.providerSessionId ? "Could not resume the saved CLI session. No replacement session was created. " : ""}${String(error instanceof Error ? error.message : error)}`,
         };
         delegations.observe(session, requestId, failure);
-        session.send(failure);
+        if (!aborted) session.send(failure); // A stop the person asked for is not an error to show.
       }
       this.finishTurn(session, requestId, aborted && !idle.timedOut ? "cancelled" : "error");
     } finally {

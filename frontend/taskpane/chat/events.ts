@@ -143,7 +143,9 @@ export function handleEvent(event: ProviderEvent): void {
     }
     case "turn_finished":
       if (event.requestId !== app.currentRequestId) return;
-      app.autoQueueAllowed = event.reason === "completed";
+      // Stop with messages waiting means: end this one, run the next.
+      const continueQueue = event.reason === "completed" || (event.reason === "cancelled" && app.cancelRequested);
+      app.autoQueueAllowed = continueQueue;
       usagePanel.finish(event.requestId);
       void refreshUsage();
       slash.reload();
@@ -161,7 +163,7 @@ export function handleEvent(event: ProviderEvent): void {
       app.liveToolGroup = null;
       setBusy(false);
       if (event.reason === "cancelled") append({ kind: "note", text: "Stopped." });
-      if (event.reason !== "completed") holdPendingPrompts();
+      if (!continueQueue) holdPendingPrompts();
       persistNow();
       void store.flush().catch(() => {});
       sendNextPending();

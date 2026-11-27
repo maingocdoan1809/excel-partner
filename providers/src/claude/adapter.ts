@@ -418,6 +418,8 @@ export class ClaudeAdapter extends BaseCliAdapter {
     if (confirmsSession || (message.type === "result" && session.resumable)) active.queue.push({ type: "session_info", requestId,
       provider: this.id, providerSessionId: session.conversationId });
     for (const event of active.translator.translate(message)) {
+      // The CLI reports an interrupted turn as an error result; the person asked for it, so it is not an error to show.
+      if (event.type === "error" && (active.interruptSent || active.input.signal.aborted)) continue;
       if (event.type === "turn_finished") {
         if (this.holdForSteered(session, active, message)) continue;
         this.finish(session, active.input.signal.aborted ? "cancelled" : event.reason);

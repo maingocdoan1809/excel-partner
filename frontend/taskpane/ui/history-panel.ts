@@ -29,7 +29,7 @@ export interface HistoryPanelDeps {
     sessionMeta: HTMLElement;
     sessionTranscript: HTMLElement;
     sessionContinue: HTMLButtonElement;
-    input: HTMLTextAreaElement;
+    input: HTMLElement;
   };
 }
 
